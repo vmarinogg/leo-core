@@ -37,7 +37,6 @@ func init() {
 	rootCmd.AddCommand(uninstallCmd)
 	rootCmd.AddCommand(upgradeCmd)
 	rootCmd.AddCommand(promoteCmd)
-	rootCmd.AddCommand(demoteCmd)
 	rootCmd.AddCommand(mapCmd)
 	rootCmd.AddCommand(bootstrapAliasCmd)
 	rootCmd.AddCommand(recallCmd)

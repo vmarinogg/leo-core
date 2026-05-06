@@ -41,99 +41,24 @@ func setupTestMemoryWithConfig(t *testing.T, runtime string) string {
 	return dir
 }
 
-// ── leo status tests ──────────────────────────────────────────────────────────
+// ── mom status tests ─────────────────────────────────────────────────────────
 
-func TestStatusCmd_ShowsRuntimeAndStorageType(t *testing.T) {
-	dir := setupTestMemoryWithConfig(t, "claude")
-
-	origDir, _ := os.Getwd()
-	os.Chdir(dir)
-	defer os.Chdir(origDir)
+func TestStatusCmd_ShowsV030CentralShape(t *testing.T) {
+	lib := openV030TestLib(t)
+	insertV030Memory(t, lib, "ops status memory", "status check")
 
 	buf := new(bytes.Buffer)
-	rootCmd.SetOut(buf)
-	rootCmd.SetErr(buf)
-	rootCmd.SetArgs([]string{"status"})
-
-	if err := rootCmd.Execute(); err != nil {
+	statusCmd.SetOut(buf)
+	statusCmd.SetErr(buf)
+	if err := runStatus(statusCmd, nil); err != nil {
 		t.Fatalf("status failed: %v", err)
 	}
 
 	out := buf.String()
-	if !strings.Contains(out, "claude") {
-		t.Errorf("expected runtime 'claude' in output, got:\n%s", out)
-	}
-	if !strings.Contains(out, "json") {
-		t.Errorf("expected storage type 'json' in output, got:\n%s", out)
-	}
-}
-
-func TestStatusCmd_ShowsDocCounts(t *testing.T) {
-	dir := setupTestMemoryWithConfig(t, "claude")
-
-	// Add two docs.
-	writeTestDoc(t, dir, sampleDoc("status-doc-1"))
-	writeTestDoc(t, dir, sampleDoc("status-doc-2"))
-
-	origDir, _ := os.Getwd()
-	os.Chdir(dir)
-	defer os.Chdir(origDir)
-
-	buf := new(bytes.Buffer)
-	rootCmd.SetOut(buf)
-	rootCmd.SetErr(buf)
-	rootCmd.SetArgs([]string{"status"})
-
-	if err := rootCmd.Execute(); err != nil {
-		t.Fatalf("status failed: %v", err)
-	}
-
-	out := buf.String()
-	if !strings.Contains(out, "2") {
-		t.Errorf("expected total doc count '2' in output, got:\n%s", out)
-	}
-}
-
-func TestStatusCmd_ShowsTagCount(t *testing.T) {
-	dir := setupTestMemoryWithConfig(t, "claude")
-
-	writeTestDoc(t, dir, sampleDoc("status-tagged"))
-
-	origDir, _ := os.Getwd()
-	os.Chdir(dir)
-	defer os.Chdir(origDir)
-
-	buf := new(bytes.Buffer)
-	rootCmd.SetOut(buf)
-	rootCmd.SetErr(buf)
-	rootCmd.SetArgs([]string{"status"})
-
-	if err := rootCmd.Execute(); err != nil {
-		t.Fatalf("status failed: %v", err)
-	}
-
-	out := buf.String()
-	// sampleDoc uses tag "test" — at least 1 unique tag.
-	if !strings.Contains(out, "Tags") || !strings.Contains(out, "1") {
-		t.Errorf("expected tag count in output, got:\n%s", out)
-	}
-}
-
-func TestStatusCmd_NoConfigYaml(t *testing.T) {
-	dir := setupTestMemory(t) // no config.yaml
-
-	origDir, _ := os.Getwd()
-	os.Chdir(dir)
-	defer os.Chdir(origDir)
-
-	buf := new(bytes.Buffer)
-	rootCmd.SetOut(buf)
-	rootCmd.SetErr(buf)
-	rootCmd.SetArgs([]string{"status"})
-
-	// Should fail because config.yaml is missing.
-	if err := rootCmd.Execute(); err == nil {
-		t.Fatal("expected error when config.yaml is missing")
+	for _, want := range []string{"MOM v0.30", "vault", "memories", "types", "landmarks", "op events", "constraints", "skills"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("expected %q in output, got:\n%s", want, out)
+		}
 	}
 }
 

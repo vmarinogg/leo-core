@@ -1,133 +1,174 @@
 package cmd
 
 import (
+	"database/sql"
+	"encoding/json"
+	"errors"
 	"fmt"
-	"os"
+	"regexp"
 	"strings"
+	"unicode"
 
-	"github.com/spf13/cobra"
-	"github.com/momhq/mom/cli/internal/adapters/storage"
-	"github.com/momhq/mom/cli/internal/scope"
+	"github.com/momhq/mom/cli/internal/centralvault"
+	"github.com/momhq/mom/cli/internal/finder"
 	"github.com/momhq/mom/cli/internal/ux"
+	"github.com/momhq/mom/cli/internal/vault"
+	"github.com/spf13/cobra"
 )
 
 const recallDefaultLimit = 10
 
 var recallCmd = &cobra.Command{
 	Use:   "recall <query>",
-	Short: "Search memories by tag match and content substring",
-	Long: `Search memories by tag match and content substring.
+	Short: "Search memories in the central vault",
+	Long: `Search memories in the central v0.30 vault.
 
-Results are ranked by FTS5 BM25 scoring with landmark boost.
+The query argument is required. It can be a natural-language search query
+or a read-only SQL SELECT/WITH query for power users.
 
 Examples:
-  mom recall "authentication"
-  mom recall "api" --tags auth,security --limit 5
-  mom recall "" --scope repo`,
-	Args: cobra.MaximumNArgs(1),
+  mom recall "aws deployment flow"
+  mom recall "SELECT id, summary FROM memories WHERE promotion_state = 'curated'"`,
+	Args: cobra.ExactArgs(1),
 	RunE: runRecall,
 }
 
-func init() {
-	recallCmd.Flags().StringSlice("tags", nil, "Filter by tags (comma-separated)")
-	recallCmd.Flags().String("scope", "", "Restrict to a specific scope (repo/org/user)")
-	recallCmd.Flags().Int("limit", recallDefaultLimit, "Maximum results to return")
-}
-
 func runRecall(cmd *cobra.Command, args []string) error {
-	query := ""
-	if len(args) > 0 {
-		query = strings.TrimSpace(args[0])
-	}
-
-	filterTags, _ := cmd.Flags().GetStringSlice("tags")
-	scopeLabel, _ := cmd.Flags().GetString("scope")
-	limit, _ := cmd.Flags().GetInt("limit")
-
-	cwd, err := os.Getwd()
-	if err != nil {
-		return fmt.Errorf("getting working directory: %w", err)
+	query := strings.TrimSpace(args[0])
+	if query == "" {
+		return fmt.Errorf("query is required")
 	}
 
 	p := ux.NewPrinter(cmd.OutOrStdout())
 
-	scopes := scope.Walk(cwd)
-	if len(scopes) == 0 {
-		p.Muted("No .mom/ directory found. Run 'mom init' first.")
-		return nil
+	if isSQLQuery(query) {
+		return runRecallSQL(cmd, query)
 	}
 
-	// Collect scope paths, filtering by label if specified.
-	var scopePaths []string
-	for _, s := range scopes {
-		if scopeLabel == "" || s.Label == scopeLabel {
-			scopePaths = append(scopePaths, s.Path)
+	lib, closeFn, err := centralvault.OpenLibrarian()
+	if err != nil {
+		return fmt.Errorf("opening central vault: %w", err)
+	}
+	defer func() { _ = closeFn() }()
+
+	results, err := finder.New(lib).Recall(finder.Options{Query: query, Limit: recallDefaultLimit})
+	if err != nil {
+		if errors.Is(err, finder.ErrEmptyQuery) {
+			return fmt.Errorf("query is required")
 		}
-	}
-	if scopeLabel != "" && len(scopePaths) == 0 {
-		return fmt.Errorf("no scope with label %q found", scopeLabel)
-	}
-
-	// Use IndexedAdapter from the nearest writable scope.
-	momDir := scopes[0].Path
-	idx := storage.NewIndexedAdapter(momDir)
-	defer idx.Close()
-
-	showSpinner := ux.IsTTY(cmd.OutOrStdout())
-
-	var results []storage.SearchResult
-	var searchErr error
-	doSearch := func() {
-		results, searchErr = idx.Search(storage.SearchOptions{
-			Query:      query,
-			ScopePaths: scopePaths,
-			Tags:       filterTags,
-			Limit:      limit,
-		})
-	}
-
-	if showSpinner {
-		sp := ux.NewSpinner(os.Stderr)
-		sp.Start("Searching")
-		doSearch()
-		sp.Stop()
-	} else {
-		doSearch()
-	}
-	if searchErr != nil {
-		return fmt.Errorf("search failed: %w", searchErr)
+		return fmt.Errorf("recall failed: %w", err)
 	}
 
 	if len(results) == 0 {
-		if query == "" && len(filterTags) == 0 {
-			p.Muted("No memories found.")
-		} else {
-			p.Muted("No memories matched your query.")
-		}
+		p.Muted("No memories matched your query.")
 		return nil
 	}
 
-	title := "recall"
-	if query != "" {
-		title = fmt.Sprintf("recall %q", query)
-	}
-	p.Diamond(fmt.Sprintf("%s — %d results", title, len(results)))
+	p.Diamond(fmt.Sprintf("recall %q — %d results", query, len(results)))
 	p.Blank()
-
-	p.Bold(fmt.Sprintf("%-36s  %-10s  %s", "ID", "Score", "Summary"))
-	p.Muted(strings.Repeat("─", 80))
+	p.Bold(fmt.Sprintf("%-36s  %-10s  %-12s  %s", "ID", "Score", "State", "Summary"))
+	p.Muted(strings.Repeat("─", 92))
 	for _, r := range results {
 		landmark := ""
 		if r.Landmark {
 			landmark = p.HighlightValue(" ★")
 		}
-		p.Textf("%-36s  %s  %s%s",
+		p.Textf("%-36s  %s  %-12s  %s%s",
 			truncate(r.ID, 36),
 			p.HighlightValue(fmt.Sprintf("%-10.3f", r.Score)),
+			r.PromotionState,
 			truncate(r.Summary, 40),
 			landmark,
 		)
 	}
+	return nil
+}
 
+func runRecallSQL(cmd *cobra.Command, query string) error {
+	if err := validateReadOnlySQL(query); err != nil {
+		return err
+	}
+	path, err := centralvault.Path()
+	if err != nil {
+		return err
+	}
+	v, err := vault.Open(path, centralvault.Migrations())
+	if err != nil {
+		return fmt.Errorf("opening central vault: %w", err)
+	}
+	defer func() { _ = v.Close() }()
+
+	rowsOut := []map[string]any{}
+	err = v.Query(query, nil, func(rows *sql.Rows) error {
+		cols, err := rows.Columns()
+		if err != nil {
+			return err
+		}
+		for rows.Next() {
+			vals := make([]any, len(cols))
+			ptrs := make([]any, len(cols))
+			for i := range vals {
+				ptrs[i] = &vals[i]
+			}
+			if err := rows.Scan(ptrs...); err != nil {
+				return err
+			}
+			row := make(map[string]any, len(cols))
+			for i, c := range cols {
+				row[c] = sqlValue(vals[i])
+			}
+			rowsOut = append(rowsOut, row)
+		}
+		return nil
+	})
+	if err != nil {
+		return fmt.Errorf("sql recall failed: %w", err)
+	}
+
+	text, err := json.MarshalIndent(rowsOut, "", "  ")
+	if err != nil {
+		return fmt.Errorf("format sql results: %w", err)
+	}
+	fmt.Fprintln(cmd.OutOrStdout(), string(text))
+	return nil
+}
+
+func sqlValue(v any) any {
+	switch x := v.(type) {
+	case []byte:
+		return string(x)
+	default:
+		return x
+	}
+}
+
+func isSQLQuery(query string) bool {
+	q := strings.TrimLeftFunc(query, unicode.IsSpace)
+	upper := strings.ToUpper(q)
+	if strings.HasPrefix(upper, "SELECT") || strings.HasPrefix(upper, "WITH") {
+		return true
+	}
+	return sqlForbiddenStart.MatchString(upper)
+}
+
+var sqlForbiddenStart = regexp.MustCompile(`^(INSERT|UPDATE|DELETE|DROP|ALTER|CREATE|REPLACE|PRAGMA|ATTACH|DETACH|VACUUM|REINDEX)\b`)
+var sqlForbidden = regexp.MustCompile(`(?i)\b(INSERT|UPDATE|DELETE|DROP|ALTER|CREATE|REPLACE|PRAGMA|ATTACH|DETACH|VACUUM|REINDEX)\b`)
+
+func validateReadOnlySQL(query string) error {
+	q := strings.TrimSpace(query)
+	if q == "" {
+		return fmt.Errorf("query is required")
+	}
+	trimmed := strings.TrimRight(q, " \t\r\n;")
+	if strings.Contains(trimmed, ";") {
+		return fmt.Errorf("SQL recall accepts one read-only statement")
+	}
+	upper := strings.ToUpper(strings.TrimLeftFunc(q, unicode.IsSpace))
+	if !(strings.HasPrefix(upper, "SELECT") || strings.HasPrefix(upper, "WITH")) {
+		return fmt.Errorf("SQL recall only accepts SELECT/WITH queries")
+	}
+	if sqlForbidden.MatchString(q) {
+		return fmt.Errorf("SQL recall is read-only")
+	}
 	return nil
 }
