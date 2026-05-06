@@ -1,6 +1,7 @@
 package mcp
 
 import (
+	"path/filepath"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -31,9 +32,16 @@ func (rs *recordingSubscriber) get() (herald.Event, bool) {
 	return v.(herald.Event), true
 }
 
+func setTestVault(t *testing.T) {
+	t.Helper()
+	t.Setenv("MOM_VAULT", filepath.Join(t.TempDir(), "mom.db"))
+}
+
 func newSrvWithSubscriber(t *testing.T) (*Server, *recordingSubscriber) {
 	t.Helper()
+	setTestVault(t)
 	srv := New(t.TempDir())
+	t.Cleanup(func() { _ = srv.Close() })
 	rs := &recordingSubscriber{}
 	t.Cleanup(rs.attach(srv.Bus()))
 	return srv, rs
@@ -225,8 +233,11 @@ func TestMomRecord_RejectsMixedTypeTags(t *testing.T) {
 // ── architectural / integration ──────────────────────────────────────────────
 
 func TestServer_BusIsAccessibleAndDistinctPerInstance(t *testing.T) {
+	setTestVault(t)
 	a := New(t.TempDir())
+	t.Cleanup(func() { _ = a.Close() })
 	b := New(t.TempDir())
+	t.Cleanup(func() { _ = b.Close() })
 	if a.Bus() == nil || b.Bus() == nil {
 		t.Fatal("Server.Bus() returned nil")
 	}
@@ -243,7 +254,9 @@ func TestServer_BusIsAccessibleAndDistinctPerInstance(t *testing.T) {
 }
 
 func TestServer_SetBusReplacesTheBus(t *testing.T) {
+	setTestVault(t)
 	srv := New(t.TempDir())
+	t.Cleanup(func() { _ = srv.Close() })
 	old := srv.Bus()
 
 	// Subscribe on the OLD bus before swapping.

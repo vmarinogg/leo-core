@@ -7,8 +7,9 @@ import (
 	"strings"
 
 	"github.com/momhq/mom/cli/internal/adapters/harness"
+	"github.com/momhq/mom/cli/internal/centralvault"
 	"github.com/momhq/mom/cli/internal/config"
-	"github.com/momhq/mom/cli/internal/scope"
+	"github.com/momhq/mom/cli/internal/librarian"
 )
 
 // statusPayload defines the mom_status response with explicit field ordering.
@@ -42,9 +43,11 @@ type statusOperatingRulesBlock struct {
 }
 
 type statusToolsBlock struct {
-	MomStatus string `json:"mom_status"`
-	MomRecall string `json:"mom_recall"`
-	MomRecord string `json:"mom_record"`
+	MomStatus    string `json:"mom_status"`
+	MomRecall    string `json:"mom_recall"`
+	MomGet       string `json:"mom_get"`
+	MomLandmarks string `json:"mom_landmarks"`
+	MomRecord    string `json:"mom_record"`
 }
 
 type statusModesBlock struct {
@@ -72,7 +75,7 @@ func (s *Server) toolMomStatus() (toolCallResult, error) {
 		Skills:         s.statusSkills(),
 		Modes:          s.statusModes(),
 		VaultState:     s.statusVaultState(),
-		DocSchema:      "Memory docs: id, type, lifecycle, scope, tags, created, created_by, updated, updated_by, content",
+		DocSchema:      "Central v0.30 SQLite schema: memories, tags, entities, memory_tags, memory_entities, op_events, filter_audit.",
 	}
 
 	text, err := json.MarshalIndent(payload, "", "  ")
@@ -117,9 +120,11 @@ func statusBoundaries() []string {
 // statusTools returns the static tools block.
 func statusTools() statusToolsBlock {
 	return statusToolsBlock{
-		MomStatus: "Returns this protocol. Call at session start.",
-		MomRecall: "Search memories by query, tags, or session. Use before asserting past context.",
-		MomRecord: "Explicit-write path: intentionally save a memory mid-session. Bypasses Drafter's content filters per ADR 0014.",
+		MomStatus:    "Returns this protocol. Call at session start.",
+		MomRecall:    "Search memories by query. Use before asserting past context.",
+		MomGet:       "Retrieve a memory by ID.",
+		MomLandmarks: "List landmark memories ordered by centrality score.",
+		MomRecord:    "Explicit-write path: intentionally save a memory mid-session. Bypasses Drafter's content filters per ADR 0014.",
 	}
 }
 
@@ -160,56 +165,32 @@ func scanDocDir(dir string) []docSummary {
 	return result
 }
 
-// statusConstraints loads constraint summaries from .mom/constraints/*.json
-// across all discovered scopes.
+// statusConstraints loads constraint summaries from the central generated
+// $HOME/.mom/constraints directory (or MOM_VAULT's parent directory when set).
 func (s *Server) statusConstraints() []docSummary {
-	var all []docSummary
-	seen := make(map[string]bool)
-
-	addDir := func(dir string) {
-		for _, d := range scanDocDir(dir) {
-			if !seen[d.Path] {
-				seen[d.Path] = true
-				all = append(all, d)
-			}
-		}
-	}
-
-	addDir(filepath.Join(s.momDir, "constraints"))
-	for _, sc := range scope.Walk(s.momDir) {
-		addDir(filepath.Join(sc.Path, "constraints"))
-	}
-
-	if all == nil {
+	dir, err := centralvault.Dir()
+	if err != nil {
 		return []docSummary{}
 	}
-	return all
+	out := scanDocDir(filepath.Join(dir, "constraints"))
+	if out == nil {
+		return []docSummary{}
+	}
+	return out
 }
 
-// statusSkills loads skill summaries from .mom/skills/*.json across all
-// discovered scopes.
+// statusSkills loads skill summaries from the central generated
+// $HOME/.mom/skills directory (or MOM_VAULT's parent directory when set).
 func (s *Server) statusSkills() []docSummary {
-	var all []docSummary
-	seen := make(map[string]bool)
-
-	addDir := func(dir string) {
-		for _, d := range scanDocDir(dir) {
-			if !seen[d.Path] {
-				seen[d.Path] = true
-				all = append(all, d)
-			}
-		}
-	}
-
-	addDir(filepath.Join(s.momDir, "skills"))
-	for _, sc := range scope.Walk(s.momDir) {
-		addDir(filepath.Join(sc.Path, "skills"))
-	}
-
-	if all == nil {
+	dir, err := centralvault.Dir()
+	if err != nil {
 		return []docSummary{}
 	}
-	return all
+	out := scanDocDir(filepath.Join(dir, "skills"))
+	if out == nil {
+		return []docSummary{}
+	}
+	return out
 }
 
 // statusModes returns language/communication/autonomy from config, falling back
@@ -245,61 +226,27 @@ type scopeVaultEntry struct {
 	MemoryCount int    `json:"memory_count"`
 }
 
-// statusVaultState builds the vault_state block: scopes, total_memories,
-// landmarks, and record_mode.
+// statusVaultState builds the central v0.30 vault_state block.
 func (s *Server) statusVaultState() statusVaultStateBlock {
-	scopes := scope.Walk(s.momDir)
-	if len(scopes) == 0 {
-		scopes = []scope.Scope{{Path: s.momDir, Label: "repo"}}
-	}
+	path, _ := centralvault.Path()
+	entry := scopeVaultEntry{Label: "central", Path: path}
 
-	entries := make([]scopeVaultEntry, len(scopes))
-	totalMemories := 0
-	totalLandmarks := 0
-
-	for i, sc := range scopes {
-		count := sc.MemoryCount()
-		entries[i] = scopeVaultEntry{
-			Label:       sc.Label,
-			Path:        sc.Path,
-			MemoryCount: count,
+	lib, err := s.requireLibrarian()
+	if err != nil {
+		return statusVaultStateBlock{
+			Scopes:     []scopeVaultEntry{entry},
+			RecordMode: "continuous",
 		}
-		totalMemories += count
-		totalLandmarks += countLandmarks(sc.Path)
 	}
+
+	memories, _ := lib.SearchMemories(librarian.SearchFilter{Limit: 1_000_000})
+	landmarks, _ := lib.Landmarks(1_000_000)
+	entry.MemoryCount = len(memories)
 
 	return statusVaultStateBlock{
-		Scopes:        entries,
-		TotalMemories: totalMemories,
-		Landmarks:     totalLandmarks,
+		Scopes:        []scopeVaultEntry{entry},
+		TotalMemories: len(memories),
+		Landmarks:     len(landmarks),
 		RecordMode:    "continuous",
 	}
-}
-
-// countLandmarks returns the number of memory docs in momDir/memory/ that have
-// landmark: true.
-func countLandmarks(momDir string) int {
-	memDir := filepath.Join(momDir, "memory")
-	entries, err := os.ReadDir(memDir)
-	if err != nil {
-		return 0
-	}
-	n := 0
-	for _, e := range entries {
-		if e.IsDir() || filepath.Ext(e.Name()) != ".json" {
-			continue
-		}
-		data, err := os.ReadFile(filepath.Join(memDir, e.Name()))
-		if err != nil {
-			continue
-		}
-		var raw map[string]any
-		if err := json.Unmarshal(data, &raw); err != nil {
-			continue
-		}
-		if lm, _ := raw["landmark"].(bool); lm {
-			n++
-		}
-	}
-	return n
 }

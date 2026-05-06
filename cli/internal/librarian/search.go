@@ -43,7 +43,7 @@ type SearchedMemory struct {
 // relaxation (AND→OR) and tier escalation (curated→draft) on top.
 //
 // Empty/whitespace tag names in f.Tags are rejected with ErrEmptyArg
-// — the previous behaviour silently produced WHERE name IN (..., '')
+// — the previous behaviour silently produced WHERE name IN (..., ”)
 // with COUNT(DISTINCT) = N+1, which always returned zero rows and
 // gave callers no signal that their input was malformed.
 func (l *Librarian) SearchMemories(f SearchFilter) ([]SearchedMemory, error) {
@@ -58,12 +58,12 @@ func (l *Librarian) SearchMemories(f SearchFilter) ([]SearchedMemory, error) {
 	}
 
 	var (
-		sb       strings.Builder
-		args     []any
-		joins    []string
-		wheres   []string
-		orderBy  = "m.created_at DESC, m.id DESC"
-		hasFTS   = strings.TrimSpace(f.FTSQuery) != ""
+		sb      strings.Builder
+		args    []any
+		joins   []string
+		wheres  []string
+		orderBy = "m.created_at DESC, m.id DESC"
+		hasFTS  = strings.TrimSpace(f.FTSQuery) != ""
 	)
 
 	if hasFTS {
@@ -160,6 +160,57 @@ func (l *Librarian) SearchMemories(f SearchFilter) ([]SearchedMemory, error) {
 	})
 	if err != nil {
 		return nil, fmt.Errorf("SearchMemories: %w", err)
+	}
+	return out, nil
+}
+
+// Landmarks returns landmark memories ordered by centrality_score descending.
+func (l *Librarian) Landmarks(limit int) ([]Memory, error) {
+	if limit <= 0 {
+		limit = 20
+	}
+	out := []Memory{}
+	err := l.v.Query(
+		`SELECT id, type, summary, content, created_at, session_id,
+		        provenance_actor, provenance_source_type, provenance_trigger_event,
+		        promotion_state, landmark, centrality_score
+		 FROM memories
+		 WHERE landmark = 1
+		 ORDER BY centrality_score DESC, created_at DESC, id DESC
+		 LIMIT ?`,
+		[]any{limit},
+		func(rs *sql.Rows) error {
+			for rs.Next() {
+				var (
+					m                                        Memory
+					summary, actor, sourceType, triggerEvent sql.NullString
+					createdAtStr                             string
+					landmarkInt                              int64
+				)
+				if err := rs.Scan(
+					&m.ID, &m.Type, &summary, &m.Content, &createdAtStr, &m.SessionID,
+					&actor, &sourceType, &triggerEvent,
+					&m.PromotionState, &landmarkInt, &m.CentralityScore,
+				); err != nil {
+					return err
+				}
+				m.Summary = summary.String
+				m.ProvenanceActor = actor.String
+				m.ProvenanceSourceType = sourceType.String
+				m.ProvenanceTriggerEvent = triggerEvent.String
+				m.Landmark = landmarkInt != 0
+				t, err := parseTime(createdAtStr)
+				if err != nil {
+					return fmt.Errorf("parse created_at %q: %w", createdAtStr, err)
+				}
+				m.CreatedAt = t
+				out = append(out, m)
+			}
+			return nil
+		},
+	)
+	if err != nil {
+		return nil, fmt.Errorf("Landmarks: %w", err)
 	}
 	return out, nil
 }
