@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 
 	"github.com/momhq/mom/cli/internal/librarian"
 	"github.com/momhq/mom/cli/internal/logbook"
@@ -48,6 +49,28 @@ func Path() (string, error) {
 func Migrations() []vault.Migration {
 	migs := append([]vault.Migration{}, librarian.Migrations()...)
 	migs = append(migs, logbook.Migrations()...)
+	migs = append(migs, vault.Migration{
+		Version: 4,
+		Stmts: []string{
+			`CREATE TABLE legacy_imports (
+				source_path        TEXT PRIMARY KEY,
+				source_fingerprint TEXT NOT NULL,
+				imported_at        TEXT NOT NULL,
+				memory_count       INTEGER NOT NULL,
+				mapping_count      INTEGER NOT NULL
+			)`,
+			`CREATE TABLE legacy_import_items (
+				source_path  TEXT NOT NULL,
+				old_id       TEXT NOT NULL,
+				new_id       TEXT NOT NULL,
+				content_hash TEXT NOT NULL,
+				created_at   TEXT NOT NULL,
+				PRIMARY KEY (source_path, old_id),
+				FOREIGN KEY (source_path) REFERENCES legacy_imports(source_path)
+			)`,
+		},
+	})
+	sort.Slice(migs, func(i, j int) bool { return migs[i].Version < migs[j].Version })
 	return migs
 }
 

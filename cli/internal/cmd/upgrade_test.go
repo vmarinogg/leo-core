@@ -15,14 +15,20 @@ import (
 // resetUpgradeFlags resets cobra flag state between tests.
 func resetUpgradeFlags(t *testing.T) {
 	t.Helper()
+	t.Setenv("MOM_UPGRADE_SCAN_ROOT", t.TempDir())
+	t.Setenv("MOM_UPGRADE_ASSUME_YES", "1")
 	t.Cleanup(func() {
 		upgradeCmd.Flags().Set("dry-run", "false")
+		upgradeCmd.Flags().Set("skip-memories", "false")
 	})
 }
 
 func setupV060Project(t *testing.T) string {
 	t.Helper()
 	dir := t.TempDir()
+	t.Setenv("HOME", dir)
+	t.Setenv("MOM_UPGRADE_SCAN_ROOT", dir)
+	t.Setenv("MOM_UPGRADE_ASSUME_YES", "1")
 	leoDir := filepath.Join(dir, ".mom")
 
 	// Create directories using the legacy kb/ layout to simulate a pre-v0.8 install.
@@ -805,16 +811,16 @@ func TestUpgradeCmd_MigratesFactASTToPattern(t *testing.T) {
 
 	// Write a plain fact doc (should NOT be converted).
 	plainFactDoc := map[string]interface{}{
-		"id":              "plain-fact",
-		"type":            "fact",
-		"lifecycle":       "state",
-		"scope":           "project",
-		"tags":            []string{"architecture"},
-		"created":         "2026-04-10T00:00:00Z",
-		"created_by":      "owner",
-		"updated":         "2026-04-10T00:00:00Z",
-		"updated_by":      "owner",
-		"content":         map[string]interface{}{"fact": "plain fact", "why": "testing", "source": "owner"},
+		"id":         "plain-fact",
+		"type":       "fact",
+		"lifecycle":  "state",
+		"scope":      "project",
+		"tags":       []string{"architecture"},
+		"created":    "2026-04-10T00:00:00Z",
+		"created_by": "owner",
+		"updated":    "2026-04-10T00:00:00Z",
+		"updated_by": "owner",
+		"content":    map[string]interface{}{"fact": "plain fact", "why": "testing", "source": "owner"},
 	}
 	docData3, _ := json.MarshalIndent(plainFactDoc, "", "  ")
 	os.WriteFile(filepath.Join(memDir, "plain-fact.json"), docData3, 0644)

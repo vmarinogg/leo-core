@@ -8,11 +8,11 @@ import (
 	"strings"
 	"time"
 
-	"github.com/spf13/cobra"
 	"github.com/momhq/mom/cli/internal/adapters/harness"
 	"github.com/momhq/mom/cli/internal/adapters/storage"
 	"github.com/momhq/mom/cli/internal/config"
 	"github.com/momhq/mom/cli/internal/ux"
+	"github.com/spf13/cobra"
 	"gopkg.in/yaml.v3"
 )
 
@@ -22,14 +22,15 @@ var upgradeCmd = &cobra.Command{
 	Long: `Upgrades core infrastructure (schema, constraints, skills, runtime files)
 to match the installed mom binary. Your documents in .mom/memory/ are never touched.
 
-Use --all to propagate the upgrade to all child scopes in the hierarchy
-(org folders and repos beneath the current scope).`,
+Use --all to propagate the legacy filesystem upgrade to all child scopes in the hierarchy
+(org folders and repos beneath the current scope). Memory import always scans $HOME.`,
 	RunE: runUpgrade,
 }
 
 func init() {
 	upgradeCmd.Flags().Bool("dry-run", false, "Show what would change without modifying anything")
 	upgradeCmd.Flags().Bool("all", false, "Upgrade all child scopes in the hierarchy")
+	upgradeCmd.Flags().Bool("skip-memories", false, "Skip importing legacy .mom/memory docs into the central vault")
 }
 
 // upgradeAction tracks a single change for reporting.
@@ -41,6 +42,7 @@ type upgradeAction struct {
 func runUpgrade(cmd *cobra.Command, args []string) error {
 	dryRun, _ := cmd.Flags().GetBool("dry-run")
 	all, _ := cmd.Flags().GetBool("all")
+	skipMemories, _ := cmd.Flags().GetBool("skip-memories")
 
 	momDir, err := findMomDir()
 	if err != nil {
@@ -54,12 +56,12 @@ func runUpgrade(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	// Propagate to child scopes if --all.
+	// Propagate legacy filesystem upgrade to child scopes if --all.
 	if all {
 		propagateUpgrade(cmd, projectRoot, dryRun)
 	}
 
-	return nil
+	return runCentralMemoryImport(cmd, dryRun, skipMemories)
 }
 
 // upgradeSingleDir runs the full upgrade pipeline on a single .mom/ directory.
