@@ -72,7 +72,7 @@ func runStatus(cmd *cobra.Command, args []string) error {
 	skills := countJSONFiles(filepath.Join(centralDir, "skills"))
 
 	p := ux.NewPrinter(cmd.OutOrStdout())
-	p.Bold("MOM v0.30")
+	p.Bold("MOM")
 	p.KeyValue("vault", path, 12)
 	p.KeyValue("memories", fmt.Sprintf("total %d, curated %d, draft %d", len(memories), curated, draft), 12)
 	p.KeyValue("types", fmt.Sprintf("episodic %d, semantic %d, procedural %d, untyped %d", types["episodic"], types["semantic"], types["procedural"], types["untyped"]), 12)

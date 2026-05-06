@@ -11,7 +11,7 @@ import (
 	"github.com/momhq/mom/cli/internal/librarian"
 )
 
-func openV030TestLib(t *testing.T) *librarian.Librarian {
+func openCentralTestLib(t *testing.T) *librarian.Librarian {
 	t.Helper()
 	t.Setenv("MOM_VAULT", filepath.Join(t.TempDir(), "mom.db"))
 	lib, closeFn, err := centralvault.OpenLibrarian()
@@ -22,7 +22,7 @@ func openV030TestLib(t *testing.T) *librarian.Librarian {
 	return lib
 }
 
-func insertV030Memory(t *testing.T, lib *librarian.Librarian, summary, text string) string {
+func insertCentralTestMemory(t *testing.T, lib *librarian.Librarian, summary, text string) string {
 	t.Helper()
 	content, _ := json.Marshal(map[string]any{"text": text})
 	id, err := lib.InsertMemoryWithTags(librarian.InsertMemory{
@@ -41,8 +41,8 @@ func insertV030Memory(t *testing.T, lib *librarian.Librarian, summary, text stri
 }
 
 func TestRecallCmd_NaturalQueryUsesCentralFinder(t *testing.T) {
-	lib := openV030TestLib(t)
-	id := insertV030Memory(t, lib, "AWS deployment flow", "deploy Lambda through canary")
+	lib := openCentralTestLib(t)
+	id := insertCentralTestMemory(t, lib, "AWS deployment flow", "deploy Lambda through canary")
 	state := "curated"
 	if err := lib.UpdateOperational(id, librarian.OperationalUpdate{PromotionState: &state}); err != nil {
 		t.Fatalf("UpdateOperational: %v", err)
@@ -61,8 +61,8 @@ func TestRecallCmd_NaturalQueryUsesCentralFinder(t *testing.T) {
 }
 
 func TestRecallCmd_SQLReadOnlyQuery(t *testing.T) {
-	lib := openV030TestLib(t)
-	id := insertV030Memory(t, lib, "SQL visible memory", "query me")
+	lib := openCentralTestLib(t)
+	id := insertCentralTestMemory(t, lib, "SQL visible memory", "query me")
 
 	buf := new(bytes.Buffer)
 	recallCmd.SetOut(buf)
@@ -77,7 +77,7 @@ func TestRecallCmd_SQLReadOnlyQuery(t *testing.T) {
 }
 
 func TestRecallCmd_SQLRejectsMutation(t *testing.T) {
-	_ = openV030TestLib(t)
+	_ = openCentralTestLib(t)
 	buf := new(bytes.Buffer)
 	recallCmd.SetOut(buf)
 	recallCmd.SetErr(buf)
@@ -90,9 +90,9 @@ func TestRecallCmd_SQLRejectsMutation(t *testing.T) {
 	}
 }
 
-func TestStatusCmd_V030Shape(t *testing.T) {
-	lib := openV030TestLib(t)
-	insertV030Memory(t, lib, "Status memory", "status text")
+func TestStatusCmd_CentralShape(t *testing.T) {
+	lib := openCentralTestLib(t)
+	insertCentralTestMemory(t, lib, "Status memory", "status text")
 
 	buf := new(bytes.Buffer)
 	statusCmd.SetOut(buf)
@@ -101,7 +101,7 @@ func TestStatusCmd_V030Shape(t *testing.T) {
 		t.Fatalf("runStatus: %v", err)
 	}
 	out := buf.String()
-	for _, want := range []string{"MOM v0.30", "vault", "memories", "types", "landmarks", "op events", "constraints", "skills"} {
+	for _, want := range []string{"MOM", "vault", "memories", "types", "landmarks", "op events", "constraints", "skills"} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("status output missing %q:\n%s", want, out)
 		}
@@ -109,8 +109,8 @@ func TestStatusCmd_V030Shape(t *testing.T) {
 }
 
 func TestPromoteCmd_FlipsDraftToCurated(t *testing.T) {
-	lib := openV030TestLib(t)
-	id := insertV030Memory(t, lib, "Promote memory", "promote me")
+	lib := openCentralTestLib(t)
+	id := insertCentralTestMemory(t, lib, "Promote memory", "promote me")
 
 	buf := new(bytes.Buffer)
 	promoteCmd.SetOut(buf)
@@ -131,8 +131,8 @@ func TestPromoteCmd_FlipsDraftToCurated(t *testing.T) {
 }
 
 func TestPromoteCmd_AlreadyCuratedErrors(t *testing.T) {
-	lib := openV030TestLib(t)
-	id := insertV030Memory(t, lib, "Already curated", "done")
+	lib := openCentralTestLib(t)
+	id := insertCentralTestMemory(t, lib, "Already curated", "done")
 	state := "curated"
 	if err := lib.UpdateOperational(id, librarian.OperationalUpdate{PromotionState: &state}); err != nil {
 		t.Fatalf("UpdateOperational: %v", err)

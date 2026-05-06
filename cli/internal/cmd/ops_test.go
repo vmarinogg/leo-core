@@ -43,9 +43,9 @@ func setupTestMemoryWithConfig(t *testing.T, runtime string) string {
 
 // ── mom status tests ─────────────────────────────────────────────────────────
 
-func TestStatusCmd_ShowsV030CentralShape(t *testing.T) {
-	lib := openV030TestLib(t)
-	insertV030Memory(t, lib, "ops status memory", "status check")
+func TestStatusCmd_ShowsCentralShape(t *testing.T) {
+	lib := openCentralTestLib(t)
+	insertCentralTestMemory(t, lib, "ops status memory", "status check")
 
 	buf := new(bytes.Buffer)
 	statusCmd.SetOut(buf)
@@ -55,7 +55,7 @@ func TestStatusCmd_ShowsV030CentralShape(t *testing.T) {
 	}
 
 	out := buf.String()
-	for _, want := range []string{"MOM v0.30", "vault", "memories", "types", "landmarks", "op events", "constraints", "skills"} {
+	for _, want := range []string{"MOM", "vault", "memories", "types", "landmarks", "op events", "constraints", "skills"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("expected %q in output, got:\n%s", want, out)
 		}

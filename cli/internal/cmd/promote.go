@@ -14,7 +14,7 @@ import (
 var promoteCmd = &cobra.Command{
 	Use:   "promote <memory-id>",
 	Short: "Promote a draft memory to curated",
-	Long:  `Promotes a memory in the central v0.30 vault by flipping promotion_state from draft to curated.`,
+	Long:  `Promotes a memory in the central vault by flipping promotion_state from draft to curated.`,
 	Args:  cobra.ExactArgs(1),
 	RunE:  runPromote,
 }

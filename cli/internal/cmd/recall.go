@@ -21,7 +21,7 @@ const recallDefaultLimit = 10
 var recallCmd = &cobra.Command{
 	Use:   "recall <query>",
 	Short: "Search memories in the central vault",
-	Long: `Search memories in the central v0.30 vault.
+	Long: `Search memories in the central vault.
 
 The query argument is required. It can be a natural-language search query
 or a read-only SQL SELECT/WITH query for power users.
