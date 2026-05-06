@@ -43,6 +43,31 @@ func TestDiscoverLegacyVaultsForImport_WalksHomeMaxDepth(t *testing.T) {
 	}
 }
 
+func TestReadLegacyMemoryDocs_SkipsSymlinkedJSON(t *testing.T) {
+	home := t.TempDir()
+	legacy := filepath.Join(home, "repo", ".mom")
+	writeLegacyMemory(t, legacy, "real", `{"id":"real","content":{"text":"safe"}}`)
+	outside := filepath.Join(home, "outside.json")
+	if err := os.WriteFile(outside, []byte(`{"id":"secret","content":{"text":"secret"}}`), 0600); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(legacy, "memory", "secret.json")
+	if err := os.Symlink(outside, link); err != nil {
+		t.Skipf("symlink unsupported: %v", err)
+	}
+
+	docs, _, err := readLegacyMemoryDocs(legacy)
+	if err != nil {
+		t.Fatalf("readLegacyMemoryDocs: %v", err)
+	}
+	if len(docs) != 1 {
+		t.Fatalf("docs = %d, want 1: %+v", len(docs), docs)
+	}
+	if docs[0].Path == link || strField(docs[0].Doc, "id") != "real" {
+		t.Fatalf("symlinked memory was imported: %+v", docs)
+	}
+}
+
 func TestExecuteCentralMemoryImport_ImportsAndIsIdempotent(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
