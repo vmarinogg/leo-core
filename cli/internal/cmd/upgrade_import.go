@@ -175,10 +175,10 @@ func readLegacyMemoryDocs(momDir string) ([]legacyMemoryDoc, string, error) {
 	var docs []legacyMemoryDoc
 	var parts []string
 	for _, e := range entries {
-		if e.IsDir() || filepath.Ext(e.Name()) != ".json" {
+		path, ok := legacyMemoryJSONPath(memDir, e)
+		if !ok {
 			continue
 		}
-		path := filepath.Join(memDir, e.Name())
 		raw, err := os.ReadFile(path)
 		if err != nil {
 			continue
@@ -195,6 +195,18 @@ func readLegacyMemoryDocs(momDir string) ([]legacyMemoryDoc, string, error) {
 	sort.Strings(parts)
 	sum := sha256.Sum256([]byte(strings.Join(parts, "\n")))
 	return docs, fmt.Sprintf("%x", sum[:]), nil
+}
+
+func legacyMemoryJSONPath(memDir string, e fs.DirEntry) (string, bool) {
+	if e.IsDir() || filepath.Ext(e.Name()) != ".json" || e.Type()&fs.ModeSymlink != 0 {
+		return "", false
+	}
+	path := filepath.Join(memDir, e.Name())
+	info, err := os.Lstat(path)
+	if err != nil || info.Mode()&fs.ModeSymlink != 0 || !info.Mode().IsRegular() {
+		return "", false
+	}
+	return path, true
 }
 
 func confirmUpgradeImport(cmd *cobra.Command, vaults, memories int) bool {
