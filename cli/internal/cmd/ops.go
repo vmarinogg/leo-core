@@ -7,12 +7,13 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/spf13/cobra"
 	"github.com/momhq/mom/cli/internal/adapters/storage"
-	"github.com/momhq/mom/cli/internal/config"
+	"github.com/momhq/mom/cli/internal/centralvault"
+	"github.com/momhq/mom/cli/internal/librarian"
 	"github.com/momhq/mom/cli/internal/memory"
 	"github.com/momhq/mom/cli/internal/scope"
 	"github.com/momhq/mom/cli/internal/ux"
+	"github.com/spf13/cobra"
 )
 
 var statusCmd = &cobra.Command{
@@ -27,60 +28,76 @@ var doctorCmd = &cobra.Command{
 	RunE:  runDoctor,
 }
 
-// runStatus implements `leo status`.
+// runStatus implements `mom status`.
 func runStatus(cmd *cobra.Command, args []string) error {
-	leoDir, err := findMomDir()
+	path, err := centralvault.Path()
 	if err != nil {
 		return err
 	}
-
-	// Load config — required.
-	cfg, err := config.Load(leoDir)
+	lib, closeFn, err := centralvault.OpenLibrarian()
 	if err != nil {
-		return fmt.Errorf("loading config: %w", err)
+		return fmt.Errorf("opening central vault: %w", err)
 	}
+	defer func() { _ = closeFn() }()
 
-	// Load index via IndexedAdapter (write-through + FTS5).
-	adapter := storage.NewIndexedAdapter(leoDir)
-	defer adapter.Close()
-	idx, err := adapter.List()
+	memories, err := lib.SearchMemories(librarian.SearchFilter{Limit: 1_000_000})
 	if err != nil {
-		return fmt.Errorf("loading index: %w", err)
+		return fmt.Errorf("loading memories: %w", err)
 	}
-
-	// Compute totals from index maps.
-	totalDocs := 0
-	for _, ids := range idx.ByScope {
-		totalDocs += len(ids)
+	types := map[string]int{"episodic": 0, "semantic": 0, "procedural": 0, "untyped": 0}
+	curated := 0
+	draft := 0
+	for _, m := range memories {
+		types[m.Type]++
+		switch m.PromotionState {
+		case "curated":
+			curated++
+		case "draft":
+			draft++
+		}
 	}
-	totalTags := len(idx.ByTag)
+	landmarks, err := lib.Landmarks(1_000_000)
+	if err != nil {
+		return fmt.Errorf("loading landmarks: %w", err)
+	}
+	opEvents, err := lib.QueryOpEvents(librarian.OpEventFilter{Limit: 1_000_000})
+	if err != nil {
+		return fmt.Errorf("loading op events: %w", err)
+	}
+	centralDir, err := centralvault.Dir()
+	if err != nil {
+		return err
+	}
+	constraints := countJSONFiles(filepath.Join(centralDir, "constraints"))
+	skills := countJSONFiles(filepath.Join(centralDir, "skills"))
 
-	// Stale count from raw JSON stats block.
-	staleCount := readRawIndexInt(leoDir, "stats", "stale_count")
-
-	// Show enabled runtimes.
 	p := ux.NewPrinter(cmd.OutOrStdout())
-	w := 14
-	enabledRTs := cfg.EnabledHarnesses()
-	if len(enabledRTs) > 0 {
-		p.KeyValue("Harnesses", strings.Join(enabledRTs, ", "), w)
-	} else {
-		p.KeyValue("Harnesses", "(none)", w)
-	}
-	commMode := cfg.Communication.Mode
-	if commMode == "" {
-		commMode = "concise"
-	}
-	p.KeyValue("Mode", commMode, w)
-	p.KeyValue("Storage", "json", w)
-	p.KeyValue("Total docs", fmt.Sprintf("%d", totalDocs), w)
-	p.KeyValue("Tags", fmt.Sprintf("%d unique", totalTags), w)
-	p.KeyValue("Stale docs", fmt.Sprintf("%d", staleCount), w)
-
+	p.Bold("MOM")
+	p.KeyValue("vault", path, 12)
+	p.KeyValue("memories", fmt.Sprintf("total %d, curated %d, draft %d", len(memories), curated, draft), 12)
+	p.KeyValue("types", fmt.Sprintf("episodic %d, semantic %d, procedural %d, untyped %d", types["episodic"], types["semantic"], types["procedural"], types["untyped"]), 12)
+	p.KeyValue("landmarks", fmt.Sprintf("%d", len(landmarks)), 12)
+	p.KeyValue("op events", fmt.Sprintf("%d", len(opEvents)), 12)
+	p.KeyValue("constraints", fmt.Sprintf("%d", constraints), 12)
+	p.KeyValue("skills", fmt.Sprintf("%d", skills), 12)
 	return nil
 }
 
 // printScopesSection prints the active scopes discovered by walk-up from cwd.
+func countJSONFiles(dir string) int {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return 0
+	}
+	n := 0
+	for _, e := range entries {
+		if !e.IsDir() && strings.HasSuffix(e.Name(), ".json") {
+			n++
+		}
+	}
+	return n
+}
+
 func printScopesSection(p *ux.Printer, cwd string) {
 	scopes := scope.Walk(cwd)
 	if len(scopes) == 0 {

@@ -33,7 +33,7 @@ func testReader(input string) io.Reader {
 //   Input:       enter text, empty = default
 //   Confirm:     y/n, empty = default
 //
-// Form flow (v0.30, bootstrap select removed alongside cartographer):
+// Form flow (bootstrap select removed alongside cartographer):
 //   Form 1: Note(welcome), MultiSelect(runtimes), Select(mode),
 //           Select(scope)
 //   Form 2: Note(summary), Confirm
