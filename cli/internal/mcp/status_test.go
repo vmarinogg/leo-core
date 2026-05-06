@@ -7,18 +7,27 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/momhq/mom/cli/internal/centralvault"
 )
 
 // newStatusTestDir creates a temp .mom/ dir with constraints, skills, and config
 // set up for mom_status tests.
 func newStatusTestDir(t *testing.T) string {
 	t.Helper()
+	vaultPath := setCentralVault(t)
+	centralDir := filepath.Dir(vaultPath)
 	dir := t.TempDir()
 	leoDir := filepath.Join(dir, ".mom")
 
 	// Required dirs.
-	for _, sub := range []string{"memory", "constraints", "skills"} {
+	for _, sub := range []string{"memory"} {
 		if err := os.MkdirAll(filepath.Join(leoDir, sub), 0755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, sub := range []string{"constraints", "skills"} {
+		if err := os.MkdirAll(filepath.Join(centralDir, sub), 0755); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -55,7 +64,7 @@ communication:
 	writeJSON(t, filepath.Join(leoDir, "identity.json"), identity)
 
 	// Two constraint docs.
-	writeJSON(t, filepath.Join(leoDir, "constraints", "anti-hallucination.json"), map[string]any{
+	writeJSON(t, filepath.Join(centralDir, "constraints", "anti-hallucination.json"), map[string]any{
 		"id":         "anti-hallucination",
 		"type":       "constraint",
 		"lifecycle":  "permanent",
@@ -68,7 +77,7 @@ communication:
 		"updated_by": "test",
 		"content":    map[string]any{"rule": "no hallucination"},
 	})
-	writeJSON(t, filepath.Join(leoDir, "constraints", "escalation-triggers.json"), map[string]any{
+	writeJSON(t, filepath.Join(centralDir, "constraints", "escalation-triggers.json"), map[string]any{
 		"id":         "escalation-triggers",
 		"type":       "constraint",
 		"lifecycle":  "permanent",
@@ -83,7 +92,7 @@ communication:
 	})
 
 	// One skill doc.
-	writeJSON(t, filepath.Join(leoDir, "skills", "session-wrap-up.json"), map[string]any{
+	writeJSON(t, filepath.Join(centralDir, "skills", "session-wrap-up.json"), map[string]any{
 		"id":         "session-wrap-up",
 		"type":       "skill",
 		"lifecycle":  "permanent",
@@ -97,20 +106,8 @@ communication:
 		"content":    map[string]any{"steps": "inventory, classify, write, report"},
 	})
 
-	// One memory doc to verify total_memories count.
-	writeMemoryDoc(t, leoDir, map[string]any{
-		"id":         "test-mem",
-		"type":       "fact",
-		"lifecycle":  "permanent",
-		"scope":      "project",
-		"tags":       []string{"test"},
-		"summary":    "A test memory",
-		"created":    time.Now().Format(time.RFC3339),
-		"created_by": "test",
-		"updated":    time.Now().Format(time.RFC3339),
-		"updated_by": "test",
-		"content":    map[string]any{"detail": "x"},
-	})
+	// One memory row to verify total_memories count.
+	insertCentralMemory(t, "A test memory", "detail x", []string{"test"})
 
 	return leoDir
 }
@@ -405,9 +402,13 @@ func TestMomStatusDocSchema(t *testing.T) {
 }
 
 func TestMomStatusNoConstraintsDir(t *testing.T) {
-	// mom_status must not fail when constraints/ is absent.
+	// mom_status must not fail when central constraints/ is absent.
 	leoDir := newStatusTestDir(t)
-	if err := os.RemoveAll(filepath.Join(leoDir, "constraints")); err != nil {
+	centralDir, err := centralvault.Dir()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.RemoveAll(filepath.Join(centralDir, "constraints")); err != nil {
 		t.Fatal(err)
 	}
 
@@ -422,9 +423,13 @@ func TestMomStatusNoConstraintsDir(t *testing.T) {
 }
 
 func TestMomStatusNoSkillsDir(t *testing.T) {
-	// mom_status must not fail when skills/ is absent.
+	// mom_status must not fail when central skills/ is absent.
 	leoDir := newStatusTestDir(t)
-	if err := os.RemoveAll(filepath.Join(leoDir, "skills")); err != nil {
+	centralDir, err := centralvault.Dir()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.RemoveAll(filepath.Join(centralDir, "skills")); err != nil {
 		t.Fatal(err)
 	}
 

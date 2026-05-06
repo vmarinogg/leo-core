@@ -26,7 +26,7 @@ var MemoryRecordEventType = herald.MemoryRecord
 //   - ProvenanceTriggerEvent = "record"
 //   - ProvenanceSourceType   = "manual-draft"
 //   - ProvenanceActor        = ActorAgent (claude-code, codex, …) or
-//                              "mcp" when the caller did not announce.
+//     "mcp" when the caller did not announce.
 //
 // Tags are normalised via librarian.NormalizeTagName before publish;
 // every entry in Tags is the canonical form. If any input tag
