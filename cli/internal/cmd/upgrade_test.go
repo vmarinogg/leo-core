@@ -74,15 +74,35 @@ kb:
 		0644,
 	)
 
-	// Write retired constraint and skill files from the legacy layout.
+	// Write retired and formerly generated central docs from the legacy layout.
 	os.WriteFile(
 		filepath.Join(leoDir, "kb", "constraints", "delegation-mandatory.json"),
 		[]byte(`{"id":"delegation-mandatory","type":"constraint"}`),
 		0644,
 	)
 	os.WriteFile(
+		filepath.Join(leoDir, "kb", "constraints", "escalation-triggers.json"),
+		[]byte(`{"id":"escalation-triggers","type":"constraint"}`),
+		0644,
+	)
+	os.WriteFile(
+		filepath.Join(leoDir, "kb", "constraints", "team-local.json"),
+		[]byte(`{"id":"team-local","type":"constraint"}`),
+		0644,
+	)
+	os.WriteFile(
 		filepath.Join(leoDir, "kb", "skills", "task-intake.json"),
 		[]byte(`{"id":"task-intake","type":"skill"}`),
+		0644,
+	)
+	os.WriteFile(
+		filepath.Join(leoDir, "kb", "skills", "session-wrap-up.json"),
+		[]byte(`{"id":"session-wrap-up","type":"skill"}`),
+		0644,
+	)
+	os.WriteFile(
+		filepath.Join(leoDir, "kb", "skills", "team-review.json"),
+		[]byte(`{"id":"team-review","type":"skill"}`),
 		0644,
 	)
 
@@ -180,7 +200,7 @@ func TestUpgradeCmd_RemovesProfilesDir(t *testing.T) {
 	}
 }
 
-func TestUpgradeCmd_RemovesRetiredConstraints(t *testing.T) {
+func TestUpgradeCmd_RemovesRetiredAndGeneratedCentralDocs(t *testing.T) {
 	resetUpgradeFlags(t)
 	dir := setupLegacyProject(t)
 
@@ -213,10 +233,23 @@ func TestUpgradeCmd_RemovesRetiredConstraints(t *testing.T) {
 		t.Error("retired skill task-intake.json should have been removed")
 	}
 
-	// Active constraint must still exist (migrated from kb/constraints/ to constraints/).
-	antiHalPath := filepath.Join(leoDir, "constraints", "anti-hallucination.json")
-	if _, err := os.Stat(antiHalPath); err != nil {
-		t.Error("active constraint anti-hallucination.json must survive upgrade")
+	// Formerly generated central docs must be removed, while unknown team docs survive.
+	for _, path := range []string{
+		filepath.Join(leoDir, "constraints", "anti-hallucination.json"),
+		filepath.Join(leoDir, "constraints", "escalation-triggers.json"),
+		filepath.Join(leoDir, "skills", "session-wrap-up.json"),
+	} {
+		if _, err := os.Stat(path); err == nil {
+			t.Errorf("generated central doc should have been removed: %s", path)
+		}
+	}
+	for _, path := range []string{
+		filepath.Join(leoDir, "constraints", "team-local.json"),
+		filepath.Join(leoDir, "skills", "team-review.json"),
+	} {
+		if _, err := os.Stat(path); err != nil {
+			t.Errorf("unknown central doc should survive upgrade: %s", path)
+		}
 	}
 }
 

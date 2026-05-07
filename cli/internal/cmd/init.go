@@ -7,7 +7,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"sort"
 	"strings"
 	"time"
 
@@ -249,24 +248,6 @@ func runInitWithConfig(cmd *cobra.Command, cwd string, force bool, result Onboar
 			return
 		}
 
-		constraintsDir := filepath.Join(leoDir, "constraints")
-		for name, content := range coreConstraints() {
-			path := filepath.Join(constraintsDir, name+".json")
-			if err := os.WriteFile(path, []byte(content), 0644); err != nil {
-				kbErr = fmt.Errorf("writing constraint %s: %w", name, err)
-				return
-			}
-		}
-
-		skillsDir := filepath.Join(leoDir, "skills")
-		for name, content := range coreSkills() {
-			path := filepath.Join(skillsDir, name+".json")
-			if err := os.WriteFile(path, []byte(content), 0644); err != nil {
-				kbErr = fmt.Errorf("writing skill %s: %w", name, err)
-				return
-			}
-		}
-
 		if showSpinner {
 			time.Sleep(800 * time.Millisecond)
 		}
@@ -472,42 +453,16 @@ func buildRuntimeConfig(cfg *config.Config) harness.Config {
 	}
 }
 
-// buildRuntimeConstraints extracts constraint summaries from coreConstraints().
+// buildRuntimeConstraints returns no generated central constraints. Agent behavior
+// is delivered through installed skills and compact context files.
 func buildRuntimeConstraints() []harness.Constraint {
-	var runtimeConstraints []harness.Constraint
-	for id := range coreConstraints() {
-		var doc struct {
-			Summary string `json:"summary"`
-		}
-		json.Unmarshal([]byte(coreConstraints()[id]), &doc) //nolint:errcheck
-		runtimeConstraints = append(runtimeConstraints, harness.Constraint{
-			ID:      id,
-			Summary: doc.Summary,
-		})
-	}
-	sort.Slice(runtimeConstraints, func(i, j int) bool {
-		return runtimeConstraints[i].ID < runtimeConstraints[j].ID
-	})
-	return runtimeConstraints
+	return nil
 }
 
-// buildRuntimeSkills extracts skill summaries from coreSkills().
+// buildRuntimeSkills returns no generated central skills. Slash skills are
+// installed through the skills package manager instead.
 func buildRuntimeSkills() []harness.Skill {
-	var runtimeSkills []harness.Skill
-	for id := range coreSkills() {
-		var doc struct {
-			Summary string `json:"summary"`
-		}
-		json.Unmarshal([]byte(coreSkills()[id]), &doc) //nolint:errcheck
-		runtimeSkills = append(runtimeSkills, harness.Skill{
-			ID:      id,
-			Summary: doc.Summary,
-		})
-	}
-	sort.Slice(runtimeSkills, func(i, j int) bool {
-		return runtimeSkills[i].ID < runtimeSkills[j].ID
-	})
-	return runtimeSkills
+	return nil
 }
 
 // buildRuntimeIdentity parses the identity JSON into a harness.Identity.

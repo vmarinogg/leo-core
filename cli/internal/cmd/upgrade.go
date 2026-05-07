@@ -19,7 +19,7 @@ import (
 var upgradeCmd = &cobra.Command{
 	Use:   "upgrade",
 	Short: "Upgrade .mom/ to the latest version (preserves your memory docs)",
-	Long: `Upgrades core infrastructure (schema, constraints, skills, harness files)
+	Long: `Upgrades core infrastructure (schema and harness files)
 to match the installed mom binary. Your documents in .mom/memory/ are never touched.
 
 Legacy central import scans $HOME and asks before writing.`,
@@ -218,6 +218,15 @@ func upgradeSingleDir(cmd *cobra.Command, projectRoot string, dryRun bool) error
 			}
 		}
 
+		removedGenerated, err := removeKnownGeneratedCentralDocs(leoDir, dryRun)
+		if err != nil {
+			phase1Err = err
+			return
+		}
+		for _, action := range removedGenerated {
+			addAction(action.symbol, action.desc)
+		}
+
 		if showSpinner {
 			time.Sleep(500 * time.Millisecond)
 		}
@@ -264,34 +273,6 @@ func upgradeSingleDir(cmd *cobra.Command, projectRoot string, dryRun bool) error
 				}
 			}
 			addAction("✔", "identity.json updated")
-		}
-
-		constraintsDir := filepath.Join(leoDir, "constraints")
-		for name, content := range coreConstraints() {
-			path := filepath.Join(constraintsDir, name+".json")
-			if changed := fileChanged(path, []byte(content)); changed {
-				if !dryRun {
-					if err := os.WriteFile(path, []byte(content), 0644); err != nil {
-						phase2Err = fmt.Errorf("writing constraint %s: %w", name, err)
-						return
-					}
-				}
-				addAction("✔", fmt.Sprintf("constraint %s updated", name))
-			}
-		}
-
-		skillsDir := filepath.Join(leoDir, "skills")
-		for name, content := range coreSkills() {
-			path := filepath.Join(skillsDir, name+".json")
-			if changed := fileChanged(path, []byte(content)); changed {
-				if !dryRun {
-					if err := os.WriteFile(path, []byte(content), 0644); err != nil {
-						phase2Err = fmt.Errorf("writing skill %s: %w", name, err)
-						return
-					}
-				}
-				addAction("✔", fmt.Sprintf("skill %s updated", name))
-			}
 		}
 
 		docsDir := filepath.Join(leoDir, "memory")
@@ -508,6 +489,37 @@ func fileChanged(path string, data []byte) bool {
 		return true
 	}
 	return string(existing) != string(data)
+}
+
+func removeKnownGeneratedCentralDocs(leoDir string, dryRun bool) ([]upgradeAction, error) {
+	categories := []struct {
+		dirName string
+		kind    string
+		names   []string
+	}{
+		{dirName: "constraints", kind: "constraint", names: knownGeneratedCentralDocs.Constraints},
+		{dirName: "skills", kind: "skill", names: knownGeneratedCentralDocs.Skills},
+	}
+
+	var actions []upgradeAction
+	for _, category := range categories {
+		for _, name := range category.names {
+			path := filepath.Join(leoDir, category.dirName, name+".json")
+			if _, statErr := os.Stat(path); statErr != nil {
+				if os.IsNotExist(statErr) {
+					continue
+				}
+				return nil, fmt.Errorf("checking generated %s %s: %w", category.kind, name, statErr)
+			}
+			if !dryRun {
+				if err := os.Remove(path); err != nil {
+					return nil, fmt.Errorf("removing generated %s %s: %w", category.kind, name, err)
+				}
+			}
+			actions = append(actions, upgradeAction{"✔", fmt.Sprintf("generated %s %s removed", category.kind, name)})
+		}
+	}
+	return actions, nil
 }
 
 // migrateKBLayout detects a legacy .mom/kb/ layout and promotes each subdirectory
