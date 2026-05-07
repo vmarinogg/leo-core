@@ -70,6 +70,30 @@ func Migrations() []vault.Migration {
 			)`,
 		},
 	})
+	migs = append(migs, vault.Migration{
+		Version: 5,
+		Stmts: []string{
+			`CREATE TABLE legacy_log_imports (
+				source_path        TEXT PRIMARY KEY,
+				source_fingerprint TEXT NOT NULL,
+				imported_at        TEXT NOT NULL,
+				event_count        INTEGER NOT NULL,
+				mapping_count      INTEGER NOT NULL
+			)`,
+			`CREATE TABLE legacy_log_import_items (
+				source_path    TEXT NOT NULL,
+				source_item_id TEXT NOT NULL,
+				op_event_id    INTEGER NOT NULL,
+				content_hash   TEXT NOT NULL,
+				event_type     TEXT NOT NULL,
+				session_id     TEXT NOT NULL,
+				created_at     TEXT NOT NULL,
+				PRIMARY KEY (source_path, source_item_id),
+				FOREIGN KEY (source_path) REFERENCES legacy_log_imports(source_path),
+				FOREIGN KEY (op_event_id) REFERENCES op_events(id)
+			)`,
+		},
+	})
 	sort.Slice(migs, func(i, j int) bool { return migs[i].Version < migs[j].Version })
 	return migs
 }

@@ -19,7 +19,6 @@ func resetUpgradeFlags(t *testing.T) {
 	t.Setenv("MOM_UPGRADE_ASSUME_YES", "1")
 	t.Cleanup(func() {
 		upgradeCmd.Flags().Set("dry-run", "false")
-		upgradeCmd.Flags().Set("skip-memories", "false")
 	})
 }
 

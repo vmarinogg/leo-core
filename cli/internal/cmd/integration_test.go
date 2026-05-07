@@ -59,7 +59,6 @@ func upgradeProject(t *testing.T, dir string, extraArgs ...string) string {
 	rootCmd.SetArgs(args)
 	t.Cleanup(func() {
 		upgradeCmd.Flags().Set("dry-run", "false")
-		upgradeCmd.Flags().Set("all", "false")
 	})
 
 	if err := rootCmd.Execute(); err != nil {
@@ -263,9 +262,9 @@ func TestIntegration_UpgradeRegistersAllRuntimes(t *testing.T) {
 	assertMCPEntry(t, filepath.Join(dir, ".mcp.json"))
 }
 
-// ── Test 3: Upgrade --all propagation ───────────────────────────────────────
+// ── Test 3: Upgrade is local to the current filesystem project ─────────────
 
-func TestIntegration_UpgradeAllPropagation(t *testing.T) {
+func TestIntegration_UpgradeDoesNotPropagateScopes(t *testing.T) {
 	root := t.TempDir()
 	t.Setenv("HOME", root)
 
@@ -297,24 +296,27 @@ func TestIntegration_UpgradeAllPropagation(t *testing.T) {
 		os.WriteFile(filepath.Join(momDir, "schema.json"), []byte(`{"old": true}`), 0644)
 	}
 
-	upgradeProject(t, root, "--all")
+	upgradeProject(t, root)
 
-	// All levels should have updated schema.json (not the old placeholder).
-	for _, d := range []string{root, orgDir, repo1, repo2} {
+	rootSchema, err := os.ReadFile(filepath.Join(root, ".mom", "schema.json"))
+	if err != nil {
+		t.Fatalf("missing root schema.json: %v", err)
+	}
+	if string(rootSchema) == `{"old": true}` {
+		t.Fatal("root schema.json was not updated")
+	}
+	assertFileExists(t, filepath.Join(root, ".claude", "CLAUDE.md"))
+
+	for _, d := range []string{orgDir, repo1, repo2} {
 		schemaPath := filepath.Join(d, ".mom", "schema.json")
 		data, err := os.ReadFile(schemaPath)
 		if err != nil {
 			t.Errorf("missing schema.json in %s", d)
 			continue
 		}
-		if string(data) == `{"old": true}` {
-			t.Errorf("schema.json not updated in %s", d)
+		if string(data) != `{"old": true}` {
+			t.Errorf("schema.json unexpectedly updated in %s", d)
 		}
-	}
-
-	// All levels should have Claude context file.
-	for _, d := range []string{root, orgDir, repo1, repo2} {
-		assertFileExists(t, filepath.Join(d, ".claude", "CLAUDE.md"))
 	}
 }
 
