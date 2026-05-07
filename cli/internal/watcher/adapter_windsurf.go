@@ -6,8 +6,6 @@ import (
 	"os"
 	"strings"
 	"time"
-
-	"github.com/momhq/mom/cli/internal/logbook"
 )
 
 // WindsurfAdapter parses Windsurf JSONL transcript lines.
@@ -128,9 +126,9 @@ func (a *WindsurfAdapter) BelongsToProject(path string) bool {
 // windsurfTranscriptLine is the minimal subset of a Windsurf JSONL line
 // that the adapter needs to inspect.
 type windsurfTranscriptLine struct {
-	Type            string                  `json:"type"`
-	Status          string                  `json:"status"`
-	UserInput       *windsurfUserInput      `json:"user_input,omitempty"`
+	Type            string                   `json:"type"`
+	Status          string                   `json:"status"`
+	UserInput       *windsurfUserInput       `json:"user_input,omitempty"`
 	PlannerResponse *windsurfPlannerResponse `json:"planner_response,omitempty"`
 }
 
@@ -182,9 +180,7 @@ func (a *WindsurfAdapter) ExtractTurn(line []byte, sessionID string) (Turn, bool
 		return Turn{}, false
 	}
 
-	// Windsurf JSONL carries no per-line timestamp field (see
-	// ParseSession's comment on line 252 — it falls back to file
-	// ModTime for the session-level Started time). time.Now() is the
+	// Windsurf JSONL carries no per-line timestamp field. time.Now() is the
 	// best signal we have at the per-turn grain; for catch-up reads
 	// this means historical turns get a wall-clock "now" — accept as
 	// a known harness gap until Windsurf publishes per-line stamps.
@@ -197,79 +193,7 @@ func (a *WindsurfAdapter) ExtractTurn(line []byte, sessionID string) (Turn, bool
 	}, true
 }
 
-// ParseSession implements SessionParser for Windsurf transcripts.
-// Windsurf JSONL uses planner_response, code_action, command_action, and mcp_tool
-// instead of Claude Code's assistant/tool_use format.
-func (a *WindsurfAdapter) ParseSession(transcriptPath, sessionID string) (*logbook.SessionLog, error) {
-	f, err := os.Open(transcriptPath)
-	if err != nil {
-		return nil, err
-	}
-	defer f.Close()
-
-	log := &logbook.SessionLog{
-		SessionID: sessionID,
-		ToolCalls: make(map[string]logbook.ToolGroup),
-	}
-
-	scanner := bufio.NewScanner(f)
-	buf := make([]byte, 0, 64*1024)
-	scanner.Buffer(buf, 2*1024*1024)
-
-	filesChanged := make(map[string]bool)
-
-	for scanner.Scan() {
-		var entry map[string]any
-		if err := json.Unmarshal(scanner.Bytes(), &entry); err != nil {
-			continue
-		}
-
-		t, _ := entry["type"].(string)
-
-		switch t {
-		case "planner_response":
-			log.Interactions++
-
-		case "code_action":
-			a.windCountTool(log, "code_action")
-			if ca, ok := entry["code_action"].(map[string]any); ok {
-				if p, ok := ca["path"].(string); ok && p != "" {
-					filesChanged[p] = true
-				}
-			}
-
-		case "command_action":
-			a.windCountTool(log, "command_action")
-
-		case "mcp_tool":
-			toolName := ""
-			if mcp, ok := entry["mcp_tool"].(map[string]any); ok {
-				toolName, _ = mcp["tool_name"].(string)
-			}
-			if toolName != "" {
-				a.windCountTool(log, toolName)
-				if toolName == "create_memory_draft" {
-					log.MemoriesCreated++
-				}
-			}
-		}
-	}
-
-	// Windsurf JSONL has no timestamp fields — use file ModTime for Started.
-	info, err := os.Stat(transcriptPath)
-	if err == nil {
-		log.Started = info.ModTime().UTC().Format(time.RFC3339)
-	} else {
-		log.Started = time.Now().UTC().Format(time.RFC3339)
-	}
-	log.Ended = time.Now().UTC().Format(time.RFC3339)
-	log.FilesChanged = len(filesChanged)
-
-	return log, nil
-}
-
-// CategorizeTool returns Windsurf-specific synonyms for tool names; falls back
-// to logbook.CategorizeToolCall for everything else.
+// CategorizeTool returns Windsurf-specific synonyms for tool names.
 func (a *WindsurfAdapter) CategorizeTool(toolName string) string {
 	switch toolName {
 	case "code_action":
@@ -277,21 +201,8 @@ func (a *WindsurfAdapter) CategorizeTool(toolName string) string {
 	case "command_action":
 		return "system"
 	default:
-		return logbook.CategorizeToolCall(toolName)
+		return CategorizeToolCall(toolName)
 	}
-}
-
-// windCountTool increments tool counts in a SessionLog, routing via the
-// adapter's CategorizeTool override.
-func (a *WindsurfAdapter) windCountTool(log *logbook.SessionLog, toolName string) {
-	category := a.CategorizeTool(toolName)
-	group := log.ToolCalls[category]
-	group.Total++
-	if group.Detail == nil {
-		group.Detail = make(map[string]int)
-	}
-	group.Detail[toolName]++
-	log.ToolCalls[category] = group
 }
 
 var _ ToolCategorizer = (*WindsurfAdapter)(nil)

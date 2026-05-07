@@ -4,8 +4,6 @@ import (
 	"encoding/json"
 	"strings"
 	"time"
-
-	"github.com/momhq/mom/cli/internal/logbook"
 )
 
 // ClaudeAdapter parses Claude Code JSONL transcript lines.
@@ -24,19 +22,14 @@ func NewClaudeAdapter() *ClaudeAdapter {
 
 func (a *ClaudeAdapter) Name() string { return "claude" }
 
-// ParseSession implements SessionParser by delegating to logbook.ParseTranscript.
-func (a *ClaudeAdapter) ParseSession(transcriptPath, sessionID string) (*logbook.SessionLog, error) {
-	return logbook.ParseTranscript(transcriptPath, sessionID)
-}
-
 // claudeTranscriptLine is the minimal subset of a Claude Code JSONL line
 // that the adapter needs to inspect.
 type claudeTranscriptLine struct {
-	Type      string         `json:"type"`
-	Message   claudeMessage  `json:"message"`
-	Timestamp string         `json:"timestamp"`
-	SessionID string         `json:"sessionId"`
-	IsSidechain bool         `json:"isSidechain"`
+	Type        string        `json:"type"`
+	Message     claudeMessage `json:"message"`
+	Timestamp   string        `json:"timestamp"`
+	SessionID   string        `json:"sessionId"`
+	IsSidechain bool          `json:"isSidechain"`
 }
 
 type claudeMessage struct {
@@ -90,7 +83,7 @@ func extractClaudeContent(content any) string {
 	return strings.Join(parts, "\n")
 }
 
-// ExtractTurn implements Adapter for v0.30. Returns the rich per-turn
+// ExtractTurn implements Adapter. Returns the rich per-turn
 // shape Drafter and Logbook consume from `turn.observed` events. The
 // raw text and tool inputs ride on the bus only — Drafter applies
 // the redaction pipeline before persisting; Logbook strips them

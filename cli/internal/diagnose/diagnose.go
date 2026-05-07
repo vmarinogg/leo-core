@@ -8,9 +8,22 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-
-	"github.com/momhq/mom/cli/internal/logbook"
 )
+
+type SessionLog struct {
+	SessionID       string               `json:"session_id"`
+	Started         string               `json:"started"`
+	Ended           string               `json:"ended"`
+	Interactions    int                  `json:"interactions"`
+	FilesChanged    int                  `json:"files_changed"`
+	MemoriesCreated int                  `json:"memories_created"`
+	ToolCalls       map[string]ToolGroup `json:"tool_calls"`
+}
+
+type ToolGroup struct {
+	Total  int            `json:"total"`
+	Detail map[string]int `json:"detail"`
+}
 
 // Report holds the derived metrics computed from one or more session logs.
 type Report struct {
@@ -24,7 +37,7 @@ type Report struct {
 }
 
 // ComputeReport computes derived metrics from session logs.
-func ComputeReport(sessions []logbook.SessionLog) *Report {
+func ComputeReport(sessions []SessionLog) *Report {
 	if len(sessions) == 0 {
 		return &Report{}
 	}
@@ -145,13 +158,13 @@ func FormatReport(r *Report) string {
 
 // LoadSessionLogs reads all session-*.json files from logsDir.
 // If lastN > 0, only the last N files (by filesystem sort order) are returned.
-func LoadSessionLogs(logsDir string, lastN int) ([]logbook.SessionLog, error) {
+func LoadSessionLogs(logsDir string, lastN int) ([]SessionLog, error) {
 	entries, err := os.ReadDir(logsDir)
 	if err != nil {
 		return nil, err
 	}
 
-	var sessions []logbook.SessionLog
+	var sessions []SessionLog
 	for _, e := range entries {
 		if e.IsDir() || !strings.HasPrefix(e.Name(), "session-") || !strings.HasSuffix(e.Name(), ".json") {
 			continue
@@ -160,7 +173,7 @@ func LoadSessionLogs(logsDir string, lastN int) ([]logbook.SessionLog, error) {
 		if err != nil {
 			continue
 		}
-		var s logbook.SessionLog
+		var s SessionLog
 		if err := json.Unmarshal(data, &s); err != nil {
 			continue
 		}

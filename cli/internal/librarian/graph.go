@@ -68,6 +68,34 @@ func (l *Librarian) LinkTag(memoryID, tagID string) error {
 // MemoriesByTag returns memory IDs linked to the tag with the given
 // name. Returns an empty slice (not nil) and no error when the tag is
 // unknown or has no linked memories.
+func (l *Librarian) TagsForMemory(memoryID string) ([]string, error) {
+	if strings.TrimSpace(memoryID) == "" {
+		return nil, fmt.Errorf("TagsForMemory: %w", ErrEmptyArg)
+	}
+	names := []string{}
+	err := l.v.Query(
+		`SELECT t.name FROM tags t
+		   JOIN memory_tags mt ON mt.tag_id = t.id
+		  WHERE mt.memory_id = ?
+		  ORDER BY t.name`,
+		[]any{memoryID},
+		func(rs *sql.Rows) error {
+			for rs.Next() {
+				var name string
+				if err := rs.Scan(&name); err != nil {
+					return err
+				}
+				names = append(names, name)
+			}
+			return nil
+		},
+	)
+	if err != nil {
+		return nil, fmt.Errorf("TagsForMemory: %w", err)
+	}
+	return names, nil
+}
+
 func (l *Librarian) MemoriesByTag(name string) ([]string, error) {
 	if strings.TrimSpace(name) == "" {
 		return nil, fmt.Errorf("MemoriesByTag: %w", ErrEmptyArg)

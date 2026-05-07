@@ -5,67 +5,78 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
-	"os"
-	"path/filepath"
+	"strings"
 	"testing"
 	"time"
+
+	"github.com/momhq/mom/cli/internal/archtest"
+	"github.com/momhq/mom/cli/internal/centralvault"
+	"github.com/momhq/mom/cli/internal/librarian"
+	"github.com/momhq/mom/cli/internal/vault"
 )
 
-// writeJSON writes v as JSON to path, creating parent dirs as needed.
-func writeJSON(t *testing.T, path string, v any) {
+func testLibrarian(t *testing.T) (*librarian.Librarian, func()) {
 	t.Helper()
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		t.Fatalf("mkdir: %v", err)
-	}
-	data, err := json.Marshal(v)
+	v, err := vault.Open(t.TempDir()+"/mom.db", centralvault.Migrations())
 	if err != nil {
-		t.Fatalf("marshal: %v", err)
+		t.Fatalf("vault.Open: %v", err)
 	}
-	if err := os.WriteFile(path, data, 0o644); err != nil {
-		t.Fatalf("write: %v", err)
+	return librarian.New(v), func() { _ = v.Close() }
+}
+
+func newTestServer(t *testing.T, lib *librarian.Librarian) *Server {
+	t.Helper()
+	srv, err := New(lib)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	return srv
+}
+
+func insertTurn(t *testing.T, lib *librarian.Librarian, sessionID, role string, at time.Time, payload map[string]any) {
+	t.Helper()
+	if payload == nil {
+		payload = map[string]any{}
+	}
+	payload["role"] = role
+	_, err := lib.InsertOpEvent(librarian.OpEvent{EventType: "turn.observed", SessionID: sessionID, CreatedAt: at, Payload: payload})
+	if err != nil {
+		t.Fatalf("InsertOpEvent: %v", err)
 	}
 }
 
-// fixtureScope creates a .mom/ scope with logs/ and memory/ subdirs.
-func fixtureScope(t *testing.T) string {
+func insertLegacySummary(t *testing.T, lib *librarian.Librarian, sessionID string, at time.Time, payload map[string]any) {
 	t.Helper()
-	momDir := filepath.Join(t.TempDir(), ".mom")
-	for _, sub := range []string{"logs", "memory"} {
-		if err := os.MkdirAll(filepath.Join(momDir, sub), 0o755); err != nil {
-			t.Fatalf("mkdir: %v", err)
+	_, err := lib.InsertOpEvent(librarian.OpEvent{EventType: "legacy.session.summary", SessionID: sessionID, CreatedAt: at, Payload: payload})
+	if err != nil {
+		t.Fatalf("InsertOpEvent: %v", err)
+	}
+}
+
+func insertMemory(t *testing.T, lib *librarian.Librarian, sessionID, summary string, tags []string, curated bool) string {
+	t.Helper()
+	id, err := lib.InsertMemoryWithTags(librarian.InsertMemory{
+		Type:                   "semantic",
+		Summary:                summary,
+		Content:                `{"text":"` + summary + `"}`,
+		CreatedAt:              time.Date(2026, 4, 10, 12, 0, 0, 0, time.UTC),
+		SessionID:              sessionID,
+		ProvenanceActor:        "test",
+		ProvenanceSourceType:   "test",
+		ProvenanceTriggerEvent: "test",
+	}, tags)
+	if err != nil {
+		t.Fatalf("InsertMemoryWithTags: %v", err)
+	}
+	if curated {
+		state := "curated"
+		if err := lib.UpdateOperational(id, librarian.OperationalUpdate{PromotionState: &state}); err != nil {
+			t.Fatalf("UpdateOperational: %v", err)
 		}
 	}
-	return momDir
+	return id
 }
 
-func writeSessionLog(t *testing.T, momDir, sessionID string) {
-	t.Helper()
-	now := time.Now().UTC().Format(time.RFC3339)
-	log := map[string]any{
-		"session_id":   sessionID,
-		"started":      now,
-		"ended":        now,
-		"interactions": 1,
-		"tool_calls":   map[string]any{},
-	}
-	writeJSON(t, filepath.Join(momDir, "logs", "session-"+sessionID+".json"), log)
-}
-
-func writeMemoryDoc(t *testing.T, momDir, id, sessionID string) {
-	t.Helper()
-	doc := map[string]any{
-		"id":         id,
-		"scope":      "project",
-		"tags":       []string{},
-		"created":    time.Now().UTC(),
-		"created_by": "test",
-		"session_id": sessionID,
-		"content":    map[string]any{},
-	}
-	writeJSON(t, filepath.Join(momDir, "memory", id+".json"), doc)
-}
-
-// fetchSessions hits GET /api/sessions and returns the parsed result.
 func fetchSessions(t *testing.T, h http.Handler) []SessionSummary {
 	t.Helper()
 	req := httptest.NewRequest(http.MethodGet, "/api/sessions", nil)
@@ -81,66 +92,154 @@ func fetchSessions(t *testing.T, h http.Handler) []SessionSummary {
 	return got
 }
 
-// TestSessions_PicksUpNewMemoriesWithoutRestart locks down bug #1 + #2:
-// memories created after Server.New() must show up on subsequent requests.
-func TestSessions_PicksUpNewMemoriesWithoutRestart(t *testing.T) {
-	momDir := fixtureScope(t)
-	const sid = "sess-aaa"
-
-	writeSessionLog(t, momDir, sid)
-	writeMemoryDoc(t, momDir, "mem-1", sid)
-
-	srv, err := New([]ScopeEntry{{Label: "test", Path: momDir}})
-	if err != nil {
-		t.Fatalf("New: %v", err)
+func fetchDetail(t *testing.T, h http.Handler, id string) SessionDetail {
+	t.Helper()
+	req := httptest.NewRequest(http.MethodGet, "/api/sessions/"+id, nil)
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", rec.Code, rec.Body.String())
 	}
+	var got SessionDetail
+	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	return got
+}
 
+func TestSessions_RenderFromCentralTurnObserved(t *testing.T) {
+	lib, closeFn := testLibrarian(t)
+	defer closeFn()
+	at := time.Date(2026, 4, 10, 12, 0, 0, 0, time.UTC)
+	insertTurn(t, lib, "s-new", "user", at, nil)
+	insertTurn(t, lib, "s-new", "assistant", at.Add(time.Minute), map[string]any{
+		"tool_categories": []any{"codebase_read", "system"},
+		"usage":           map[string]any{"total_tokens": float64(42), "cost_usd": 0.02},
+		"model":           "claude-sonnet",
+		"provider":        "anthropic",
+	})
+
+	got := fetchSessions(t, newTestServer(t, lib).Handler())
+	if len(got) != 1 {
+		t.Fatalf("sessions = %+v", got)
+	}
+	if got[0].SessionID != "s-new" || got[0].Interactions != 1 || got[0].ToolsTotal != 2 || got[0].TotalTokens != 42 || got[0].ScopeLabel != "central" {
+		t.Fatalf("summary = %+v", got[0])
+	}
+}
+
+func TestSessions_RenderLegacySummaryFromCentralEvents(t *testing.T) {
+	lib, closeFn := testLibrarian(t)
+	defer closeFn()
+	insertLegacySummary(t, lib, "s-legacy", time.Date(2026, 4, 10, 15, 0, 0, 0, time.UTC), map[string]any{
+		"legacy_format": "session_summary",
+		"started":       "2026-04-10T14:00:00Z",
+		"ended":         "2026-04-10T15:00:00Z",
+		"interactions":  float64(7),
+		"tool_categories": map[string]any{
+			"codebase_read": float64(4),
+			"system":        float64(3),
+		},
+		"usage":    map[string]any{"total_tokens": float64(100), "cost_usd": 0.5},
+		"model":    "legacy-model",
+		"provider": "legacy-provider",
+	})
+
+	got := fetchSessions(t, newTestServer(t, lib).Handler())
+	if len(got) != 1 || got[0].Interactions != 7 || got[0].ToolsTotal != 7 || got[0].TotalTokens != 100 || got[0].DurationSecs != 3600 {
+		t.Fatalf("sessions = %+v", got)
+	}
+}
+
+func TestSessions_MemoryOnlySessionAppearsWithTags(t *testing.T) {
+	lib, closeFn := testLibrarian(t)
+	defer closeFn()
+	insertMemory(t, lib, "s-memory", "remember this", []string{"deploy", "aws"}, true)
+
+	srv := newTestServer(t, lib)
 	got := fetchSessions(t, srv.Handler())
-	if len(got) != 1 || got[0].MemoryCount != 1 {
-		t.Fatalf("first read: want 1 session with 1 memory, got %+v", got)
+	if len(got) != 1 || got[0].SessionID != "s-memory" || got[0].MemoryCount != 1 || got[0].CuratedCount != 1 || got[0].Interactions != 0 {
+		t.Fatalf("sessions = %+v", got)
 	}
-
-	// Memory created AFTER server start — must be visible on next request.
-	writeMemoryDoc(t, momDir, "mem-2", sid)
-
-	got = fetchSessions(t, srv.Handler())
-	if len(got) != 1 || got[0].MemoryCount != 2 {
-		t.Fatalf("second read: want 1 session with 2 memories, got %+v", got)
+	detail := fetchDetail(t, srv.Handler(), "s-memory")
+	if len(detail.Memories) != 1 || len(detail.Memories[0].Tags) != 2 || detail.Memories[0].PromotionState != "curated" {
+		t.Fatalf("detail = %+v", detail)
 	}
 }
 
-// TestMeta_ReflectsLiveMemoryCount locks down bug #1 for /api/meta.
-func TestMeta_ReflectsLiveMemoryCount(t *testing.T) {
-	momDir := fixtureScope(t)
-	writeMemoryDoc(t, momDir, "mem-1", "sess-x")
-
-	srv, err := New([]ScopeEntry{{Label: "test", Path: momDir}})
+func TestSessions_ExcludePseudoLegacySessionWithoutMemories(t *testing.T) {
+	lib, closeFn := testLibrarian(t)
+	defer closeFn()
+	_, err := lib.InsertOpEvent(librarian.OpEvent{EventType: "legacy.consumption", SessionID: "legacy:abc:2026-04-10", CreatedAt: time.Now(), Payload: map[string]any{"kind": "ConsumptionEvent"}})
 	if err != nil {
-		t.Fatalf("New: %v", err)
+		t.Fatal(err)
 	}
-
-	get := func() MetaResponse {
-		req := httptest.NewRequest(http.MethodGet, "/api/meta", nil)
-		rec := httptest.NewRecorder()
-		srv.Handler().ServeHTTP(rec, req)
-		var m MetaResponse
-		_ = json.Unmarshal(rec.Body.Bytes(), &m)
-		return m
-	}
-
-	if m := get(); m.TotalMemories != 1 {
-		t.Fatalf("first meta: want 1 memory, got %d", m.TotalMemories)
-	}
-
-	writeMemoryDoc(t, momDir, "mem-2", "sess-y")
-
-	if m := get(); m.TotalMemories != 2 {
-		t.Fatalf("second meta: want 2 memories, got %d", m.TotalMemories)
+	got := fetchSessions(t, newTestServer(t, lib).Handler())
+	if len(got) != 0 {
+		t.Fatalf("sessions = %+v, want none", got)
 	}
 }
 
-// TestListenWithFallback_BumpsToNextPort locks down bug #4:
-// when the preferred port is taken, the helper picks a free nearby port.
+func TestSessions_MixedSessionPrefersTurnObservedCounts(t *testing.T) {
+	lib, closeFn := testLibrarian(t)
+	defer closeFn()
+	insertLegacySummary(t, lib, "s-mixed", time.Date(2026, 4, 10, 15, 0, 0, 0, time.UTC), map[string]any{
+		"started":         "2026-04-10T14:00:00Z",
+		"ended":           "2026-04-10T15:00:00Z",
+		"interactions":    float64(99),
+		"tool_categories": map[string]any{"system": float64(99)},
+		"model":           "legacy-model",
+		"provider":        "legacy-provider",
+		"legacy_format":   "session_summary",
+	})
+	insertTurn(t, lib, "s-mixed", "assistant", time.Date(2026, 4, 10, 14, 30, 0, 0, time.UTC), map[string]any{
+		"tool_categories": []any{"codebase_read"},
+		"model":           "new-model",
+		"provider":        "new-provider",
+	})
+
+	got := fetchSessions(t, newTestServer(t, lib).Handler())
+	if len(got) != 1 || got[0].Interactions != 1 || got[0].ToolsTotal != 1 || got[0].Model != "new-model" || got[0].Provider != "new-provider" || got[0].DurationSecs != 3600 {
+		t.Fatalf("sessions = %+v", got)
+	}
+}
+
+func TestLensResponseDoesNotLeakToolInputSentinel(t *testing.T) {
+	lib, closeFn := testLibrarian(t)
+	defer closeFn()
+	insertTurn(t, lib, "s-private", "assistant", time.Now(), map[string]any{
+		"tool_categories": []any{"system"},
+		"input":           "AKIA-SHOULD-NOT-LEAK secrets.env echo boom",
+	})
+	req := httptest.NewRequest(http.MethodGet, "/api/sessions/s-private", nil)
+	rec := httptest.NewRecorder()
+	newTestServer(t, lib).Handler().ServeHTTP(rec, req)
+	if strings.Contains(rec.Body.String(), "AKIA") || strings.Contains(rec.Body.String(), "secrets.env") || strings.Contains(rec.Body.String(), "echo boom") {
+		t.Fatalf("Lens response leaked sentinel: %s", rec.Body.String())
+	}
+}
+
+func TestLensStaticHasNoScopeFilter(t *testing.T) {
+	data, err := staticFS.ReadFile("static/index.html")
+	if err != nil {
+		t.Fatalf("ReadFile: %v", err)
+	}
+	s := string(data)
+	for _, forbidden := range []string{"v3-scope-row", "activeScope", "?scope=", "Scope</span>", "nav-scope"} {
+		if strings.Contains(s, forbidden) {
+			t.Fatalf("static UI still contains scope filter marker %q", forbidden)
+		}
+	}
+}
+
+func TestLensDoesNotImportLegacyStores(t *testing.T) {
+	archtest.AssertNoDirectImport(t, ".",
+		"github.com/momhq/mom/cli/internal/memory",
+		"github.com/momhq/mom/cli/internal/scope",
+		"github.com/momhq/mom/cli/internal/logbook",
+	)
+}
+
 func TestListenWithFallback_BumpsToNextPort(t *testing.T) {
 	occupier, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
@@ -165,8 +264,6 @@ func TestListenWithFallback_BumpsToNextPort(t *testing.T) {
 	}
 }
 
-// TestListenWithFallback_ZeroAttemptsFailsCleanly: explicit-port behavior
-// (attempts=0 means no fallback, fail loud if taken).
 func TestListenWithFallback_ZeroAttemptsFailsCleanly(t *testing.T) {
 	occupier, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
