@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"fmt"
 	"strings"
+	"time"
 )
 
 // SearchFilter narrows a SearchMemories call. All fields are optional;
@@ -160,6 +161,58 @@ func (l *Librarian) SearchMemories(f SearchFilter) ([]SearchedMemory, error) {
 	})
 	if err != nil {
 		return nil, fmt.Errorf("SearchMemories: %w", err)
+	}
+	return out, nil
+}
+
+// RecentDrafts returns newest draft memories created within the given window.
+func (l *Librarian) RecentDrafts(since time.Duration, limit int) ([]Memory, error) {
+	if limit <= 0 {
+		limit = 50
+	}
+	cutoff := formatTime(l.now().Add(-since))
+	out := []Memory{}
+	err := l.v.Query(
+		`SELECT id, type, summary, content, created_at, session_id,
+		        provenance_actor, provenance_source_type, provenance_trigger_event,
+		        promotion_state, landmark, centrality_score
+		 FROM memories
+		 WHERE promotion_state = 'draft' AND created_at >= ?
+		 ORDER BY created_at DESC, id DESC
+		 LIMIT ?`,
+		[]any{cutoff, limit},
+		func(rs *sql.Rows) error {
+			for rs.Next() {
+				var (
+					m                                        Memory
+					summary, actor, sourceType, triggerEvent sql.NullString
+					createdAtStr                             string
+					landmarkInt                              int64
+				)
+				if err := rs.Scan(
+					&m.ID, &m.Type, &summary, &m.Content, &createdAtStr, &m.SessionID,
+					&actor, &sourceType, &triggerEvent,
+					&m.PromotionState, &landmarkInt, &m.CentralityScore,
+				); err != nil {
+					return err
+				}
+				m.Summary = summary.String
+				m.ProvenanceActor = actor.String
+				m.ProvenanceSourceType = sourceType.String
+				m.ProvenanceTriggerEvent = triggerEvent.String
+				m.Landmark = landmarkInt != 0
+				t, err := parseTime(createdAtStr)
+				if err != nil {
+					return fmt.Errorf("parse created_at %q: %w", createdAtStr, err)
+				}
+				m.CreatedAt = t
+				out = append(out, m)
+			}
+			return nil
+		},
+	)
+	if err != nil {
+		return nil, fmt.Errorf("RecentDrafts: %w", err)
 	}
 	return out, nil
 }

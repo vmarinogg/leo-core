@@ -15,6 +15,7 @@ package librarian
 
 import (
 	"database/sql"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -295,6 +296,52 @@ type OperationalUpdate struct {
 	PromotionState  *string
 	Landmark        *bool
 	CentralityScore *float64
+}
+
+// CurateDraft turns a draft into a curated memory in one update.
+func (l *Librarian) CurateDraft(id, memoryType, summary string) error {
+	id = strings.TrimSpace(id)
+	memoryType = strings.TrimSpace(memoryType)
+	summary = strings.TrimSpace(summary)
+	if id == "" {
+		return fmt.Errorf("CurateDraft: id: %w", ErrEmptyArg)
+	}
+	if memoryType == "" {
+		return fmt.Errorf("CurateDraft: type: %w", ErrEmptyArg)
+	}
+	if summary == "" {
+		return fmt.Errorf("CurateDraft: summary: %w", ErrEmptyArg)
+	}
+	if memoryType != "semantic" && memoryType != "procedural" && memoryType != "episodic" {
+		return fmt.Errorf("CurateDraft: invalid type %q", memoryType)
+	}
+	return l.v.Tx(func(tx *sql.Tx) error {
+		var state string
+		if err := tx.QueryRow(`SELECT promotion_state FROM memories WHERE id = ?`, id).Scan(&state); err != nil {
+			if errors.Is(err, sql.ErrNoRows) {
+				return ErrNotFound
+			}
+			return err
+		}
+		if state == "curated" {
+			return fmt.Errorf("already curated")
+		}
+		res, err := tx.Exec(
+			`UPDATE memories SET type = ?, summary = ?, promotion_state = 'curated' WHERE id = ?`,
+			memoryType, summary, id,
+		)
+		if err != nil {
+			return err
+		}
+		n, err := res.RowsAffected()
+		if err != nil {
+			return err
+		}
+		if n == 0 {
+			return ErrNotFound
+		}
+		return nil
+	})
 }
 
 // Delete removes a memory by id. ON DELETE CASCADE on memory_tags
