@@ -10,12 +10,12 @@ import (
 	"strings"
 	"time"
 
-	"github.com/spf13/cobra"
 	"github.com/momhq/mom/cli/internal/adapters/harness"
+	"github.com/momhq/mom/cli/internal/centralvault"
 	"github.com/momhq/mom/cli/internal/config"
 	"github.com/momhq/mom/cli/internal/herald"
-	"github.com/momhq/mom/cli/internal/scope"
 	"github.com/momhq/mom/cli/internal/ux"
+	"github.com/spf13/cobra"
 )
 
 //go:embed schema.json
@@ -72,15 +72,10 @@ func runInit(cmd *cobra.Command, args []string) error {
 		return nil
 	}
 
-	// Non-interactive path: use flags/defaults.
-	// When --force, look for an existing .mom/ up the directory tree so we
-	// regenerate context files in the right place instead of the cwd.
+	// Non-interactive path: use flags/defaults. MOM's writable vault/config and
+	// harness integrations are installed globally; cwd is only registered as the
+	// active project for watcher metadata.
 	installDir := cwd
-	if force {
-		if sc, ok := scope.NearestWritable(cwd); ok {
-			installDir = filepath.Dir(sc.Path)
-		}
-	}
 
 	harnesses, _ := cmd.Flags().GetStringSlice("harnesses")
 	if len(harnesses) == 0 {
@@ -100,12 +95,16 @@ func runInit(cmd *cobra.Command, args []string) error {
 	})
 }
 
-// runInitWithConfig performs the actual directory and file creation using the
-// resolved configuration from either the wizard or flag defaults.
-// cwd is the directory where .mom/ will be created (may differ from os.Getwd()
-// when the user chose a parent install location during onboarding).
+// runInitWithConfig performs central vault setup and global harness integration
+// using the resolved configuration from either the wizard or flag defaults. cwd
+// is only used as the active project for watcher metadata; the .mom directory is
+// always the central vault dir ($HOME/.mom or MOM_VAULT's parent for tests/local
+// runs).
 func runInitWithConfig(cmd *cobra.Command, cwd string, force bool, result OnboardingResult) error {
-	leoDir := filepath.Join(cwd, ".mom")
+	leoDir, err := centralvault.Dir()
+	if err != nil {
+		return err
+	}
 
 	// Check if already initialized.
 	alreadyExists := false
@@ -142,19 +141,18 @@ func runInitWithConfig(cmd *cobra.Command, cwd string, force bool, result Onboar
 				return
 			}
 		}
-		if showSpinner {
-			time.Sleep(600 * time.Millisecond)
+		v, err := centralvault.Open()
+		if err != nil {
+			scaffoldErr = err
+			return
+		}
+		if err := v.Close(); err != nil {
+			scaffoldErr = err
+			return
 		}
 	}
 
-	if showSpinner {
-		sp := ux.NewSpinner(os.Stderr)
-		sp.Start("Scanning project structure")
-		doScaffold()
-		sp.Stop()
-	} else {
-		doScaffold()
-	}
+	doScaffold()
 	if scaffoldErr != nil {
 		return scaffoldErr
 	}
@@ -225,27 +223,21 @@ func runInitWithConfig(cmd *cobra.Command, cwd string, force bool, result Onboar
 			return
 		}
 
-		// Write core constraints — skip if a parent scope already provides them.
-		if !parentScopeHasDir(cwd, "constraints") {
-			constraintsDir := filepath.Join(leoDir, "constraints")
-			for name, content := range coreConstraints() {
-				path := filepath.Join(constraintsDir, name+".json")
-				if err := os.WriteFile(path, []byte(content), 0644); err != nil {
-					kbErr = fmt.Errorf("writing constraint %s: %w", name, err)
-					return
-				}
+		constraintsDir := filepath.Join(leoDir, "constraints")
+		for name, content := range coreConstraints() {
+			path := filepath.Join(constraintsDir, name+".json")
+			if err := os.WriteFile(path, []byte(content), 0644); err != nil {
+				kbErr = fmt.Errorf("writing constraint %s: %w", name, err)
+				return
 			}
 		}
 
-		// Write core skills — skip if a parent scope already provides them.
-		if !parentScopeHasDir(cwd, "skills") {
-			skillsDir := filepath.Join(leoDir, "skills")
-			for name, content := range coreSkills() {
-				path := filepath.Join(skillsDir, name+".json")
-				if err := os.WriteFile(path, []byte(content), 0644); err != nil {
-					kbErr = fmt.Errorf("writing skill %s: %w", name, err)
-					return
-				}
+		skillsDir := filepath.Join(leoDir, "skills")
+		for name, content := range coreSkills() {
+			path := filepath.Join(skillsDir, name+".json")
+			if err := os.WriteFile(path, []byte(content), 0644); err != nil {
+				kbErr = fmt.Errorf("writing skill %s: %w", name, err)
+				return
 			}
 		}
 
@@ -256,7 +248,7 @@ func runInitWithConfig(cmd *cobra.Command, cwd string, force bool, result Onboar
 
 	if showSpinner {
 		sp := ux.NewSpinner(os.Stderr)
-		sp.Start("Writing memory structure")
+		sp.Start("Building memory vault")
 		doWriteKB()
 		sp.Stop()
 	} else {
@@ -282,38 +274,33 @@ func runInitWithConfig(cmd *cobra.Command, cwd string, force bool, result Onboar
 		runtimeSkills := buildRuntimeSkills()
 		runtimeIdentity := buildRuntimeIdentity()
 
-		// Generate context files for all selected runtimes.
+		// Install global context/tool integration for all selected runtimes.
 		for _, rt := range result.Harnesses {
 			adapter, ok := registry.Get(rt)
 			if !ok {
 				continue
 			}
-
-			// Backup existing files if needed.
-			for _, relPath := range adapter.GeneratedFiles() {
-				absPath := filepath.Join(cwd, relPath)
-				harness.BackupIfNeeded(absPath) //nolint:errcheck
+			global, ok := adapter.(harness.GlobalAdapter)
+			if !ok {
+				genErr = fmt.Errorf("%s does not support global install", rt)
+				return
 			}
-
-			if err := adapter.GenerateContextFile(runtimeCfg, runtimeConstraints, runtimeSkills, runtimeIdentity); err != nil {
+			if err := global.GenerateGlobalContextFile(runtimeCfg, runtimeConstraints, runtimeSkills, runtimeIdentity); err != nil {
 				genErr = err
 				return
 			}
-
-			// Register MCP, then any optional integration mechanisms the
-			// Harness exposes (hooks, extensions).
-			if err := adapter.RegisterMCP(); err != nil {
+			if err := global.RegisterGlobalMCP(); err != nil {
 				genErr = err
 				return
 			}
-			if h, ok := adapter.(harness.HookInstaller); ok {
-				if err := h.RegisterHooks(); err != nil {
+			if h, ok := adapter.(harness.GlobalHookInstaller); ok {
+				if err := h.RegisterGlobalHooks(); err != nil {
 					genErr = err
 					return
 				}
 			}
-			if e, ok := adapter.(harness.ExtensionInstaller); ok {
-				if err := e.RegisterExtension(); err != nil {
+			if e, ok := adapter.(harness.GlobalExtensionInstaller); ok {
+				if err := e.RegisterGlobalExtension(); err != nil {
 					genErr = err
 					return
 				}
@@ -327,7 +314,7 @@ func runInitWithConfig(cmd *cobra.Command, cwd string, force bool, result Onboar
 
 	if showSpinner {
 		sp := ux.NewSpinner(os.Stderr)
-		sp.Start("Generating runtime context files")
+		sp.Start("Generating agent context files")
 		doGenerate()
 		sp.Stop()
 	} else {
@@ -341,14 +328,7 @@ func runInitWithConfig(cmd *cobra.Command, cwd string, force bool, result Onboar
 	if err := ensureGlobalDaemon(cwd, leoDir, result.Harnesses); err != nil {
 		p.Warnf("watch daemon: %v", err)
 	} else {
-		p.Check("watch daemon installed")
-	}
-
-	// ── Phase 4: Update .gitignore ──────────────────────────────────────────
-	if added, gitErr := ensureGitIgnore(cwd, registry, result.Harnesses); gitErr != nil {
-		p.Warnf(".gitignore: %v", gitErr)
-	} else if len(added) > 0 {
-		p.Checkf(".gitignore updated (%d entries added)", len(added))
+		p.Check("Watch daemon installed")
 	}
 
 	// ── Telemetry: emit smoke events ────────────────────────────────────────
@@ -370,18 +350,9 @@ func runInitWithConfig(cmd *cobra.Command, cwd string, force bool, result Onboar
 
 	// ── Done ────────────────────────────────────────────────────────────────
 	p.Blank()
-	p.Check(".mom/ structure created")
+	p.Check("Memory vault ready")
 	for _, rt := range result.Harnesses {
-		adapter, ok := registry.Get(rt)
-		if !ok {
-			continue
-		}
-		for _, f := range adapter.GeneratedFiles() {
-			absPath := filepath.Join(cwd, f)
-			if _, statErr := os.Stat(absPath); statErr == nil {
-				p.Check(f)
-			}
-		}
+		p.Checkf("%s global integration installed", harnessLabel(rt))
 	}
 	p.Blank()
 	p.Textf("MOM is ready. Run %s to check health.", p.HighlightCmd("mom status"))
@@ -432,7 +403,7 @@ func runReinit(cmd *cobra.Command, cwd, leoDir string, result OnboardingResult, 
 		return fmt.Errorf("saving config: %w", err)
 	}
 
-	// Regenerate runtime context files for all enabled runtimes.
+	// Regenerate global context/tool integration for all enabled runtimes.
 	registry := harness.NewRegistry(cwd)
 	runtimeCfg := buildRuntimeConfig(cfg)
 	runtimeConstraints := buildRuntimeConstraints()
@@ -444,23 +415,24 @@ func runReinit(cmd *cobra.Command, cwd, leoDir string, result OnboardingResult, 
 		if !ok {
 			continue
 		}
-
-		for _, relPath := range adapter.GeneratedFiles() {
-			absPath := filepath.Join(cwd, relPath)
-			harness.BackupIfNeeded(absPath) //nolint:errcheck
+		global, ok := adapter.(harness.GlobalAdapter)
+		if !ok {
+			p.Warnf("%s does not support global install", rt)
+			continue
 		}
-
-		if err := adapter.GenerateContextFile(runtimeCfg, runtimeConstraints, runtimeSkills, runtimeIdentity); err != nil {
+		if err := global.GenerateGlobalContextFile(runtimeCfg, runtimeConstraints, runtimeSkills, runtimeIdentity); err != nil {
 			p.Warnf("generating %s context: %v", rt, err)
 			continue
 		}
-
-		_ = adapter.RegisterMCP()
-		if h, ok := adapter.(harness.HookInstaller); ok {
-			_ = h.RegisterHooks()
+		if err := global.RegisterGlobalMCP(); err != nil {
+			p.Warnf("registering %s tools: %v", rt, err)
+			continue
 		}
-		if e, ok := adapter.(harness.ExtensionInstaller); ok {
-			_ = e.RegisterExtension()
+		if h, ok := adapter.(harness.GlobalHookInstaller); ok {
+			_ = h.RegisterGlobalHooks()
+		}
+		if e, ok := adapter.(harness.GlobalExtensionInstaller); ok {
+			_ = e.RegisterGlobalExtension()
 		}
 	}
 
@@ -471,24 +443,10 @@ func runReinit(cmd *cobra.Command, cwd, leoDir string, result OnboardingResult, 
 		p.Check("watch daemon updated")
 	}
 
-	// Update .gitignore.
-	if added, gitErr := ensureGitIgnore(cwd, registry, cfg.EnabledRuntimes()); gitErr != nil {
-		p.Warnf(".gitignore: %v", gitErr)
-	} else if len(added) > 0 {
-		p.Checkf(".gitignore updated (%d entries added)", len(added))
-	}
-
 	p.Blank()
 	p.Check("configuration updated")
 	for _, rt := range result.Harnesses {
-		if adapter, ok := registry.Get(rt); ok {
-			for _, f := range adapter.GeneratedFiles() {
-				absPath := filepath.Join(cwd, f)
-				if _, statErr := os.Stat(absPath); statErr == nil {
-					p.Check(f)
-				}
-			}
-		}
+		p.Checkf("%s global integration installed", harnessLabel(rt))
 	}
 	return nil
 }
@@ -547,7 +505,6 @@ func propagateInit(cmd *cobra.Command, rootDir string, parentResult OnboardingRe
 		}
 	}
 }
-
 
 // buildRuntimeConfig converts a config.Config to a harness.Config.
 // Autonomy was retired from the persisted config in v0.9.0 (#74);

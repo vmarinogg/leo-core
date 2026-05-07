@@ -642,6 +642,7 @@ func TestUpgradeCmd_PartialMigrationSkipsExisting(t *testing.T) {
 
 func TestInitCmd_NewLayout_NoKBDir(t *testing.T) {
 	dir := t.TempDir()
+	centralDir := initTestCentralVault(t)
 	origDir, _ := os.Getwd()
 	os.Chdir(dir)
 	defer os.Chdir(origDir)
@@ -655,7 +656,10 @@ func TestInitCmd_NewLayout_NoKBDir(t *testing.T) {
 		t.Fatalf("init failed: %v", err)
 	}
 
-	leoDir := filepath.Join(dir, ".mom")
+	leoDir := centralDir
+	if _, err := os.Stat(filepath.Join(dir, ".mom")); err == nil {
+		t.Error("init must not create project-local .mom/ directory")
+	}
 
 	// kb/ must NEVER be created by init.
 	if _, err := os.Stat(filepath.Join(leoDir, "kb")); err == nil {

@@ -181,25 +181,18 @@ func TestWindsurfAdapter_GeneratedFiles(t *testing.T) {
 	}
 }
 
-func TestWindsurfAdapter_GitIgnorePaths(t *testing.T) {
-	a := NewWindsurfAdapter("/tmp/test")
-	paths := a.GitIgnorePaths()
-
-	if len(paths) != 1 || paths[0] != ".windsurf/" {
-		t.Errorf("expected [.windsurf/], got %v", paths)
-	}
-}
-
 func TestWindsurfAdapter_DetectHarness(t *testing.T) {
-	dir := t.TempDir()
-	a := NewWindsurfAdapter(dir)
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("PATH", t.TempDir())
+	a := NewWindsurfAdapter(t.TempDir())
 
 	if a.DetectHarness() {
-		t.Error("expected false when .windsurf/ does not exist")
+		t.Error("expected false when global Windsurf config does not exist")
 	}
 
-	os.MkdirAll(filepath.Join(dir, ".windsurf"), 0755)
+	os.MkdirAll(filepath.Join(home, ".codeium", "windsurf"), 0755)
 	if !a.DetectHarness() {
-		t.Error("expected true when .windsurf/ exists")
+		t.Error("expected true when global Windsurf config exists")
 	}
 }

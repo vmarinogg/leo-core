@@ -55,4 +55,3 @@ func (r *Registry) All() []Adapter {
 	}
 	return all
 }
-

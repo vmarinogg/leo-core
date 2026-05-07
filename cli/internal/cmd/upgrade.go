@@ -378,17 +378,6 @@ func upgradeSingleDir(cmd *cobra.Command, projectRoot string, dryRun bool) error
 		}
 	}
 
-	// ── Phase 4: Update .gitignore ──────────────────────────────────────────
-	if !dryRun {
-		registry := harness.NewRegistry(projectRoot)
-		enabledRTs := cfg.EnabledHarnesses()
-		if added, gitErr := ensureGitIgnore(projectRoot, registry, enabledRTs); gitErr != nil {
-			addAction("⚠", fmt.Sprintf(".gitignore: %v", gitErr))
-		} else if len(added) > 0 {
-			addAction("✔", fmt.Sprintf(".gitignore updated (%d entries added)", len(added)))
-		}
-	}
-
 	// ── Report ──────────────────────────────────────────────────────────────
 	home, _ := os.UserHomeDir()
 	display := projectRoot

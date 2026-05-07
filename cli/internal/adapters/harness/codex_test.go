@@ -16,16 +16,19 @@ func TestCodexAdapter_Name(t *testing.T) {
 }
 
 func TestCodexAdapter_DetectHarness(t *testing.T) {
-	dir := t.TempDir()
-	a := NewCodexAdapter(dir)
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("CODEX_HOME", "")
+	t.Setenv("PATH", t.TempDir())
+	a := NewCodexAdapter(t.TempDir())
 
 	if a.DetectHarness() {
-		t.Error("expected false when AGENTS.md does not exist")
+		t.Error("expected false when global Codex config does not exist")
 	}
 
-	os.WriteFile(filepath.Join(dir, "AGENTS.md"), []byte("# agents"), 0644)
+	os.MkdirAll(filepath.Join(home, ".codex"), 0755)
 	if !a.DetectHarness() {
-		t.Error("expected true when AGENTS.md exists")
+		t.Error("expected true when global .codex/ exists")
 	}
 }
 
@@ -243,20 +246,6 @@ func TestCodexAdapter_GeneratedFiles(t *testing.T) {
 	for i, f := range files {
 		if f != expected[i] {
 			t.Errorf("expected files[%d] = %q, got %q", i, expected[i], f)
-		}
-	}
-}
-
-func TestCodexAdapter_GitIgnorePaths(t *testing.T) {
-	a := NewCodexAdapter("/tmp/test")
-	paths := a.GitIgnorePaths()
-	expected := []string{"AGENTS.md", ".codex/"}
-	if len(paths) != len(expected) {
-		t.Fatalf("expected %d paths, got %d: %v", len(expected), len(paths), paths)
-	}
-	for i, p := range paths {
-		if p != expected[i] {
-			t.Errorf("expected paths[%d] = %q, got %q", i, expected[i], p)
 		}
 	}
 }

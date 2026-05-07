@@ -30,10 +30,13 @@ func TestRegistryGetUnknown(t *testing.T) {
 }
 
 func TestRegistryDetectAll(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("CODEX_HOME", "")
+	t.Setenv("PATH", t.TempDir())
 	dir := t.TempDir()
 
-	// Create .claude/ but not AGENTS.md or windsurf dirs.
-	os.MkdirAll(filepath.Join(dir, ".claude"), 0755)
+	os.MkdirAll(filepath.Join(home, ".claude"), 0755)
 
 	r := NewRegistry(dir)
 	detected := r.DetectAll()
@@ -70,4 +73,3 @@ func TestRegistryAll(t *testing.T) {
 		}
 	}
 }
-

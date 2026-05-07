@@ -67,15 +67,11 @@ func runOnboarding(r io.Reader, w io.Writer, cwd string) (OnboardingResult, erro
 	lang := "en"
 	mode := "concise"
 
-	// Scope installation choice: "cwd" (repo), a detected parent dir, or "custom".
-	// scopeChoice maps to an install directory; scopeLabel tracks the config value.
-	scopeChoice := "cwd" // default: current directory
-	customScopePath := ""
-
-	// Detect common parent dirs to offer as suggestions.
-	home, _ := os.UserHomeDir()
-	parentSuggestions := detectParentDirs(cwd, home)
-	scopeOptions := buildScopeOptions(cwd, parentSuggestions)
+	// Local project files are still created in cwd, while the canonical vault is
+	// global. Scope selection was removed from onboarding to avoid implying that
+	// memory storage is project-local.
+	installDir := cwd
+	scopeLabel := "repo"
 
 	// ── Build the form ──────────────────────────────────────────────────────
 	form := huh.NewForm(
@@ -94,7 +90,7 @@ func runOnboarding(r io.Reader, w io.Writer, cwd string) (OnboardingResult, erro
 				Description(
 					"\nMOM gives your AI coding assistant persistent memory\n"+
 						"and structured knowledge management.\n\n"+
-						"Let's set up your project. This takes about 30 seconds.",
+						"Setting up MOM takes about 30 seconds. Let's start.",
 				),
 		),
 
@@ -124,16 +120,6 @@ func runOnboarding(r io.Reader, w io.Writer, cwd string) (OnboardingResult, erro
 				).
 				Value(&mode),
 		),
-
-		// Group 4: Scope / install location
-		huh.NewGroup(
-			huh.NewSelect[string]().
-				Title("Where should MOM be installed?").
-				Description("Installing in a parent folder lets MOM span all repos beneath it.").
-				Options(scopeOptions...).
-				Value(&scopeChoice),
-		),
-
 	).WithAccessible(accessible).
 		WithInput(r).
 		WithOutput(w).
@@ -143,21 +129,12 @@ func runOnboarding(r io.Reader, w io.Writer, cwd string) (OnboardingResult, erro
 		return OnboardingResult{}, fmt.Errorf("onboarding aborted: %w", err)
 	}
 
-	// Resolve scope choice into an install directory and scope label.
-	installDir, scopeLabel := resolveScopeChoice(scopeChoice, customScopePath, cwd, parentSuggestions)
-
 	// ── Summary + Confirm ───────────────────────────────────────────────────
-	scopeDisplay := installDir
-	if scopeDisplay == cwd {
-		scopeDisplay = "current directory (repo)"
-	}
 	summaryText := fmt.Sprintf(
-		"  Harnesses: %s\n  Language:  %s\n  Mode:      %s\n  Scope:     %s (%s)",
+		"  Harnesses: %s\n  Language:  %s\n  Mode:      %s",
 		harnessesLabel(selectedHarnesses),
 		languageLabel(lang),
 		modeLabel(mode),
-		scopeLabel,
-		scopeDisplay,
 	)
 
 	confirmed := true
