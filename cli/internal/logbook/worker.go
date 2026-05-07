@@ -161,7 +161,7 @@ func extractToolCategories(v any) []string {
 }
 
 func extractToolNames(v any) []string {
-	return extractToolStringField(v, "safe_name")
+	return extractAlignedToolNames(v)
 }
 
 func extractToolStringField(v any, field string) []string {
@@ -186,6 +186,43 @@ func extractToolStringField(v any, field string) []string {
 			}
 		}
 		return out
+	}
+	return nil
+}
+
+func extractAlignedToolNames(v any) []string {
+	switch tcs := v.(type) {
+	case []map[string]any:
+		out := make([]string, 0, len(tcs))
+		hasAny := false
+		for _, tc := range tcs {
+			s, _ := tc["safe_name"].(string)
+			if s != "" {
+				hasAny = true
+			}
+			out = append(out, s)
+		}
+		if hasAny {
+			return out
+		}
+	case []any:
+		out := make([]string, 0, len(tcs))
+		hasAny := false
+		for _, item := range tcs {
+			tc, ok := item.(map[string]any)
+			if !ok {
+				out = append(out, "")
+				continue
+			}
+			s, _ := tc["safe_name"].(string)
+			if s != "" {
+				hasAny = true
+			}
+			out = append(out, s)
+		}
+		if hasAny {
+			return out
+		}
 	}
 	return nil
 }
