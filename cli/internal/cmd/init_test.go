@@ -55,19 +55,20 @@ func TestInitCmd_CreatesLeoStructure(t *testing.T) {
 		"schema.json",
 		"logs",
 		"central.db",
-		"constraints/anti-hallucination.json",
-		"skills/session-wrap-up.json",
 	}
 	globalExpected := []string{
 		filepath.Join(home, ".claude", "CLAUDE.md"),
 		filepath.Join(home, ".claude.json"),
 	}
-	// Retired files must NOT exist.
+	// Retired and formerly generated central docs must NOT exist.
 	retired := []string{
 		".mom/profiles/general-manager.yaml",
 		".mom/profiles/backend-engineer.yaml",
 		".mom/constraints/delegation-mandatory.json",
+		".mom/constraints/anti-hallucination.json",
+		".mom/constraints/escalation-triggers.json",
 		".mom/skills/task-intake.json",
+		".mom/skills/session-wrap-up.json",
 		".mom/kb",
 	}
 	for _, path := range retired {
@@ -509,7 +510,7 @@ func TestInitCmd_DoesNotCreateProjectLocalMom(t *testing.T) {
 	}
 }
 
-func TestInitCmd_CreatesConstraintsInCentralVault(t *testing.T) {
+func TestInitCmd_DoesNotCreateGeneratedCentralDocs(t *testing.T) {
 	dir := t.TempDir()
 	centralDir := initTestCentralVault(t)
 	origDir, _ := os.Getwd()
@@ -529,8 +530,8 @@ func TestInitCmd_CreatesConstraintsInCentralVault(t *testing.T) {
 	if err != nil {
 		t.Fatalf("constraints dir should exist: %v", err)
 	}
-	if len(entries) == 0 {
-		t.Error("central vault should have constraint files")
+	if len(entries) != 0 {
+		t.Errorf("central vault should not create generated constraint files, got %d", len(entries))
 	}
 
 	skillsDir := filepath.Join(centralDir, "skills")
@@ -538,8 +539,8 @@ func TestInitCmd_CreatesConstraintsInCentralVault(t *testing.T) {
 	if err != nil {
 		t.Fatalf("skills dir should exist: %v", err)
 	}
-	if len(skillEntries) == 0 {
-		t.Error("central vault should have skill files")
+	if len(skillEntries) != 0 {
+		t.Errorf("central vault should not create generated skill files, got %d", len(skillEntries))
 	}
 	if _, err := os.Stat(filepath.Join(dir, ".mom")); err == nil {
 		t.Error("project-local .mom/ should not be created")
