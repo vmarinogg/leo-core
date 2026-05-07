@@ -112,6 +112,7 @@ type sessionBuild struct {
 	ended           time.Time
 	interactions    int
 	tools           map[string]int
+	toolDetails     map[string]map[string]int
 	totalTokens     int
 	costUSD         float64
 	provider        string
@@ -133,7 +134,7 @@ func (s *Server) loadSessionData() (map[string]sessionData, int, error) {
 	get := func(id string) *sessionBuild {
 		b := builds[id]
 		if b == nil {
-			b = &sessionBuild{id: id, tools: map[string]int{}}
+			b = &sessionBuild{id: id, tools: map[string]int{}, toolDetails: map[string]map[string]int{}}
 			builds[id] = b
 		}
 		return b
@@ -170,7 +171,7 @@ func (s *Server) loadSessionData() (map[string]sessionData, int, error) {
 		if memories == nil {
 			memories = []MemoryItem{}
 		}
-		toolCalls, toolsTotal := toolGroups(b.tools)
+		toolCalls, toolsTotal := toolGroups(b.tools, b.toolDetails)
 		curated := 0
 		for _, m := range memories {
 			if m.PromotionState == "curated" || m.Landmark {
@@ -242,6 +243,7 @@ func applyTurnObserved(b *sessionBuild, payload map[string]any) {
 	if !b.hasTurnObserved {
 		b.interactions = 0
 		b.tools = map[string]int{}
+		b.toolDetails = map[string]map[string]int{}
 		b.totalTokens = 0
 		b.costUSD = 0
 	}
@@ -255,9 +257,18 @@ func applyTurnObserved(b *sessionBuild, payload map[string]any) {
 	if provider, _ := payload["provider"].(string); provider != "" {
 		b.provider = provider
 	}
-	for _, cat := range stringSlice(payload["tool_categories"]) {
-		if cat != "" {
-			b.tools[cat]++
+	cats := stringSlice(payload["tool_categories"])
+	names := stringSlice(payload["tool_names"])
+	for i, cat := range cats {
+		if cat == "" {
+			continue
+		}
+		b.tools[cat]++
+		if i < len(names) && names[i] != "" {
+			if b.toolDetails[cat] == nil {
+				b.toolDetails[cat] = map[string]int{}
+			}
+			b.toolDetails[cat][names[i]]++
 		}
 	}
 	if usage, ok := payload["usage"].(map[string]any); ok {
@@ -347,14 +358,18 @@ func floatValue(v any) float64 {
 	}
 }
 
-func toolGroups(tools map[string]int) (map[string]ToolGroup, int) {
+func toolGroups(tools map[string]int, details map[string]map[string]int) (map[string]ToolGroup, int) {
 	out := map[string]ToolGroup{}
 	total := 0
 	for cat, n := range tools {
 		if n <= 0 {
 			continue
 		}
-		out[cat] = ToolGroup{Total: n, Detail: map[string]int{}}
+		detail := details[cat]
+		if detail == nil {
+			detail = map[string]int{}
+		}
+		out[cat] = ToolGroup{Total: n, Detail: detail}
 		total += n
 	}
 	return out, total

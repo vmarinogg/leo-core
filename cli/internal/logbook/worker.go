@@ -74,6 +74,7 @@ func (w *Worker) Subscribe(bus *herald.Bus, eventType herald.EventType) func() {
 //
 //	role             ("user" | "assistant")
 //	tool_categories  ([]string, derived from tool_calls[].category)
+//	tool_names       ([]string, privacy-safe tool names only, no args)
 //	usage            (token counts only, no text)
 //	model, provider, harness
 //
@@ -135,6 +136,9 @@ func projectTurnObserved(payload map[string]any) (map[string]any, time.Time) {
 	if cats := extractToolCategories(payload["tool_calls"]); len(cats) > 0 {
 		out["tool_categories"] = cats
 	}
+	if names := extractToolNames(payload["tool_calls"]); len(names) > 0 {
+		out["tool_names"] = names
+	}
 
 	// Usage map: keep numeric fields only.
 	if usage, ok := payload["usage"].(map[string]any); ok && usage != nil {
@@ -153,12 +157,20 @@ func projectTurnObserved(payload map[string]any) (map[string]any, time.Time) {
 }
 
 func extractToolCategories(v any) []string {
+	return extractToolStringField(v, "category")
+}
+
+func extractToolNames(v any) []string {
+	return extractToolStringField(v, "safe_name")
+}
+
+func extractToolStringField(v any, field string) []string {
 	switch tcs := v.(type) {
 	case []map[string]any:
 		out := make([]string, 0, len(tcs))
 		for _, tc := range tcs {
-			if cat, _ := tc["category"].(string); cat != "" {
-				out = append(out, cat)
+			if s, _ := tc[field].(string); s != "" {
+				out = append(out, s)
 			}
 		}
 		return out
@@ -169,8 +181,8 @@ func extractToolCategories(v any) []string {
 			if !ok {
 				continue
 			}
-			if cat, _ := tc["category"].(string); cat != "" {
-				out = append(out, cat)
+			if s, _ := tc[field].(string); s != "" {
+				out = append(out, s)
 			}
 		}
 		return out

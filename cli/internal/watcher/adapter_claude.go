@@ -191,10 +191,12 @@ func walkClaudeContent(content any) (string, []ToolCall) {
 				continue
 			}
 			input, _ := m["input"].(map[string]any)
+			category, safeName := CategorizeObservedToolCall(name, input)
 			tcs = append(tcs, ToolCall{
 				Name:     name,
+				SafeName: safeName,
 				Input:    input,
-				Category: CategorizeToolCall(name),
+				Category: category,
 			})
 		}
 	}

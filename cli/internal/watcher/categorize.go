@@ -54,8 +54,49 @@ func isMemoryTool(name string) bool {
 		name == "mom_get" || name == "mom_landmarks" || name == "mom_status"
 }
 
+// CategorizeObservedToolCall returns the Lens category and privacy-safe name
+// for one observed tool call. It may inspect raw shell command input while the
+// event is still on the in-process bus, but it returns only coarse metadata.
+func CategorizeObservedToolCall(toolName string, input map[string]any) (category, safeName string) {
+	name := NormalizeToolName(toolName)
+	if isShellTool(name) {
+		if momName := safeMomCLIName(input); momName != "" {
+			return "mom_cli", momName
+		}
+	}
+	return CategorizeToolCall(name), name
+}
+
 func isMomCLI(name string) bool {
 	return name == "mom_draft" || name == "mom_log"
+}
+
+func isShellTool(name string) bool {
+	return name == "Bash" || name == "bash" || name == "Shell" || name == "shell"
+}
+
+func safeMomCLIName(input map[string]any) string {
+	if input == nil {
+		return ""
+	}
+	command, _ := input["command"].(string)
+	fields := strings.Fields(strings.TrimSpace(command))
+	for len(fields) > 0 && strings.Contains(fields[0], "=") && !strings.HasPrefix(fields[0], "-") {
+		fields = fields[1:]
+	}
+	if len(fields) == 0 || fields[0] != "mom" {
+		return ""
+	}
+	if len(fields) == 1 || strings.HasPrefix(fields[1], "-") {
+		return "mom"
+	}
+	sub := fields[1]
+	for _, r := range sub {
+		if (r < 'a' || r > 'z') && r != '-' {
+			return "mom"
+		}
+	}
+	return "mom " + sub
 }
 
 func isCodebaseRead(name string) bool {

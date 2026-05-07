@@ -15,8 +15,8 @@ import (
 // TestSubscribeTurnObserved_PersistsMetadataProjection locks the
 // privacy contract: when a turn.observed event arrives with raw text
 // and tool inputs in the payload, the persisted op_events row contains
-// ONLY role, tool_categories, usage, model, provider. No text. No
-// tool_call inputs. No tool_call names.
+// ONLY role, tool_categories, privacy-safe tool_names, usage, model,
+// provider. No text. No tool_call inputs.
 //
 // This is the most important test in PR 1 — it's the lock that
 // prevents Drafter's redaction promise from being undone by the
@@ -47,14 +47,16 @@ func TestSubscribeTurnObserved_PersistsMetadataProjection(t *testing.T) {
 			"text":       "I'll deploy now using AKIA1234567890ABCDEF",
 			"tool_calls": []map[string]any{
 				{
-					"name":     "Read",
-					"category": "codebase_read",
-					"input":    map[string]any{"file_path": "/Users/x/secrets.env"},
+					"name":      "Read",
+					"safe_name": "Read",
+					"category":  "codebase_read",
+					"input":     map[string]any{"file_path": "/Users/x/secrets.env"},
 				},
 				{
-					"name":     "Bash",
-					"category": "system",
-					"input":    map[string]any{"command": "echo AKIA1234567890ABCDEF"},
+					"name":      "Bash",
+					"safe_name": "mom recall",
+					"category":  "mom_cli",
+					"input":     map[string]any{"command": "mom recall AKIA1234567890ABCDEF"},
 				},
 			},
 			"usage": map[string]any{
@@ -112,11 +114,23 @@ func TestSubscribeTurnObserved_PersistsMetadataProjection(t *testing.T) {
 	if len(cats) != 2 {
 		t.Errorf("tool_categories len = %d, want 2 (one per tool_call)", len(cats))
 	}
-	for i, want := range []string{"codebase_read", "system"} {
+	for i, want := range []string{"codebase_read", "mom_cli"} {
 		if i < len(cats) {
 			got, _ := cats[i].(string)
 			if got != want {
 				t.Errorf("tool_categories[%d] = %v, want %q", i, cats[i], want)
+			}
+		}
+	}
+	names, _ := row.Payload["tool_names"].([]any)
+	if len(names) != 2 {
+		t.Errorf("tool_names len = %d, want 2 (one per tool_call)", len(names))
+	}
+	for i, want := range []string{"Read", "mom recall"} {
+		if i < len(names) {
+			got, _ := names[i].(string)
+			if got != want {
+				t.Errorf("tool_names[%d] = %v, want %q", i, names[i], want)
 			}
 		}
 	}
@@ -138,7 +152,7 @@ func TestSubscribeTurnObserved_PersistsMetadataProjection(t *testing.T) {
 		t.Errorf("payload leaked the Bash command:\n%s", dump)
 	}
 
-	// tool_calls and tool_call NAMES should NOT survive the projection.
+	// tool_calls should NOT survive the projection; only safe tool_names do.
 	if _, present := row.Payload["tool_calls"]; present {
 		t.Error("tool_calls should not appear in the projection")
 	}
