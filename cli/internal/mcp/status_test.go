@@ -38,7 +38,7 @@ communication:
 }
 
 // callMomStatus sends the mom_status tool call and returns the parsed JSON payload.
-func callMomStatus(t *testing.T, leoDir string) map[string]any {
+func callMomStatusText(t *testing.T, leoDir string) string {
 	t.Helper()
 	inW, outR, _ := runServer(t, leoDir)
 	defer inW.Close()
@@ -71,6 +71,12 @@ func callMomStatus(t *testing.T, leoDir string) map[string]any {
 	if text == "" {
 		t.Fatal("text content is empty")
 	}
+	return text
+}
+
+func callMomStatus(t *testing.T, leoDir string) map[string]any {
+	t.Helper()
+	text := callMomStatusText(t, leoDir)
 	var payload map[string]any
 	if err := json.Unmarshal([]byte(text), &payload); err != nil {
 		t.Fatalf("parsing mom_status text as JSON: %v\ntext: %s", err, text)
@@ -80,7 +86,14 @@ func callMomStatus(t *testing.T, leoDir string) map[string]any {
 
 func TestMomStatusCompactShape(t *testing.T) {
 	leoDir := newStatusTestDir(t)
-	payload := callMomStatus(t, leoDir)
+	text := callMomStatusText(t, leoDir)
+	if strings.Contains(text, "\n  ") {
+		t.Fatalf("mom_status should return compact JSON, got: %s", text)
+	}
+	var payload map[string]any
+	if err := json.Unmarshal([]byte(text), &payload); err != nil {
+		t.Fatalf("parsing mom_status text as JSON: %v\ntext: %s", err, text)
+	}
 
 	for _, key := range []string{"identity", "health", "routing", "session", "vault_state", "skills"} {
 		if _, ok := payload[key]; !ok {
@@ -161,9 +174,9 @@ func TestMomStatusCompactShape(t *testing.T) {
 		}
 	}
 
-	text, _ := json.Marshal(payload)
+	payloadText, _ := json.Marshal(payload)
 	legacyWriteTool := "mom" + "_" + "record"
-	if strings.Contains(string(text), legacyWriteTool) {
+	if strings.Contains(string(payloadText), legacyWriteTool) {
 		t.Fatalf("mom_status should not mention %s", legacyWriteTool)
 	}
 }

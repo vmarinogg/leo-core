@@ -161,7 +161,7 @@ func (s *Server) toolMomGet(args map[string]any) (toolCallResult, error) {
 	if err != nil {
 		return toolCallResult{}, fmt.Errorf("mom_get: %w", err)
 	}
-	text, _ := json.MarshalIndent(mem, "", "  ")
+	text, _ := json.Marshal(mem)
 	return toolCallResult{Content: []toolContent{{Type: "text", Text: string(text)}}}, nil
 }
 
@@ -178,7 +178,7 @@ func (s *Server) toolMomLandmarks(args map[string]any) (toolCallResult, error) {
 	if len(items) == 0 {
 		return toolCallResult{Content: []toolContent{{Type: "text", Text: "No landmarks found."}}}, nil
 	}
-	text, _ := json.MarshalIndent(items, "", "  ")
+	text, _ := json.Marshal(items)
 	return toolCallResult{Content: []toolContent{{Type: "text", Text: string(text)}}}, nil
 }
 
@@ -203,8 +203,50 @@ func (s *Server) toolMomRecall(args map[string]any) (toolCallResult, error) {
 	if len(results) == 0 {
 		return toolCallResult{Content: []toolContent{{Type: "text", Text: "No memories matched."}}}, nil
 	}
-	text, _ := json.MarshalIndent(results, "", "  ")
+	text, _ := json.Marshal(compactRecallResults(results))
 	return toolCallResult{Content: []toolContent{{Type: "text", Text: string(text)}}}, nil
+}
+
+type recallIndexItem struct {
+	ID             string  `json:"id"`
+	Type           string  `json:"type"`
+	Summary        string  `json:"summary,omitempty"`
+	Snippet        string  `json:"snippet,omitempty"`
+	SessionID      string  `json:"session_id,omitempty"`
+	PromotionState string  `json:"promotion_state"`
+	Score          float64 `json:"score"`
+	Tier           string  `json:"tier"`
+}
+
+func compactRecallResults(results []finder.Result) []recallIndexItem {
+	items := make([]recallIndexItem, 0, len(results))
+	for _, r := range results {
+		items = append(items, recallIndexItem{
+			ID:             r.ID,
+			Type:           r.Type,
+			Summary:        r.Summary,
+			Snippet:        contentSnippet(r.Content, 160),
+			SessionID:      r.SessionID,
+			PromotionState: r.PromotionState,
+			Score:          r.Score,
+			Tier:           r.Tier,
+		})
+	}
+	return items
+}
+
+func contentSnippet(content string, limit int) string {
+	var raw map[string]any
+	if err := json.Unmarshal([]byte(content), &raw); err != nil {
+		return ""
+	}
+	text, _ := raw["text"].(string)
+	text = strings.Join(strings.Fields(text), " ")
+	runes := []rune(text)
+	if len(runes) <= limit {
+		return text
+	}
+	return string(runes[:limit]) + "…"
 }
 
 // --- Argument helpers ---

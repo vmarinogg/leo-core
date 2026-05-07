@@ -227,6 +227,15 @@ func upgradeSingleDir(cmd *cobra.Command, projectRoot string, dryRun bool) error
 			addAction(action.symbol, action.desc)
 		}
 
+		cleanedHooks, err := removeDeadHookCommands(projectRoot, dryRun)
+		if err != nil {
+			phase1Err = err
+			return
+		}
+		for _, action := range cleanedHooks {
+			addAction(action.symbol, action.desc)
+		}
+
 		if showSpinner {
 			time.Sleep(500 * time.Millisecond)
 		}
@@ -509,6 +518,118 @@ func removeKnownGeneratedCentralDocs(leoDir string, dryRun bool) ([]upgradeActio
 		actions = append(actions, upgradeAction{"✔", fmt.Sprintf("generated %s %s removed", doc.Kind, doc.Name)})
 	}
 	return actions, nil
+}
+
+func removeDeadHookCommands(projectRoot string, dryRun bool) ([]upgradeAction, error) {
+	paths := []string{
+		filepath.Join(projectRoot, ".claude", "settings.json"),
+		filepath.Join(projectRoot, ".codex", "hooks.json"),
+		filepath.Join(projectRoot, ".windsurf", "hooks.json"),
+	}
+	if home, err := os.UserHomeDir(); err == nil {
+		paths = append(paths,
+			filepath.Join(home, ".claude", "settings.json"),
+			filepath.Join(home, ".codex", "hooks.json"),
+			filepath.Join(home, ".codeium", "windsurf", "hooks.json"),
+		)
+	}
+
+	seen := map[string]bool{}
+	var actions []upgradeAction
+	for _, path := range paths {
+		clean := filepath.Clean(path)
+		if seen[clean] {
+			continue
+		}
+		seen[clean] = true
+		changed, err := removeDeadHookCommandsFromFile(clean, dryRun)
+		if err != nil {
+			actions = append(actions, upgradeAction{"⚠", fmt.Sprintf("dead hook cleanup skipped for %s: %v", clean, err)})
+			continue
+		}
+		if changed {
+			actions = append(actions, upgradeAction{"✔", fmt.Sprintf("dead hook entries removed from %s", clean)})
+		}
+	}
+	return actions, nil
+}
+
+func removeDeadHookCommandsFromFile(path string, dryRun bool) (bool, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return false, nil
+		}
+		return false, fmt.Errorf("reading hook config %s: %w", path, err)
+	}
+	var root any
+	if err := json.Unmarshal(data, &root); err != nil {
+		return false, fmt.Errorf("parsing hook config %s: %w", path, err)
+	}
+	cleaned, keep, changed := stripDeadHookEntries(root)
+	if !keep {
+		cleaned = map[string]any{}
+	}
+	if !changed {
+		return false, nil
+	}
+	if dryRun {
+		return true, nil
+	}
+	out, err := json.MarshalIndent(cleaned, "", "  ")
+	if err != nil {
+		return false, fmt.Errorf("marshaling hook config %s: %w", path, err)
+	}
+	out = append(out, '\n')
+	if err := os.WriteFile(path, out, 0644); err != nil {
+		return false, fmt.Errorf("writing hook config %s: %w", path, err)
+	}
+	return true, nil
+}
+
+func stripDeadHookEntries(v any) (any, bool, bool) {
+	switch x := v.(type) {
+	case map[string]any:
+		if command, ok := x["command"].(string); ok && isDeadHookCommand(command) {
+			return nil, false, true
+		}
+		changed := false
+		for k, child := range x {
+			cleaned, keep, childChanged := stripDeadHookEntries(child)
+			if childChanged {
+				changed = true
+			}
+			if keep {
+				x[k] = cleaned
+			} else {
+				delete(x, k)
+			}
+		}
+		return x, true, changed
+	case []any:
+		out := make([]any, 0, len(x))
+		changed := false
+		for _, child := range x {
+			cleaned, keep, childChanged := stripDeadHookEntries(child)
+			if childChanged {
+				changed = true
+			}
+			if keep {
+				out = append(out, cleaned)
+			}
+		}
+		if len(out) != len(x) {
+			changed = true
+		}
+		return out, true, changed
+	default:
+		return v, true, false
+	}
+}
+
+func isDeadHookCommand(command string) bool {
+	fields := strings.Fields(command)
+	return len(fields) >= 2 && fields[0] == "mom" && (fields[1] == "draft" || fields[1] == "record")
 }
 
 // migrateKBLayout detects a legacy .mom/kb/ layout and promotes each subdirectory

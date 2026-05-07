@@ -945,6 +945,58 @@ func TestUpgradeCmd_InstallsSkillsForConfiguredHarnesses(t *testing.T) {
 	}
 }
 
+func TestUpgradeCmd_RemovesDeadHookCommands(t *testing.T) {
+	resetUpgradeFlags(t)
+	dir := setupLegacyProject(t)
+
+	claudeSettings := filepath.Join(dir, ".claude", "settings.json")
+	codexHooks := filepath.Join(dir, ".codex", "hooks.json")
+	windsurfHooks := filepath.Join(dir, ".windsurf", "hooks.json")
+	for _, p := range []string{claudeSettings, codexHooks, windsurfHooks} {
+		if err := os.MkdirAll(filepath.Dir(p), 0755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.WriteFile(claudeSettings, []byte(`{"hooks":{"Stop":[{"hooks":[{"type":"command","command":"mom draft"},{"type":"command","command":"mom watch --sweep"}]}],"SessionEnd":[{"hooks":[{"type":"command","command":"mom record"}]}]}}`), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(codexHooks, []byte(`{"hooks":{"Stop":[{"hooks":[{"type":"command","command":"mom record --session old"},{"type":"command","command":"mom watch --sweep"}]}]}}`), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(windsurfHooks, []byte(`{"hooks":{"post_cascade_response":[{"command":"mom draft"},{"command":"mom watch --sweep"}]}}`), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	origDir, _ := os.Getwd()
+	os.Chdir(dir)
+	defer os.Chdir(origDir)
+
+	buf := new(bytes.Buffer)
+	rootCmd.SetOut(buf)
+	rootCmd.SetErr(buf)
+	rootCmd.SetArgs([]string{"upgrade"})
+
+	if err := rootCmd.Execute(); err != nil {
+		t.Fatalf("upgrade failed: %v\noutput:\n%s", err, buf.String())
+	}
+	for _, path := range []string{claudeSettings, codexHooks, windsurfHooks} {
+		data, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatalf("reading %s: %v", path, err)
+		}
+		text := string(data)
+		if strings.Contains(text, "mom draft") || strings.Contains(text, "mom record") {
+			t.Fatalf("dead hook command survived in %s:\n%s", path, text)
+		}
+		if !strings.Contains(text, "mom watch --sweep") {
+			t.Fatalf("active watch hook was removed from %s:\n%s", path, text)
+		}
+	}
+	if !strings.Contains(buf.String(), "dead hook entries removed") {
+		t.Fatalf("upgrade output should mention dead hook cleanup:\n%s", buf.String())
+	}
+}
+
 func TestUpgradeCmd_DryRunPrintsPlannedSkillsInstallCommands(t *testing.T) {
 	resetUpgradeFlags(t)
 	dir := setupLegacyProject(t)
