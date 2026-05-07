@@ -5,8 +5,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/momhq/mom/cli/internal/adapters/harness"
@@ -20,6 +22,10 @@ import (
 //go:embed schema.json
 var embeddedSchema embed.FS
 
+var runExternalCommand = func(name string, args ...string) ([]byte, error) {
+	return exec.Command(name, args...).CombinedOutput()
+}
+
 var initCmd = &cobra.Command{
 	Use:   "init",
 	Short: "Install MOM's global vault and agent integrations",
@@ -27,7 +33,7 @@ var initCmd = &cobra.Command{
 }
 
 func init() {
-	initCmd.Flags().StringSlice("runtimes", nil, "AI runtimes to configure (claude, codex, windsurf, pi)")
+	initCmd.Flags().String("harnesses", "", "AI harnesses to configure as a comma list (claude,codex,windsurf,pi,all)")
 	initCmd.Flags().Bool("force", false, "Overwrite existing global MOM configuration")
 	initCmd.Flags().BoolP("no-interactive", "y", false, "Skip the interactive wizard and use defaults/flags")
 }
@@ -43,8 +49,8 @@ func runInit(cmd *cobra.Command, args []string) error {
 
 	// Run the interactive onboarding wizard unless:
 	//   - --no-interactive / -y was passed, OR
-	//   - --runtimes was explicitly provided by the user (direct/scripted mode).
-	if !noInteractive && !cmd.Flags().Changed("runtimes") {
+	//   - --harnesses was explicitly provided by the user (direct/scripted mode).
+	if !noInteractive && !cmd.Flags().Changed("harnesses") {
 		result, err := runOnboarding(cmd.InOrStdin(), cmd.OutOrStdout(), cwd)
 		if err != nil {
 			return err
@@ -71,13 +77,12 @@ func runInit(cmd *cobra.Command, args []string) error {
 	// active project for watcher metadata.
 	installDir := cwd
 
-	harnesses, _ := cmd.Flags().GetStringSlice("harnesses")
-	if len(harnesses) == 0 {
-		harnesses, _ = cmd.Flags().GetStringSlice("runtimes")
-	}
+	harnessesFlag, _ := cmd.Flags().GetString("harnesses")
+	harnesses := parseHarnessList(harnessesFlag)
 	if len(harnesses) == 0 {
 		harnesses = []string{"claude"}
 	}
+	harnesses = resolveInitHarnesses(cwd, harnesses)
 
 	defaults := config.Default()
 	return runInitWithConfig(cmd, installDir, force, OnboardingResult{
@@ -87,6 +92,31 @@ func runInit(cmd *cobra.Command, args []string) error {
 		InstallDir: installDir,
 		ScopeLabel: "repo",
 	})
+}
+
+func parseHarnessList(raw string) []string {
+	parts := strings.Split(raw, ",")
+	out := make([]string, 0, len(parts))
+	for _, part := range parts {
+		part = strings.TrimSpace(part)
+		if part != "" {
+			out = append(out, part)
+		}
+	}
+	return out
+}
+
+func resolveInitHarnesses(cwd string, requested []string) []string {
+	if len(requested) != 1 || strings.TrimSpace(requested[0]) != "all" {
+		return requested
+	}
+	registry := harness.NewRegistry(cwd)
+	detected := registry.DetectAll()
+	out := make([]string, 0, len(detected))
+	for _, adapter := range detected {
+		out = append(out, adapter.Name())
+	}
+	return out
 }
 
 // runInitWithConfig performs central vault setup and global harness integration
@@ -254,13 +284,13 @@ func runInitWithConfig(cmd *cobra.Command, cwd string, force bool, result Onboar
 		return kbErr
 	}
 
-	// Re-load config for runtime generation.
+	// Re-load config for harness generation.
 	cfg, err := config.Load(leoDir)
 	if err != nil {
 		return fmt.Errorf("loading config after write: %w", err)
 	}
 
-	// ── Phase 3: Generate runtime context files ────────────────────────────
+	// ── Phase 3: Generate harness context files ────────────────────────────
 	var genErr error
 	doGenerate := func() {
 		runtimeCfg := buildRuntimeConfig(cfg)
@@ -270,7 +300,7 @@ func runInitWithConfig(cmd *cobra.Command, cwd string, force bool, result Onboar
 		runtimeSkills := buildRuntimeSkills()
 		runtimeIdentity := buildRuntimeIdentity()
 
-		// Install global context/tool integration for all selected runtimes.
+		// Install global context/tool integration for all selected harnesses.
 		for _, rt := range result.Harnesses {
 			adapter, ok := registry.Get(rt)
 			if !ok {
@@ -299,7 +329,10 @@ func runInitWithConfig(cmd *cobra.Command, cwd string, force bool, result Onboar
 		return genErr
 	}
 
-	// ── Phase 3.5: Register with global watch daemon ────────────────────────
+	// ── Phase 3.5: Install global skills ────────────────────────────────────
+	installGlobalSkills(p, result.Harnesses)
+
+	// ── Phase 4: Register with global watch daemon ──────────────────────────
 	if err := ensureGlobalDaemon(cwd, leoDir, result.Harnesses); err != nil {
 		p.Warnf("watch daemon: %v", err)
 	} else {
@@ -330,7 +363,7 @@ func runInitWithConfig(cmd *cobra.Command, cwd string, force bool, result Onboar
 		p.Checkf("%s global integration installed", harnessLabel(rt))
 	}
 	p.Blank()
-	p.Textf("MOM is ready. Run %s to check health.", p.HighlightCmd("mom status"))
+	p.Textf("MOM is ready. Try /mom-status or run %s.", p.HighlightCmd("mom status"))
 	return nil
 }
 
@@ -394,6 +427,8 @@ func runReinit(cmd *cobra.Command, cwd, leoDir string, result OnboardingResult, 
 		}
 		installed = append(installed, rt)
 	}
+
+	installGlobalSkills(p, cfg.EnabledHarnesses())
 
 	// Register with global watch daemon (updated harnesses).
 	if err := ensureGlobalDaemon(cwd, leoDir, cfg.EnabledHarnesses()); err != nil {
@@ -487,6 +522,46 @@ func buildRuntimeIdentity() *harness.Identity {
 		What:        identityData.What,
 		Philosophy:  identityData.Philosophy,
 		Constraints: identityData.Constraints,
+	}
+}
+
+func installGlobalSkills(p *ux.Printer, harnesses []string) {
+	for _, h := range harnesses {
+		agent, ok := skillsAgentForHarness(h)
+		if !ok {
+			p.Warnf("skills: unsupported harness %s", h)
+			continue
+		}
+		args, command := skillsInstallCommand(agent)
+		if output, err := runExternalCommand("npx", args...); err != nil {
+			p.Warnf("skills install %s → %s failed: %v", h, agent, err)
+			if len(output) > 0 {
+				p.Muted(strings.TrimSpace(string(output)))
+			}
+			p.Muted(fmt.Sprintf("Retry: mom init --force, or run: %s", command))
+			continue
+		}
+		p.Checkf("skills installed for %s → %s", h, agent)
+	}
+}
+
+func skillsInstallCommand(agent string) ([]string, string) {
+	args := []string{"skills", "add", "momhq/mom", "-g", "-s", "*", "-a", agent, "-y"}
+	return args, fmt.Sprintf("npx skills add momhq/mom -g -s '*' -a %s -y", agent)
+}
+
+func skillsAgentForHarness(h string) (string, bool) {
+	switch h {
+	case "claude":
+		return "claude-code", true
+	case "codex":
+		return "codex", true
+	case "windsurf":
+		return "windsurf", true
+	case "pi":
+		return "pi", true
+	default:
+		return "", false
 	}
 }
 

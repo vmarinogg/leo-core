@@ -15,17 +15,15 @@ import (
 
 func resetInitFlags() {
 	f := initCmd.Flags()
-	// StringSlice.Set appends when changed=true, so clear Changed first.
-	if rt := f.Lookup("runtimes"); rt != nil {
-		rt.Changed = false
-		rt.Value.Set("")
-		rt.Changed = false
+	if h := f.Lookup("harnesses"); h != nil {
+		h.Value.Set("")
+		h.Changed = false
 	}
 	f.Set("force", "false")
 	f.Set("no-interactive", "false")
 }
 
-func initProject(t *testing.T, dir string, runtimes []string) string {
+func initProject(t *testing.T, dir string, harnesses []string) string {
 	t.Helper()
 	origDir, _ := os.Getwd()
 	os.Chdir(dir)
@@ -33,11 +31,14 @@ func initProject(t *testing.T, dir string, runtimes []string) string {
 
 	// Reset flags BEFORE execute to avoid cross-test contamination.
 	resetInitFlags()
+	oldRunner := runExternalCommand
+	runExternalCommand = func(string, ...string) ([]byte, error) { return []byte("ok"), nil }
+	t.Cleanup(func() { runExternalCommand = oldRunner })
 
 	buf := new(bytes.Buffer)
 	rootCmd.SetOut(buf)
 	rootCmd.SetErr(buf)
-	rootCmd.SetArgs([]string{"init", "--runtimes", strings.Join(runtimes, ",")})
+	rootCmd.SetArgs([]string{"init", "--harnesses", strings.Join(harnesses, ",")})
 	t.Cleanup(resetInitFlags)
 
 	if err := rootCmd.Execute(); err != nil {
@@ -123,7 +124,7 @@ func assertMCPEntry(t *testing.T, mcpPath string) {
 	}
 }
 
-func setupMinimalMom(t *testing.T, dir string, runtimes []string) {
+func setupMinimalMom(t *testing.T, dir string, harnesses []string) {
 	t.Helper()
 	momDir := filepath.Join(dir, ".mom")
 	for _, d := range []string{"memory", "constraints", "skills", "logs", "cache", "raw"} {
@@ -132,7 +133,7 @@ func setupMinimalMom(t *testing.T, dir string, runtimes []string) {
 
 	cfg := config.Default()
 	cfg.Harnesses = make(map[string]config.HarnessConfig)
-	for _, rt := range runtimes {
+	for _, rt := range harnesses {
 		cfg.Harnesses[rt] = config.HarnessConfig{Enabled: true}
 	}
 	cfg.Communication.Mode = "efficient"
@@ -145,15 +146,15 @@ func setupMinimalMom(t *testing.T, dir string, runtimes []string) {
 	os.WriteFile(filepath.Join(momDir, "schema.json"), []byte(`{"old": true}`), 0644)
 }
 
-// ── Test 1: Init with all runtimes ──────────────────────────────────────────
+// ── Test 1: Init with all harnesses ──────────────────────────────────────────
 
-func TestIntegration_InitAllRuntimes(t *testing.T) {
+func TestIntegration_InitAllHarnesses(t *testing.T) {
 	dir := t.TempDir()
 	home := t.TempDir()
 	t.Setenv("HOME", home) // isolate global configs
 
-	allRuntimes := []string{"claude", "codex", "windsurf", "pi"}
-	initProject(t, dir, allRuntimes)
+	allHarnesses := []string{"claude", "codex", "windsurf", "pi"}
+	initProject(t, dir, allHarnesses)
 
 	// ── central .mom/ structure ──
 	assertFileNotExists(t, filepath.Join(dir, ".mom"))
@@ -165,9 +166,9 @@ func TestIntegration_InitAllRuntimes(t *testing.T) {
 	if err != nil {
 		t.Fatalf("loading config: %v", err)
 	}
-	enabled := cfg.EnabledRuntimes()
+	enabled := cfg.EnabledHarnesses()
 	if len(enabled) != 4 {
-		t.Errorf("expected 4 enabled runtimes, got %d: %v", len(enabled), enabled)
+		t.Errorf("expected 4 enabled harnesses, got %d: %v", len(enabled), enabled)
 	}
 
 	// ── Claude ──
@@ -209,16 +210,16 @@ func TestIntegration_InitAllRuntimes(t *testing.T) {
 	assertFileNotExists(t, filepath.Join(dir, ".mcp.json"))
 }
 
-// ── Test 2: Upgrade registers ALL runtimes (regression) ─────────────────────
+// ── Test 2: Upgrade registers ALL harnesses (regression) ─────────────────────
 
-func TestIntegration_UpgradeRegistersAllRuntimes(t *testing.T) {
+func TestIntegration_UpgradeRegistersAllHarnesses(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("HOME", dir)
 
-	allRuntimes := []string{"claude", "codex", "windsurf", "pi"}
-	setupMinimalMom(t, dir, allRuntimes)
+	allHarnesses := []string{"claude", "codex", "windsurf", "pi"}
+	setupMinimalMom(t, dir, allHarnesses)
 
-	// No runtime artifacts exist yet — this simulates the bug scenario.
+	// No harness artifacts exist yet — this simulates the bug scenario.
 	assertFileNotExists(t, filepath.Join(dir, ".claude", "CLAUDE.md"))
 	assertFileNotExists(t, filepath.Join(dir, "AGENTS.md"))
 	assertFileNotExists(t, filepath.Join(dir, ".windsurf", "rules", "mom.md"))
@@ -226,14 +227,14 @@ func TestIntegration_UpgradeRegistersAllRuntimes(t *testing.T) {
 
 	output := upgradeProject(t, dir)
 
-	// ALL runtimes must be regenerated — not just Claude.
-	for _, rt := range allRuntimes {
-		if !strings.Contains(output, "runtime "+rt+" context file regenerated") {
-			t.Errorf("upgrade output missing regeneration for runtime %s", rt)
+	// ALL harnesses must be regenerated — not just Claude.
+	for _, rt := range allHarnesses {
+		if !strings.Contains(output, "harness "+rt+" context file regenerated") {
+			t.Errorf("upgrade output missing regeneration for harness %s", rt)
 		}
 	}
 
-	// ── Verify artifacts created for ALL runtimes ──
+	// ── Verify artifacts created for ALL harnesses ──
 	assertFileExists(t, filepath.Join(dir, ".claude", "CLAUDE.md"))
 	assertFileContains(t, filepath.Join(dir, ".claude", "CLAUDE.md"), "Generated by MOM")
 
@@ -314,9 +315,9 @@ func TestIntegration_UpgradeDoesNotPropagateScopes(t *testing.T) {
 	}
 }
 
-// ── Test 4: Add runtimes via upgrade ────────────────────────────────────────
+// ── Test 4: Add harnesses via upgrade ────────────────────────────────────────
 
-func TestIntegration_AddRuntimesViaUpgrade(t *testing.T) {
+func TestIntegration_AddHarnessesViaUpgrade(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("HOME", dir)
 
@@ -343,7 +344,7 @@ func TestIntegration_AddRuntimesViaUpgrade(t *testing.T) {
 	cfg.Harnesses["codex"] = config.HarnessConfig{Enabled: true}
 	config.Save(momDir, cfg)
 
-	// Upgrade should pick up new runtimes.
+	// Upgrade should pick up new harnesses.
 	upgradeProject(t, dir)
 
 	// All three should now exist.
@@ -367,8 +368,8 @@ func TestIntegration_MCPConfigCorrectness(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 
-	allRuntimes := []string{"claude", "codex", "windsurf"}
-	initProject(t, dir, allRuntimes)
+	allHarnesses := []string{"claude", "codex", "windsurf"}
+	initProject(t, dir, allHarnesses)
 
 	mcpPath := filepath.Join(home, ".codeium", "windsurf", "mcp_config.json")
 

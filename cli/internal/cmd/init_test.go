@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"bytes"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -15,9 +16,14 @@ import (
 
 func initTestCentralVault(t *testing.T) string {
 	t.Helper()
+	resetInitFlags()
+	t.Cleanup(resetInitFlags)
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 	t.Setenv("MOM_VAULT", filepath.Join(home, ".mom", "central.db"))
+	oldRunner := runExternalCommand
+	runExternalCommand = func(string, ...string) ([]byte, error) { return []byte("ok"), nil }
+	t.Cleanup(func() { runExternalCommand = oldRunner })
 	dir, err := centralvault.Dir()
 	if err != nil {
 		t.Fatalf("centralvault.Dir: %v", err)
@@ -35,7 +41,7 @@ func TestInitCmd_CreatesLeoStructure(t *testing.T) {
 	buf := new(bytes.Buffer)
 	rootCmd.SetOut(buf)
 	rootCmd.SetErr(buf)
-	rootCmd.SetArgs([]string{"init", "--runtimes", "claude"})
+	rootCmd.SetArgs([]string{"init", "--harnesses", "claude"})
 
 	if err := rootCmd.Execute(); err != nil {
 		t.Fatalf("init failed: %v", err)
@@ -111,7 +117,7 @@ func TestInitCmd_SkipsScaffoldIfAlreadyExists(t *testing.T) {
 	buf := new(bytes.Buffer)
 	rootCmd.SetOut(buf)
 	rootCmd.SetErr(buf)
-	rootCmd.SetArgs([]string{"init", "--runtimes", "claude"})
+	rootCmd.SetArgs([]string{"init", "--harnesses", "claude"})
 
 	if err := rootCmd.Execute(); err != nil {
 		t.Fatalf("expected graceful skip when MOM already exists, got error: %v", err)
@@ -131,7 +137,7 @@ func TestInitCmd_ReinitRepairsMissingGlobalFiles(t *testing.T) {
 	buf := new(bytes.Buffer)
 	rootCmd.SetOut(buf)
 	rootCmd.SetErr(buf)
-	rootCmd.SetArgs([]string{"init", "--runtimes", "claude"})
+	rootCmd.SetArgs([]string{"init", "--harnesses", "claude"})
 	if err := rootCmd.Execute(); err != nil {
 		t.Fatalf("initial init failed: %v", err)
 	}
@@ -149,7 +155,7 @@ func TestInitCmd_ReinitRepairsMissingGlobalFiles(t *testing.T) {
 	buf.Reset()
 	rootCmd.SetOut(buf)
 	rootCmd.SetErr(buf)
-	rootCmd.SetArgs([]string{"init", "--runtimes", "claude"})
+	rootCmd.SetArgs([]string{"init", "--harnesses", "claude"})
 	if err := rootCmd.Execute(); err != nil {
 		t.Fatalf("reinit failed: %v", err)
 	}
@@ -177,7 +183,7 @@ func TestInitCmd_ForceOverwrite(t *testing.T) {
 	buf := new(bytes.Buffer)
 	rootCmd.SetOut(buf)
 	rootCmd.SetErr(buf)
-	rootCmd.SetArgs([]string{"init", "--runtimes", "claude", "--force"})
+	rootCmd.SetArgs([]string{"init", "--harnesses", "claude", "--force"})
 
 	if err := rootCmd.Execute(); err != nil {
 		t.Fatalf("init --force failed: %v", err)
@@ -192,7 +198,7 @@ func TestInitCmd_ForceOverwrite(t *testing.T) {
 	}
 }
 
-func TestInitCmd_MultiRuntime(t *testing.T) {
+func TestInitCmd_HarnessesFlagConfiguresGlobalHarnesses(t *testing.T) {
 	dir := t.TempDir()
 	centralDir := initTestCentralVault(t)
 	origDir, _ := os.Getwd()
@@ -202,13 +208,176 @@ func TestInitCmd_MultiRuntime(t *testing.T) {
 	buf := new(bytes.Buffer)
 	rootCmd.SetOut(buf)
 	rootCmd.SetErr(buf)
-	rootCmd.SetArgs([]string{"init", "--runtimes", "claude,codex"})
+	rootCmd.SetArgs([]string{"init", "--harnesses", "claude,codex"})
 
 	if err := rootCmd.Execute(); err != nil {
 		t.Fatalf("init failed: %v", err)
 	}
 
-	// Both global runtime outputs should exist.
+	home := filepath.Dir(centralDir)
+	for _, path := range []string{
+		filepath.Join(home, ".claude", "CLAUDE.md"),
+		filepath.Join(home, ".codex", "AGENTS.md"),
+	} {
+		if _, err := os.Stat(path); err != nil {
+			t.Errorf("missing global harness output: %s", path)
+		}
+	}
+
+	cfg, err := config.Load(centralDir)
+	if err != nil {
+		t.Fatalf("loading config: %v", err)
+	}
+	if got := cfg.EnabledHarnesses(); len(got) != 2 {
+		t.Errorf("expected 2 enabled harnesses, got %d: %v", len(got), got)
+	}
+}
+
+func TestInitCmd_HarnessesAllUsesDetectedInstalledHarnesses(t *testing.T) {
+	dir := t.TempDir()
+	centralDir := initTestCentralVault(t)
+	t.Setenv("PATH", t.TempDir())
+	if err := os.MkdirAll(filepath.Join(filepath.Dir(centralDir), ".claude"), 0755); err != nil {
+		t.Fatalf("creating fake Claude install: %v", err)
+	}
+	if err := os.MkdirAll(filepath.Join(filepath.Dir(centralDir), ".codex"), 0755); err != nil {
+		t.Fatalf("creating fake Codex install: %v", err)
+	}
+	origDir, _ := os.Getwd()
+	os.Chdir(dir)
+	defer os.Chdir(origDir)
+
+	buf := new(bytes.Buffer)
+	rootCmd.SetOut(buf)
+	rootCmd.SetErr(buf)
+	rootCmd.SetArgs([]string{"init", "--harnesses", "all"})
+
+	if err := rootCmd.Execute(); err != nil {
+		t.Fatalf("init failed: %v", err)
+	}
+
+	cfg, err := config.Load(centralDir)
+	if err != nil {
+		t.Fatalf("loading config: %v", err)
+	}
+	enabled := strings.Join(cfg.EnabledHarnesses(), ",")
+	if !strings.Contains(enabled, "claude") || !strings.Contains(enabled, "codex") {
+		t.Fatalf("expected detected harnesses to include claude and codex, got %v", cfg.EnabledHarnesses())
+	}
+	if strings.Contains(enabled, "windsurf") || strings.Contains(enabled, "pi") {
+		t.Fatalf("expected undetected harnesses to be excluded, got %v", cfg.EnabledHarnesses())
+	}
+}
+
+func TestInitCmd_InstallsSkillsForSelectedHarnesses(t *testing.T) {
+	dir := t.TempDir()
+	_ = initTestCentralVault(t)
+	origDir, _ := os.Getwd()
+	os.Chdir(dir)
+	defer os.Chdir(origDir)
+
+	var calls []string
+	oldRunner := runExternalCommand
+	runExternalCommand = func(name string, args ...string) ([]byte, error) {
+		calls = append(calls, name+" "+strings.Join(args, " "))
+		return []byte("ok"), nil
+	}
+	t.Cleanup(func() { runExternalCommand = oldRunner })
+
+	buf := new(bytes.Buffer)
+	rootCmd.SetOut(buf)
+	rootCmd.SetErr(buf)
+	rootCmd.SetArgs([]string{"init", "--harnesses", "claude,codex"})
+
+	if err := rootCmd.Execute(); err != nil {
+		t.Fatalf("init failed: %v", err)
+	}
+
+	want := []string{
+		"npx skills add momhq/mom -g -s * -a claude-code -y",
+		"npx skills add momhq/mom -g -s * -a codex -y",
+	}
+	if strings.Join(calls, "\n") != strings.Join(want, "\n") {
+		t.Fatalf("skills install calls mismatch\nwant: %v\n got: %v", want, calls)
+	}
+}
+
+func TestInitCmd_FinalTextMentionsStatusSkillAndCLI(t *testing.T) {
+	dir := t.TempDir()
+	_ = initTestCentralVault(t)
+	origDir, _ := os.Getwd()
+	os.Chdir(dir)
+	defer os.Chdir(origDir)
+
+	buf := new(bytes.Buffer)
+	rootCmd.SetOut(buf)
+	rootCmd.SetErr(buf)
+	rootCmd.SetArgs([]string{"init", "--harnesses", "claude"})
+
+	if err := rootCmd.Execute(); err != nil {
+		t.Fatalf("init failed: %v", err)
+	}
+	out := buf.String()
+	if !strings.Contains(out, "/mom-status") || !strings.Contains(out, "mom status") {
+		t.Fatalf("final output should mention /mom-status and mom status:\n%s", out)
+	}
+}
+
+func TestInitCmd_SkillsInstallFailureIsSoft(t *testing.T) {
+	dir := t.TempDir()
+	centralDir := initTestCentralVault(t)
+	origDir, _ := os.Getwd()
+	os.Chdir(dir)
+	defer os.Chdir(origDir)
+
+	oldRunner := runExternalCommand
+	runExternalCommand = func(name string, args ...string) ([]byte, error) {
+		return []byte("network unavailable"), fmt.Errorf("npx failed")
+	}
+	t.Cleanup(func() { runExternalCommand = oldRunner })
+
+	buf := new(bytes.Buffer)
+	rootCmd.SetOut(buf)
+	rootCmd.SetErr(buf)
+	rootCmd.SetArgs([]string{"init", "--harnesses", "claude"})
+
+	if err := rootCmd.Execute(); err != nil {
+		t.Fatalf("init should soft-fail skills install, got: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(centralDir, "config.yaml")); err != nil {
+		t.Fatalf("core init did not complete: %v", err)
+	}
+	out := buf.String()
+	for _, want := range []string{"skills install", "mom init --force", "npx skills add momhq/mom -g -s '*' -a claude-code -y"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("output missing %q:\n%s", want, out)
+		}
+	}
+}
+
+func TestInitCmd_RuntimesFlagIsNotRegistered(t *testing.T) {
+	if f := initCmd.Flags().Lookup("runtimes"); f != nil {
+		t.Fatalf("--runtimes should not be registered")
+	}
+}
+
+func TestInitCmd_MultiHarness(t *testing.T) {
+	dir := t.TempDir()
+	centralDir := initTestCentralVault(t)
+	origDir, _ := os.Getwd()
+	os.Chdir(dir)
+	defer os.Chdir(origDir)
+
+	buf := new(bytes.Buffer)
+	rootCmd.SetOut(buf)
+	rootCmd.SetErr(buf)
+	rootCmd.SetArgs([]string{"init", "--harnesses", "claude,codex"})
+
+	if err := rootCmd.Execute(); err != nil {
+		t.Fatalf("init failed: %v", err)
+	}
+
+	// Both global harness outputs should exist.
 	home := filepath.Dir(centralDir)
 	files := map[string]string{
 		filepath.Join(home, ".claude", "CLAUDE.md"): "Claude",
@@ -224,15 +393,15 @@ func TestInitCmd_MultiRuntime(t *testing.T) {
 		t.Error("project-local .mom/ should not be created")
 	}
 
-	// Config should have both runtimes.
+	// Config should have both harnesses.
 	cfg, err := config.Load(centralDir)
 	if err != nil {
 		t.Fatalf("loading config: %v", err)
 	}
 
-	enabled := cfg.EnabledRuntimes()
+	enabled := cfg.EnabledHarnesses()
 	if len(enabled) != 2 {
-		t.Errorf("expected 2 enabled runtimes, got %d: %v", len(enabled), enabled)
+		t.Errorf("expected 2 enabled harnesses, got %d: %v", len(enabled), enabled)
 	}
 }
 
@@ -250,7 +419,7 @@ func TestInitCmd_DefaultDeliversMinimalContent(t *testing.T) {
 	buf := new(bytes.Buffer)
 	rootCmd.SetOut(buf)
 	rootCmd.SetErr(buf)
-	rootCmd.SetArgs([]string{"init", "--runtimes", "claude"})
+	rootCmd.SetArgs([]string{"init", "--harnesses", "claude"})
 
 	if err := rootCmd.Execute(); err != nil {
 		t.Fatalf("init failed: %v", err)
@@ -290,7 +459,7 @@ func TestInitCmd_BackupExistingFile(t *testing.T) {
 	buf := new(bytes.Buffer)
 	rootCmd.SetOut(buf)
 	rootCmd.SetErr(buf)
-	rootCmd.SetArgs([]string{"init", "--runtimes", "codex"})
+	rootCmd.SetArgs([]string{"init", "--harnesses", "codex"})
 
 	if err := rootCmd.Execute(); err != nil {
 		t.Fatalf("init failed: %v", err)
@@ -350,7 +519,7 @@ func TestInitCmd_CreatesConstraintsInCentralVault(t *testing.T) {
 	buf := new(bytes.Buffer)
 	rootCmd.SetOut(buf)
 	rootCmd.SetErr(buf)
-	rootCmd.SetArgs([]string{"init", "--runtimes", "claude"})
+	rootCmd.SetArgs([]string{"init", "--harnesses", "claude"})
 	if err := rootCmd.Execute(); err != nil {
 		t.Fatalf("init failed: %v", err)
 	}
