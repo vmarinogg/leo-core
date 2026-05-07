@@ -244,7 +244,7 @@ func upgradeSingleDir(cmd *cobra.Command, projectRoot string, dryRun bool) error
 		return phase1Err
 	}
 
-	// ── Phase 2: Update core memory docs ──────────────────────────────────────
+	// ── Phase 2: Update core files ─────────────────────────────────────────────
 	var phase2Err error
 	doPhase2 := func() {
 		schemaData, err := embeddedSchema.ReadFile("schema.json")
@@ -492,32 +492,21 @@ func fileChanged(path string, data []byte) bool {
 }
 
 func removeKnownGeneratedCentralDocs(leoDir string, dryRun bool) ([]upgradeAction, error) {
-	categories := []struct {
-		dirName string
-		kind    string
-		names   []string
-	}{
-		{dirName: "constraints", kind: "constraint", names: knownGeneratedCentralDocs.Constraints},
-		{dirName: "skills", kind: "skill", names: knownGeneratedCentralDocs.Skills},
-	}
-
 	var actions []upgradeAction
-	for _, category := range categories {
-		for _, name := range category.names {
-			path := filepath.Join(leoDir, category.dirName, name+".json")
-			if _, statErr := os.Stat(path); statErr != nil {
-				if os.IsNotExist(statErr) {
-					continue
-				}
-				return nil, fmt.Errorf("checking generated %s %s: %w", category.kind, name, statErr)
+	for _, doc := range knownGeneratedCentralDocs {
+		path := filepath.Join(leoDir, doc.DirName, doc.Name+".json")
+		if _, statErr := os.Stat(path); statErr != nil {
+			if os.IsNotExist(statErr) {
+				continue
 			}
-			if !dryRun {
-				if err := os.Remove(path); err != nil {
-					return nil, fmt.Errorf("removing generated %s %s: %w", category.kind, name, err)
-				}
-			}
-			actions = append(actions, upgradeAction{"✔", fmt.Sprintf("generated %s %s removed", category.kind, name)})
+			return nil, fmt.Errorf("checking generated %s %s: %w", doc.Kind, doc.Name, statErr)
 		}
+		if !dryRun {
+			if err := os.Remove(path); err != nil {
+				return nil, fmt.Errorf("removing generated %s %s: %w", doc.Kind, doc.Name, err)
+			}
+		}
+		actions = append(actions, upgradeAction{"✔", fmt.Sprintf("generated %s %s removed", doc.Kind, doc.Name)})
 	}
 	return actions, nil
 }

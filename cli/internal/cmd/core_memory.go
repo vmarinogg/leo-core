@@ -1,11 +1,15 @@
 package cmd
 
-var knownGeneratedCentralDocs = struct {
-	Constraints []string
-	Skills      []string
-}{
-	Constraints: []string{"anti-hallucination", "escalation-triggers"},
-	Skills:      []string{"session-wrap-up"},
+type generatedCentralDoc struct {
+	DirName string
+	Kind    string
+	Name    string
+}
+
+var knownGeneratedCentralDocs = []generatedCentralDoc{
+	{DirName: "constraints", Kind: "constraint", Name: "anti-hallucination"},
+	{DirName: "constraints", Kind: "constraint", Name: "escalation-triggers"},
+	{DirName: "skills", Kind: "skill", Name: "session-wrap-up"},
 }
 
 // defaultIdentity returns the default identity.json content.

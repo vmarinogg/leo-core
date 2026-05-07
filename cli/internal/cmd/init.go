@@ -276,7 +276,6 @@ func runInitWithConfig(cmd *cobra.Command, cwd string, force bool, result Onboar
 	doGenerate := func() {
 		runtimeCfg := buildRuntimeConfig(cfg)
 
-		// Build constraints list from core constraints.
 		runtimeConstraints := buildRuntimeConstraints()
 		runtimeSkills := buildRuntimeSkills()
 		runtimeIdentity := buildRuntimeIdentity()
