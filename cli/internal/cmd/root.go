@@ -43,7 +43,6 @@ func init() {
 	rootCmd.AddCommand(tourCmd)
 	rootCmd.AddCommand(serveCmd)
 	rootCmd.AddCommand(recordCmd)
-	rootCmd.AddCommand(logCmd)
 	rootCmd.AddCommand(diagnoseCmd)
 	rootCmd.AddCommand(sweepCmd)
 	rootCmd.AddCommand(reindexCmd)

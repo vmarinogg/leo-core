@@ -3,10 +3,6 @@
 // events on Herald for downstream Drafter and Logbook subscribers.
 package watcher
 
-import (
-	"github.com/momhq/mom/cli/internal/logbook"
-)
-
 // Adapter parses Harness-specific transcript lines into Turn values.
 // Each Harness (Claude Code, Windsurf, Pi) has its own adapter.
 type Adapter interface {
@@ -26,13 +22,6 @@ type Adapter interface {
 	ExtractTurn(line []byte, sessionID string) (Turn, bool)
 }
 
-// SessionParser is optionally implemented by adapters that provide
-// Harness-specific logbook parsing. Falls back to logbook.ParseTranscript
-// (Claude Code format) when not implemented.
-type SessionParser interface {
-	ParseSession(transcriptPath, sessionID string) (*logbook.SessionLog, error)
-}
-
 // ProjectFilter is optionally implemented by adapters that need to
 // filter transcripts by project (e.g. Windsurf, which uses a flat
 // transcript directory with no per-project subdirectories).
@@ -43,9 +32,7 @@ type ProjectFilter interface {
 }
 
 // ToolCategorizer is optionally implemented by adapters that know how to
-// bucket their Harness's tool names into logbook categories. Falls back to
-// logbook.categorizeTool when not implemented or when an empty string is
-// returned for an unknown tool.
+// bucket their Harness's tool names into Lens categories.
 type ToolCategorizer interface {
 	CategorizeTool(toolName string) string
 }

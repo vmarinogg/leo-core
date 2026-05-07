@@ -9,34 +9,22 @@ import (
 	"math"
 	"net/http"
 	"os"
-	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
 	"time"
 
-	"github.com/momhq/mom/cli/internal/logbook"
-	"github.com/momhq/mom/cli/internal/memory"
+	"github.com/momhq/mom/cli/internal/librarian"
 )
 
 //go:embed static
 var staticFS embed.FS
 
-// ScopeEntry is a single .mom/ scope passed to New.
-type ScopeEntry struct {
-	Label string
-	Path  string
-}
+const centralScopeLabel = "central"
 
-// ScopeInfo is the API representation of a scope, including live counts.
-// Key is the stable index string used for ?scope= filtering ("0", "1", ...).
-// PathHint is the parent directory name, used to disambiguate duplicate labels.
-type ScopeInfo struct {
-	Key           string `json:"key"`
-	Label         string `json:"label"`
-	PathHint      string `json:"path_hint"`
-	TotalSessions int    `json:"total_sessions"`
-	TotalMemories int    `json:"total_memories"`
+type ToolGroup struct {
+	Total  int            `json:"total"`
+	Detail map[string]int `json:"detail"`
 }
 
 // SessionSummary is the list-view shape returned by GET /api/sessions.
@@ -61,7 +49,6 @@ type MemoryItem struct {
 	ID             string    `json:"id"`
 	Summary        string    `json:"summary"`
 	Tags           []string  `json:"tags"`
-	Scope          string    `json:"scope"`
 	PromotionState string    `json:"promotion_state"`
 	Created        time.Time `json:"created"`
 	Landmark       bool      `json:"landmark"`
@@ -70,43 +57,33 @@ type MemoryItem struct {
 // SessionDetail extends SessionSummary with the full per-session breakdown.
 type SessionDetail struct {
 	SessionSummary
-	ToolCalls map[string]logbook.ToolGroup `json:"tool_calls"`
-	Memories  []MemoryItem                 `json:"memories"`
+	ToolCalls map[string]ToolGroup `json:"tool_calls"`
+	Memories  []MemoryItem         `json:"memories"`
 }
 
 // MetaResponse is returned by GET /api/meta.
 type MetaResponse struct {
-	Scopes        []ScopeInfo `json:"scopes"`
-	TotalSessions int         `json:"total_sessions"`
-	TotalMemories int         `json:"total_memories"`
-}
-
-// scopeData carries scope identity. Memory and session data are read fresh
-// on each request — see loadMemoryIndex and loadSessions.
-type scopeData struct {
-	entry ScopeEntry
-	key   string // "0", "1", ... set by New()
+	TotalSessions int `json:"total_sessions"`
+	TotalMemories int `json:"total_memories"`
 }
 
 // Server serves the lens dashboard.
 type Server struct {
-	scopes []*scopeData
-	mux    *http.ServeMux
+	lib *librarian.Librarian
+	mux *http.ServeMux
 }
 
-// New creates a Server for the given list of scopes (nearest-first).
-func New(scopes []ScopeEntry) (*Server, error) {
-	s := &Server{mux: http.NewServeMux()}
-
-	for i, e := range scopes {
-		s.scopes = append(s.scopes, &scopeData{entry: e, key: strconv.Itoa(i)})
+// New creates a Server over the central vault.
+func New(lib *librarian.Librarian) (*Server, error) {
+	if lib == nil {
+		return nil, fmt.Errorf("librarian is nil")
 	}
+	s := &Server{lib: lib, mux: http.NewServeMux()}
 
 	s.mux.Handle("GET /api/meta", http.HandlerFunc(s.handleMeta))
 	s.mux.Handle("GET /api/sessions/{id}", http.HandlerFunc(s.handleSession))
 	s.mux.Handle("GET /api/sessions", http.HandlerFunc(s.handleSessions))
 
-	// MOM_LENS_STATIC_DIR: serve files from disk for development iteration.
 	if devDir := os.Getenv("MOM_LENS_STATIC_DIR"); devDir != "" {
 		s.mux.Handle("/", http.FileServer(http.Dir(devDir)))
 	} else {
@@ -123,186 +100,307 @@ func New(scopes []ScopeEntry) (*Server, error) {
 // Handler returns the HTTP handler.
 func (s *Server) Handler() http.Handler { return s.mux }
 
-// loadMemoryIndex scans the scope's memory dir and returns a session_id →
-// memories map plus the total memory count. Called per request — cheap for
-// local dirs and avoids stale state when memories are written while lens runs.
-func (sd *scopeData) loadMemoryIndex() (map[string][]MemoryItem, int) {
-	index := make(map[string][]MemoryItem)
-	total := 0
-	memDir := filepath.Join(sd.entry.Path, "memory")
-	entries, err := os.ReadDir(memDir)
+type sessionData struct {
+	SessionSummary
+	ToolCalls map[string]ToolGroup
+	Memories  []MemoryItem
+}
+
+type sessionBuild struct {
+	id              string
+	started         time.Time
+	ended           time.Time
+	interactions    int
+	tools           map[string]int
+	totalTokens     int
+	costUSD         float64
+	provider        string
+	model           string
+	hasTurnObserved bool
+}
+
+func (s *Server) loadSessionData() (map[string]sessionData, int, error) {
+	memIndex, totalMemories, err := s.loadMemoryIndex()
 	if err != nil {
-		return index, 0
+		return nil, 0, err
 	}
-	for _, e := range entries {
-		if e.IsDir() || filepath.Ext(e.Name()) != ".json" {
+	events, err := s.lib.QueryOpEvents(librarian.OpEventFilter{Limit: 100000})
+	if err != nil {
+		return nil, 0, err
+	}
+
+	builds := map[string]*sessionBuild{}
+	get := func(id string) *sessionBuild {
+		b := builds[id]
+		if b == nil {
+			b = &sessionBuild{id: id, tools: map[string]int{}}
+			builds[id] = b
+		}
+		return b
+	}
+	for _, e := range events {
+		if e.SessionID == "" {
 			continue
 		}
-		doc, err := memory.LoadDoc(filepath.Join(memDir, e.Name()))
+		b := get(e.SessionID)
+		b.includeTime(e.CreatedAt)
+		switch e.EventType {
+		case "turn.observed":
+			applyTurnObserved(b, e.Payload)
+		case "legacy.session.summary":
+			applyLegacySummary(b, e.Payload)
+		}
+	}
+	for sid, memories := range memIndex {
+		if sid == "" {
+			continue
+		}
+		b := get(sid)
+		for _, m := range memories {
+			b.includeTime(m.Created)
+		}
+	}
+
+	out := map[string]sessionData{}
+	for sid, b := range builds {
+		memories := memIndex[sid]
+		if strings.HasPrefix(sid, "legacy:") && len(memories) == 0 {
+			continue
+		}
+		if memories == nil {
+			memories = []MemoryItem{}
+		}
+		toolCalls, toolsTotal := toolGroups(b.tools)
+		curated := 0
+		for _, m := range memories {
+			if m.PromotionState == "curated" || m.Landmark {
+				curated++
+			}
+		}
+		out[sid] = sessionData{
+			SessionSummary: SessionSummary{
+				SessionID:    sid,
+				ScopeLabel:   centralScopeLabel,
+				Started:      formatLensTime(b.started),
+				Ended:        formatLensTime(b.ended),
+				DurationSecs: durationSecs(b.started, b.ended),
+				Interactions: b.interactions,
+				MemoryCount:  len(memories),
+				CuratedCount: curated,
+				ToolsTotal:   toolsTotal,
+				TotalTokens:  b.totalTokens,
+				CostUSD:      b.costUSD,
+				Provider:     b.provider,
+				Model:        b.model,
+			},
+			ToolCalls: toolCalls,
+			Memories:  memories,
+		}
+	}
+	return out, totalMemories, nil
+}
+
+func (s *Server) loadMemoryIndex() (map[string][]MemoryItem, int, error) {
+	rows, err := s.lib.SearchMemories(librarian.SearchFilter{Limit: 100000})
+	if err != nil {
+		return nil, 0, err
+	}
+	index := map[string][]MemoryItem{}
+	for _, row := range rows {
+		m := row.Memory
+		tags, err := s.lib.TagsForMemory(m.ID)
 		if err != nil {
-			continue
+			return nil, 0, err
 		}
-		total++
-		if doc.SessionID != "" {
-			index[doc.SessionID] = append(index[doc.SessionID], MemoryItem{
-				ID:             doc.ID,
-				Summary:        doc.Summary,
-				Tags:           doc.Tags,
-				Scope:          doc.Scope,
-				PromotionState: doc.PromotionState,
-				Created:        doc.Created,
-				Landmark:       doc.Landmark,
+		if m.SessionID != "" {
+			index[m.SessionID] = append(index[m.SessionID], MemoryItem{
+				ID:             m.ID,
+				Summary:        m.Summary,
+				Tags:           tags,
+				PromotionState: m.PromotionState,
+				Created:        m.CreatedAt,
+				Landmark:       m.Landmark,
 			})
 		}
 	}
-	return index, total
+	return index, len(rows), nil
 }
 
-// loadSessions returns sessions for a single scope, joined with the live
-// memory index for that scope.
-func (sd *scopeData) loadSessions() ([]SessionSummary, int, error) {
-	memIndex, totalMemories := sd.loadMemoryIndex()
-
-	logsDir := filepath.Join(sd.entry.Path, "logs")
-	entries, err := os.ReadDir(logsDir)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return nil, totalMemories, nil
-		}
-		return nil, totalMemories, err
+func (b *sessionBuild) includeTime(t time.Time) {
+	if t.IsZero() {
+		return
 	}
-
-	var sessions []SessionSummary
-	for _, e := range entries {
-		if e.IsDir() {
-			continue
-		}
-		name := e.Name()
-		if !strings.HasPrefix(name, "session-") || filepath.Ext(name) != ".json" {
-			continue
-		}
-		data, err := os.ReadFile(filepath.Join(logsDir, name))
-		if err != nil {
-			continue
-		}
-		var sl logbook.SessionLog
-		if err := json.Unmarshal(data, &sl); err != nil {
-			continue
-		}
-		sessions = append(sessions, sd.toSummary(&sl, memIndex))
+	if b.started.IsZero() || t.Before(b.started) {
+		b.started = t
 	}
-	return sessions, totalMemories, nil
+	if b.ended.IsZero() || t.After(b.ended) {
+		b.ended = t
+	}
 }
 
-func (sd *scopeData) toSummary(sl *logbook.SessionLog, memIndex map[string][]MemoryItem) SessionSummary {
-	dur := 0.0
-	t1, err1 := time.Parse(time.RFC3339, sl.Started)
-	t2, err2 := time.Parse(time.RFC3339, sl.Ended)
-	if err1 == nil && err2 == nil && t2.After(t1) {
-		dur = math.Round(t2.Sub(t1).Seconds())
+func applyTurnObserved(b *sessionBuild, payload map[string]any) {
+	if !b.hasTurnObserved {
+		b.interactions = 0
+		b.tools = map[string]int{}
+		b.totalTokens = 0
+		b.costUSD = 0
 	}
-
-	toolsTotal := 0
-	for _, g := range sl.ToolCalls {
-		toolsTotal += g.Total
+	b.hasTurnObserved = true
+	if s, _ := payload["role"].(string); s == "assistant" {
+		b.interactions++
 	}
-
-	totalTokens := 0
-	costUSD := 0.0
-	if sl.Usage != nil {
-		totalTokens = sl.Usage.TotalTokens
-		costUSD = sl.Usage.CostUSD
+	if model, _ := payload["model"].(string); model != "" {
+		b.model = model
 	}
-
-	memories := memIndex[sl.SessionID]
-	curatedCount := 0
-	for _, m := range memories {
-		if m.PromotionState == "curated" || m.Landmark {
-			curatedCount++
+	if provider, _ := payload["provider"].(string); provider != "" {
+		b.provider = provider
+	}
+	for _, cat := range stringSlice(payload["tool_categories"]) {
+		if cat != "" {
+			b.tools[cat]++
 		}
 	}
-
-	return SessionSummary{
-		SessionID:    sl.SessionID,
-		ScopeLabel:   sd.entry.Label,
-		Started:      sl.Started,
-		Ended:        sl.Ended,
-		DurationSecs: dur,
-		Interactions: sl.Interactions,
-		MemoryCount:  len(memories),
-		CuratedCount: curatedCount,
-		ToolsTotal:   toolsTotal,
-		TotalTokens:  totalTokens,
-		CostUSD:      costUSD,
-		Provider:     sl.Provider,
-		Model:        sl.Model,
+	if usage, ok := payload["usage"].(map[string]any); ok {
+		b.totalTokens += intValue(usage["total_tokens"])
+		b.costUSD += floatValue(usage["cost_usd"])
 	}
+}
+
+func applyLegacySummary(b *sessionBuild, payload map[string]any) {
+	b.includePayloadTime(payload, "started")
+	b.includePayloadTime(payload, "ended")
+	if b.model == "" {
+		b.model, _ = payload["model"].(string)
+	}
+	if b.provider == "" {
+		b.provider, _ = payload["provider"].(string)
+	}
+	if b.hasTurnObserved {
+		return
+	}
+	b.interactions = intValue(payload["interactions"])
+	if cats, ok := payload["tool_categories"].(map[string]any); ok {
+		for cat, total := range cats {
+			b.tools[cat] += intValue(total)
+		}
+	}
+	if usage, ok := payload["usage"].(map[string]any); ok {
+		b.totalTokens = intValue(usage["total_tokens"])
+		b.costUSD = floatValue(usage["cost_usd"])
+	}
+}
+
+func (b *sessionBuild) includePayloadTime(payload map[string]any, key string) {
+	s, _ := payload[key].(string)
+	if s == "" {
+		return
+	}
+	if t, err := time.Parse(time.RFC3339Nano, s); err == nil {
+		b.includeTime(t)
+	}
+}
+
+func stringSlice(v any) []string {
+	switch xs := v.(type) {
+	case []string:
+		return xs
+	case []any:
+		out := make([]string, 0, len(xs))
+		for _, x := range xs {
+			if s, ok := x.(string); ok {
+				out = append(out, s)
+			}
+		}
+		return out
+	default:
+		return nil
+	}
+}
+
+func intValue(v any) int {
+	switch n := v.(type) {
+	case int:
+		return n
+	case int64:
+		return int(n)
+	case float64:
+		return int(n)
+	case json.Number:
+		i, _ := strconv.Atoi(n.String())
+		return i
+	default:
+		return 0
+	}
+}
+
+func floatValue(v any) float64 {
+	switch n := v.(type) {
+	case float64:
+		return n
+	case int:
+		return float64(n)
+	case json.Number:
+		f, _ := strconv.ParseFloat(n.String(), 64)
+		return f
+	default:
+		return 0
+	}
+}
+
+func toolGroups(tools map[string]int) (map[string]ToolGroup, int) {
+	out := map[string]ToolGroup{}
+	total := 0
+	for cat, n := range tools {
+		if n <= 0 {
+			continue
+		}
+		out[cat] = ToolGroup{Total: n, Detail: map[string]int{}}
+		total += n
+	}
+	return out, total
+}
+
+func durationSecs(started, ended time.Time) float64 {
+	if started.IsZero() || ended.IsZero() || !ended.After(started) {
+		return 0
+	}
+	return math.Round(ended.Sub(started).Seconds())
+}
+
+func formatLensTime(t time.Time) string {
+	if t.IsZero() {
+		return ""
+	}
+	return t.UTC().Format(time.RFC3339Nano)
+}
+
+func sortedSessions(m map[string]sessionData) []SessionSummary {
+	out := make([]SessionSummary, 0, len(m))
+	for _, s := range m {
+		out = append(out, s.SessionSummary)
+	}
+	sort.Slice(out, func(i, j int) bool {
+		return out[i].Started > out[j].Started
+	})
+	return out
 }
 
 func (s *Server) handleMeta(w http.ResponseWriter, _ *http.Request) {
-	var infos []ScopeInfo
-	seenIDs := make(map[string]bool)
-	totalSessions, totalMemories := 0, 0
-	for _, sd := range s.scopes {
-		sessions, scopeMemories, _ := sd.loadSessions()
-		infos = append(infos, ScopeInfo{
-			Key:           sd.key,
-			Label:         sd.entry.Label,
-			PathHint:      filepath.Base(filepath.Dir(sd.entry.Path)),
-			TotalSessions: len(sessions),
-			TotalMemories: scopeMemories,
-		})
-		for _, s := range sessions {
-			if !seenIDs[s.SessionID] {
-				seenIDs[s.SessionID] = true
-				totalSessions++
-			}
-		}
-		totalMemories += scopeMemories
+	sessions, totalMemories, err := s.loadSessionData()
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
 	}
-	jsonResponse(w, MetaResponse{
-		Scopes:        infos,
-		TotalSessions: totalSessions,
-		TotalMemories: totalMemories,
-	})
+	jsonResponse(w, MetaResponse{TotalSessions: len(sessions), TotalMemories: totalMemories})
 }
 
-func (s *Server) handleSessions(w http.ResponseWriter, r *http.Request) {
-	scopeFilter := r.URL.Query().Get("scope")
-
-	var all []SessionSummary
-	for _, sd := range s.scopes {
-		if scopeFilter != "" && scopeFilter != "all" && sd.key != scopeFilter {
-			continue
-		}
-		sessions, _, err := sd.loadSessions()
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
-			return
-		}
-		all = append(all, sessions...)
+func (s *Server) handleSessions(w http.ResponseWriter, _ *http.Request) {
+	sessions, _, err := s.loadSessionData()
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
 	}
-
-	// Deduplicate by session ID: keep first occurrence (nearest scope wins,
-	// since scopes are ordered nearest-first by scope.Walk).
-	seen := make(map[string]bool, len(all))
-	deduped := all[:0]
-	for _, s := range all {
-		if !seen[s.SessionID] {
-			seen[s.SessionID] = true
-			deduped = append(deduped, s)
-		}
-	}
-	all = deduped
-
-	sort.Slice(all, func(i, j int) bool {
-		return all[i].Started > all[j].Started
-	})
-
-	if all == nil {
-		all = []SessionSummary{}
-	}
-	jsonResponse(w, all)
+	jsonResponse(w, sortedSessions(sessions))
 }
 
 func (s *Server) handleSession(w http.ResponseWriter, r *http.Request) {
@@ -311,32 +409,17 @@ func (s *Server) handleSession(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "missing session id", http.StatusBadRequest)
 		return
 	}
-
-	// Search all scopes for the session log (IDs are globally unique).
-	for _, sd := range s.scopes {
-		data, err := os.ReadFile(filepath.Join(sd.entry.Path, "logs", "session-"+id+".json"))
-		if err != nil {
-			continue
-		}
-		var sl logbook.SessionLog
-		if err := json.Unmarshal(data, &sl); err != nil {
-			http.Error(w, "malformed session log", http.StatusInternalServerError)
-			return
-		}
-		memIndex, _ := sd.loadMemoryIndex()
-		memories := memIndex[id]
-		if memories == nil {
-			memories = []MemoryItem{}
-		}
-		jsonResponse(w, SessionDetail{
-			SessionSummary: sd.toSummary(&sl, memIndex),
-			ToolCalls:      sl.ToolCalls,
-			Memories:       memories,
-		})
+	sessions, _, err := s.loadSessionData()
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-
-	http.Error(w, "session not found", http.StatusNotFound)
+	d, ok := sessions[id]
+	if !ok {
+		http.Error(w, "session not found", http.StatusNotFound)
+		return
+	}
+	jsonResponse(w, SessionDetail{SessionSummary: d.SessionSummary, ToolCalls: d.ToolCalls, Memories: d.Memories})
 }
 
 func jsonResponse(w http.ResponseWriter, v any) {

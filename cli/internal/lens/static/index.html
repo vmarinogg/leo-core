@@ -156,14 +156,6 @@ body {
 }
 .v3-filters { display: flex; align-items: center; gap: 4px; flex-wrap: wrap; }
 .v3-fsep { width: 1px; height: 14px; background: var(--paper-15); margin: 0 4px; }
-.v3-scope-row {
-  padding: 8px 24px;
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  border-bottom: 1px solid var(--paper-06);
-}
-
 /* ── Tags / Pills ────────────────────────────────────────────────────────── */
 .tag {
   font-family: 'IBM Plex Mono', monospace;
@@ -651,7 +643,7 @@ body {
 <!-- Nav -->
 <nav class="nav">
   <div class="nav-wordmark">MOM<span class="nav-cursor"></span></div>
-  <div class="nav-meta" id="nav-scope">—</div>
+  <div class="nav-meta" id="nav-vault">—</div>
 </nav>
 
 <!-- Filter bar -->
@@ -661,10 +653,6 @@ body {
     <div class="v3-cell"><span class="v3-val is-gold" id="v3-memories">—</span><span class="v3-key">Memories</span></div>
     <div class="v3-cell"><span class="v3-val" id="v3-tokens">—</span><span class="v3-key">Tokens</span></div>
     <div class="v3-cell"><span class="v3-val" id="v3-avg-dur">—</span><span class="v3-key">Avg. Duration</span></div>
-  </div>
-  <div class="v3-scope-row" id="v3-scope-row" style="display:none">
-    <span class="v3-section-label">Scope</span>
-    <div class="v3-filters" id="v3-scope-filters"></div>
   </div>
   <div class="v3-filter-row">
     <span class="v3-section-label">Showing</span>
@@ -714,8 +702,6 @@ const state = {
   activeSession: null,
   activeHarness: null,
   activeMemFilter: null, // 'has' | 'no' | null
-  activeScope: 'all',
-  scopes: [],       // ScopeInfo[] from /api/meta
   totalMemories: 0,
 };
 
@@ -730,18 +716,15 @@ async function loadMeta() {
     const res = await fetch('/api/meta');
     if (!res.ok) return;
     const meta = await res.json();
-    state.scopes = meta.scopes || [];
     state.totalMemories = meta.total_memories || 0;
-    buildScopeFilters();
-    const nav = document.getElementById('nav-scope');
-    if (nav) nav.textContent = state.scopes.length > 1 ? state.scopes.length + ' SCOPES' : (state.scopes[0]?.label || '').toUpperCase();
+    const nav = document.getElementById('nav-vault');
+    if (nav) nav.textContent = 'CENTRAL';
   } catch (_) {}
 }
 
 async function loadSessions() {
   try {
-    const scopeParam = state.activeScope !== 'all' ? '?scope=' + encodeURIComponent(state.activeScope) : '';
-    const res = await fetch('/api/sessions' + scopeParam);
+    const res = await fetch('/api/sessions');
     if (!res.ok) throw new Error(res.status + ' ' + res.statusText);
     state.sessions = await res.json();
     buildHarnessFilters();
@@ -765,52 +748,6 @@ function populateVariantMetrics() {
   set('v3-memories', state.totalMemories);
   set('v3-tokens',   fmtTokens(totalTokens));
   set('v3-avg-dur',  avgDur > 0 ? fmtDuration(avgDur) : '\u2014');
-}
-
-/* ── Scope switcher ────────────────────────────────────────────────────── */
-function buildScopeFilters() {
-  if (state.scopes.length <= 1) return;
-  const container = document.getElementById('v3-scope-filters');
-  const row = document.getElementById('v3-scope-row');
-  if (!container || !row) return;
-  row.style.display = '';
-  container.innerHTML = '';
-
-  // Only show scopes that have data.
-  const visibleScopes = state.scopes.filter(sc => sc.total_sessions > 0 || sc.total_memories > 0);
-  if (visibleScopes.length <= 1) return;
-
-  // Detect duplicate labels so we can disambiguate with a path hint.
-  const labelCount = {};
-  visibleScopes.forEach(sc => { labelCount[sc.label] = (labelCount[sc.label] || 0) + 1; });
-
-  const allBtn = makeTag('All', state.activeScope === 'all');
-  allBtn.addEventListener('click', () => setScope('all'));
-  container.appendChild(allBtn);
-  visibleScopes.forEach(sc => {
-    const displayLabel = labelCount[sc.label] > 1
-      ? sc.label + ' (' + sc.path_hint + ')'
-      : sc.label;
-    const btn = makeTag(displayLabel, sc.key === state.activeScope);
-    btn.addEventListener('click', () => setScope(sc.key));
-    container.appendChild(btn);
-  });
-}
-
-async function setScope(key) {
-  state.activeScope = key;
-  if (key === 'all') {
-    state.totalMemories = state.scopes.reduce((n, sc) => n + (sc.total_memories || 0), 0);
-  } else {
-    const sc = state.scopes.find(s => s.key === key);
-    state.totalMemories = sc ? sc.total_memories : 0;
-  }
-  state.activeHarness = null;
-  state.activeMemFilter = null;
-  document.querySelectorAll('[data-mem]').forEach(b => b.classList.remove('active'));
-  buildScopeFilters();
-  renderSkeleton();
-  await loadSessions();
 }
 
 /* ── Filters ───────────────────────────────────────────────────────────── */

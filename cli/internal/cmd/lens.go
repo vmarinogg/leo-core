@@ -9,8 +9,8 @@ import (
 	"os/signal"
 	"time"
 
+	"github.com/momhq/mom/cli/internal/centralvault"
 	"github.com/momhq/mom/cli/internal/lens"
-	"github.com/momhq/mom/cli/internal/scope"
 	"github.com/momhq/mom/cli/internal/ux"
 	"github.com/spf13/cobra"
 )
@@ -22,8 +22,7 @@ var lensCmd = &cobra.Command{
 	Short: "Open the session history dashboard in your browser",
 	Long: `Launch a local web server and open the MOM sessions dashboard.
 
-The dashboard shows sessions across all .mom/ scopes visible from the current
-directory. Use the scope switcher in the UI to filter by repo, org, or user.
+The dashboard shows sessions from the central MOM vault.
 
 Press Ctrl+C to stop the server.`,
 	RunE: runLens,
@@ -37,22 +36,13 @@ func runLens(cmd *cobra.Command, _ []string) error {
 	port, _ := cmd.Flags().GetInt("port")
 	portExplicit := cmd.Flags().Changed("port")
 
-	cwd, err := os.Getwd()
+	lib, closeFn, err := centralvault.OpenLibrarian()
 	if err != nil {
-		return fmt.Errorf("getting working directory: %w", err)
+		return fmt.Errorf("opening central vault: %w", err)
 	}
+	defer func() { _ = closeFn() }()
 
-	scopes := scope.Walk(cwd)
-	if len(scopes) == 0 {
-		return fmt.Errorf("no .mom/ directory found — run 'mom init' first")
-	}
-
-	entries := make([]lens.ScopeEntry, len(scopes))
-	for i, s := range scopes {
-		entries[i] = lens.ScopeEntry{Label: s.Label, Path: s.Path}
-	}
-
-	srv, err := lens.New(entries)
+	srv, err := lens.New(lib)
 	if err != nil {
 		return fmt.Errorf("starting lens: %w", err)
 	}
@@ -74,9 +64,7 @@ func runLens(cmd *cobra.Command, _ []string) error {
 	url := fmt.Sprintf("http://localhost:%d", actualPort)
 	p := ux.NewPrinter(cmd.OutOrStdout())
 	p.Checkf("mom lens → %s", url)
-	for _, s := range scopes {
-		p.KeyValue("  scope", s.Label, 8)
-	}
+	p.KeyValue("  vault", "central", 8)
 	p.Blank()
 	p.Muted("  Ctrl+C to stop")
 

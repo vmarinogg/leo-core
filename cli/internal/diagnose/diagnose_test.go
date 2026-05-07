@@ -8,12 +8,11 @@ import (
 	"testing"
 
 	"github.com/momhq/mom/cli/internal/diagnose"
-	"github.com/momhq/mom/cli/internal/logbook"
 )
 
 // helper: build a minimal SessionLog.
-func makeSession(interactions int, toolCalls map[string]logbook.ToolGroup) logbook.SessionLog {
-	return logbook.SessionLog{
+func makeSession(interactions int, toolCalls map[string]diagnose.ToolGroup) diagnose.SessionLog {
+	return diagnose.SessionLog{
 		SessionID:    "test-id",
 		Interactions: interactions,
 		ToolCalls:    toolCalls,
@@ -37,7 +36,7 @@ func TestComputeReport_ZeroSessions(t *testing.T) {
 }
 
 func TestComputeReport_SingleSession(t *testing.T) {
-	session := makeSession(4, map[string]logbook.ToolGroup{
+	session := makeSession(4, map[string]diagnose.ToolGroup{
 		"mom_memory": {
 			Total: 3,
 			Detail: map[string]int{
@@ -59,7 +58,7 @@ func TestComputeReport_SingleSession(t *testing.T) {
 		},
 	})
 
-	r := diagnose.ComputeReport([]logbook.SessionLog{session})
+	r := diagnose.ComputeReport([]diagnose.SessionLog{session})
 
 	if r.SessionsAnalyzed != 1 {
 		t.Errorf("sessions_analyzed: want 1, got %d", r.SessionsAnalyzed)
@@ -93,7 +92,7 @@ func TestComputeReport_SingleSession(t *testing.T) {
 }
 
 func TestComputeReport_MultipleSessions(t *testing.T) {
-	s1 := makeSession(2, map[string]logbook.ToolGroup{
+	s1 := makeSession(2, map[string]diagnose.ToolGroup{
 		"mom_memory": {
 			Total:  2,
 			Detail: map[string]int{"mom_recall": 2},
@@ -103,7 +102,7 @@ func TestComputeReport_MultipleSessions(t *testing.T) {
 			Detail: map[string]int{"Read": 2},
 		},
 	})
-	s2 := makeSession(6, map[string]logbook.ToolGroup{
+	s2 := makeSession(6, map[string]diagnose.ToolGroup{
 		"mom_memory": {
 			Total:  6,
 			Detail: map[string]int{"search_memories": 6},
@@ -114,7 +113,7 @@ func TestComputeReport_MultipleSessions(t *testing.T) {
 		},
 	})
 
-	r := diagnose.ComputeReport([]logbook.SessionLog{s1, s2})
+	r := diagnose.ComputeReport([]diagnose.SessionLog{s1, s2})
 
 	if r.SessionsAnalyzed != 2 {
 		t.Errorf("sessions_analyzed: want 2, got %d", r.SessionsAnalyzed)
@@ -137,15 +136,15 @@ func TestComputeReport_MultipleSessions(t *testing.T) {
 }
 
 func TestComputeReport_ProtocolCompliance(t *testing.T) {
-	withStatus := makeSession(1, map[string]logbook.ToolGroup{
+	withStatus := makeSession(1, map[string]diagnose.ToolGroup{
 		"mom_cli": {Total: 1, Detail: map[string]int{"mom_status": 1}},
 	})
-	withoutStatus := makeSession(1, map[string]logbook.ToolGroup{
+	withoutStatus := makeSession(1, map[string]diagnose.ToolGroup{
 		"mom_cli": {Total: 1, Detail: map[string]int{"mom_draft": 1}},
 	})
-	noMomCli := makeSession(1, map[string]logbook.ToolGroup{})
+	noMomCli := makeSession(1, map[string]diagnose.ToolGroup{})
 
-	r := diagnose.ComputeReport([]logbook.SessionLog{withStatus, withoutStatus, noMomCli})
+	r := diagnose.ComputeReport([]diagnose.SessionLog{withStatus, withoutStatus, noMomCli})
 
 	// 1 out of 3 sessions have mom_status
 	want := 1.0 / 3.0
@@ -155,7 +154,7 @@ func TestComputeReport_ProtocolCompliance(t *testing.T) {
 }
 
 func TestComputeReport_ContextRediscovery(t *testing.T) {
-	session := makeSession(5, map[string]logbook.ToolGroup{
+	session := makeSession(5, map[string]diagnose.ToolGroup{
 		"system": {
 			Total:  4,
 			Detail: map[string]int{"git": 2, "grep": 2},
@@ -166,7 +165,7 @@ func TestComputeReport_ContextRediscovery(t *testing.T) {
 		},
 	})
 
-	r := diagnose.ComputeReport([]logbook.SessionLog{session})
+	r := diagnose.ComputeReport([]diagnose.SessionLog{session})
 
 	// total tool calls: 4 (system) + 4 (mom_memory) = 8
 	// git+grep in system = 4
@@ -228,18 +227,18 @@ func TestLoadSessionLogs(t *testing.T) {
 	dir := t.TempDir()
 
 	// Write two valid session files.
-	sessions := []logbook.SessionLog{
+	sessions := []diagnose.SessionLog{
 		{
 			SessionID:    "s1",
 			Interactions: 3,
-			ToolCalls: map[string]logbook.ToolGroup{
+			ToolCalls: map[string]diagnose.ToolGroup{
 				"mom_memory": {Total: 1, Detail: map[string]int{"mom_recall": 1}},
 			},
 		},
 		{
 			SessionID:    "s2",
 			Interactions: 5,
-			ToolCalls:    map[string]logbook.ToolGroup{},
+			ToolCalls:    map[string]diagnose.ToolGroup{},
 		},
 	}
 	for _, s := range sessions {
@@ -265,7 +264,7 @@ func TestLoadSessionLogs_LastN(t *testing.T) {
 	dir := t.TempDir()
 
 	for i := 1; i <= 5; i++ {
-		s := logbook.SessionLog{SessionID: "s" + string(rune('0'+i))}
+		s := diagnose.SessionLog{SessionID: "s" + string(rune('0'+i))}
 		data, _ := json.Marshal(s)
 		name := filepath.Join(dir, "session-"+s.SessionID+".json")
 		os.WriteFile(name, data, 0600)
