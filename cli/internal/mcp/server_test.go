@@ -234,6 +234,44 @@ func TestToolsCallMomRecallUsesCentralFinder(t *testing.T) {
 	}
 }
 
+func TestToolsCallMomRecallReturnsCompactIndex(t *testing.T) {
+	leoDir := newTestLeoDir(t)
+	insertCentralMemory(t, "Authentication pattern for JWT", strings.Repeat("Use JWT with RS256. ", 30), []string{"auth", "security"})
+	inW, outR, _ := runServer(t, leoDir)
+	defer inW.Close()
+
+	sendRequest(t, inW, "initialize", 1, map[string]any{"protocolVersion": "2024-11-05"})
+	readResponse(t, outR)
+	sendRequest(t, inW, "tools/call", 2, map[string]any{"name": "mom_recall", "arguments": map[string]any{"query": "JWT"}})
+	resp := readResponse(t, outR)
+
+	result := resp["result"].(map[string]any)
+	text := result["content"].([]any)[0].(map[string]any)["text"].(string)
+	if strings.Contains(text, "\n  ") {
+		t.Fatalf("mom_recall should return compact JSON, got: %s", text)
+	}
+
+	var rows []map[string]any
+	if err := json.Unmarshal([]byte(text), &rows); err != nil {
+		t.Fatalf("mom_recall JSON parse failed: %v\n%s", err, text)
+	}
+	if len(rows) == 0 {
+		t.Fatal("mom_recall returned no rows")
+	}
+	if _, ok := rows[0]["content"]; ok {
+		t.Fatalf("mom_recall compact index must not include full content: %#v", rows[0])
+	}
+	if _, ok := rows[0]["Content"]; ok {
+		t.Fatalf("mom_recall compact index must not include full Content: %#v", rows[0])
+	}
+	if rows[0]["summary"] == "" || rows[0]["snippet"] == "" || rows[0]["id"] == "" {
+		t.Fatalf("mom_recall compact row missing id/summary/snippet: %#v", rows[0])
+	}
+	if len([]rune(rows[0]["snippet"].(string))) > 161 {
+		t.Fatalf("snippet too long: %q", rows[0]["snippet"])
+	}
+}
+
 func TestToolsCallMomRecallRequiresQuery(t *testing.T) {
 	leoDir := newTestLeoDir(t)
 	inW, outR, _ := runServer(t, leoDir)

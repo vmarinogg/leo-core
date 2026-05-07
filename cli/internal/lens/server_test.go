@@ -113,7 +113,8 @@ func TestSessions_RenderFromCentralTurnObserved(t *testing.T) {
 	at := time.Date(2026, 4, 10, 12, 0, 0, 0, time.UTC)
 	insertTurn(t, lib, "s-new", "user", at, nil)
 	insertTurn(t, lib, "s-new", "assistant", at.Add(time.Minute), map[string]any{
-		"tool_categories": []any{"codebase_read", "system"},
+		"tool_categories": []any{"codebase_read", "mom_cli"},
+		"tool_names":      []any{"Read", "mom recall"},
 		"usage":           map[string]any{"total_tokens": float64(42), "cost_usd": 0.02},
 		"model":           "claude-sonnet",
 		"provider":        "anthropic",
@@ -125,6 +126,10 @@ func TestSessions_RenderFromCentralTurnObserved(t *testing.T) {
 	}
 	if got[0].SessionID != "s-new" || got[0].Interactions != 1 || got[0].ToolsTotal != 2 || got[0].TotalTokens != 42 || got[0].ScopeLabel != "central" {
 		t.Fatalf("summary = %+v", got[0])
+	}
+	detail := fetchDetail(t, newTestServer(t, lib).Handler(), "s-new")
+	if detail.ToolCalls["mom_cli"].Detail["mom recall"] != 1 || detail.ToolCalls["codebase_read"].Detail["Read"] != 1 {
+		t.Fatalf("tool detail missing safe tool names: %+v", detail.ToolCalls)
 	}
 }
 

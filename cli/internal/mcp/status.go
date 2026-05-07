@@ -71,7 +71,7 @@ func (s *Server) toolMomStatus() (toolCallResult, error) {
 		payload.Health.Status = "degraded"
 	}
 
-	text, err := json.MarshalIndent(payload, "", "  ")
+	text, err := json.Marshal(payload)
 	if err != nil {
 		return toolCallResult{}, err
 	}

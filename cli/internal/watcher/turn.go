@@ -30,11 +30,12 @@ type Turn struct {
 
 // ToolCall is one tool invocation observed in an assistant turn.
 // `Input` carries the raw tool arguments (file paths, shell commands,
-// etc.) for Drafter's filter pipeline. `Category` is pre-computed by
-// the adapter using CategorizeToolCall so Logbook's projection does
-// not need to look at tool names.
+// etc.) for Drafter's filter pipeline. `Category` and SafeName are
+// pre-computed by the adapter so Logbook can persist a privacy-safe
+// metadata projection without inspecting raw inputs.
 type ToolCall struct {
 	Name     string
+	SafeName string
 	Input    map[string]any
 	Category string // "mom_memory" | "mom_cli" | "codebase_read" | "codebase_write" | "system"
 }
@@ -71,6 +72,9 @@ func (t Turn) ToPayload() map[string]any {
 			m := map[string]any{
 				"name":     tc.Name,
 				"category": tc.Category,
+			}
+			if tc.SafeName != "" {
+				m["safe_name"] = tc.SafeName
 			}
 			if tc.Input != nil {
 				m["input"] = tc.Input

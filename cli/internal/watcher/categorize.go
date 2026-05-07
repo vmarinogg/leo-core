@@ -54,8 +54,96 @@ func isMemoryTool(name string) bool {
 		name == "mom_get" || name == "mom_landmarks" || name == "mom_status"
 }
 
+// CategorizeObservedToolCall returns the Lens category and privacy-safe name
+// for one observed tool call. It may inspect raw shell command input while the
+// event is still on the in-process bus, but it returns only coarse metadata.
+func CategorizeObservedToolCall(toolName string, input map[string]any) (category, safeName string) {
+	name := NormalizeToolName(toolName)
+	if isShellTool(name) {
+		if momName := safeMomCLIName(input); momName != "" {
+			return "mom_cli", momName
+		}
+	}
+	return CategorizeToolCall(name), name
+}
+
 func isMomCLI(name string) bool {
 	return name == "mom_draft" || name == "mom_log"
+}
+
+func isShellTool(name string) bool {
+	return name == "Bash" || name == "bash" || name == "Shell" || name == "shell"
+}
+
+func safeMomCLIName(input map[string]any) string {
+	if input == nil {
+		return ""
+	}
+	command, _ := input["command"].(string)
+	fields := strings.Fields(strings.TrimSpace(command))
+	atCommandStart := true
+	for i := 0; i < len(fields); i++ {
+		field := strings.Trim(fields[i], "'")
+		if isCommandSeparator(field) {
+			atCommandStart = true
+			continue
+		}
+		if !atCommandStart {
+			continue
+		}
+		if field == "env" {
+			continue
+		}
+		if isEnvAssignment(field) {
+			continue
+		}
+		if field != "mom" {
+			atCommandStart = false
+			continue
+		}
+		if i+1 >= len(fields) {
+			return "mom"
+		}
+		sub := strings.Trim(fields[i+1], "'")
+		if sub == "" || strings.HasPrefix(sub, "-") || isCommandSeparator(sub) {
+			return "mom"
+		}
+		return "mom " + safeSubcommandName(sub)
+	}
+	return ""
+}
+
+func isCommandSeparator(field string) bool {
+	return field == "&&" || field == ";" || field == "||"
+}
+
+func isEnvAssignment(field string) bool {
+	if strings.HasPrefix(field, "-") {
+		return false
+	}
+	idx := strings.Index(field, "=")
+	if idx <= 0 {
+		return false
+	}
+	for _, r := range field[:idx] {
+		if (r < 'A' || r > 'Z') && (r < 'a' || r > 'z') && (r < '0' || r > '9') && r != '_' {
+			return false
+		}
+	}
+	return true
+}
+
+func safeSubcommandName(sub string) string {
+	var b strings.Builder
+	for _, r := range sub {
+		if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') || r == '-' {
+			b.WriteRune(r)
+		}
+	}
+	if b.Len() == 0 {
+		return "unknown"
+	}
+	return b.String()
 }
 
 func isCodebaseRead(name string) bool {
