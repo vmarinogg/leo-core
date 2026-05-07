@@ -55,9 +55,14 @@ func TestStatusCmd_ShowsCentralShape(t *testing.T) {
 	}
 
 	out := buf.String()
-	for _, want := range []string{"MOM", "vault", "memories", "types", "landmarks", "op events", "constraints", "skills"} {
+	for _, want := range []string{"MOM", "cwd", "vault", "memories", "types", "landmarks", "op events", "recording", "watcher"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("expected %q in output, got:\n%s", want, out)
+		}
+	}
+	for _, forbidden := range []string{"constraints", "skills"} {
+		if strings.Contains(out, forbidden) {
+			t.Errorf("did not expect %q in output, got:\n%s", forbidden, out)
 		}
 	}
 }

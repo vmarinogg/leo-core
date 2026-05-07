@@ -10,11 +10,11 @@ import (
 func BuildMinimalContextContent() string {
 	return `# MOM — Memory Oriented Machine
 
-You have MOM tools via MCP. Call ` + "`mom_status`" + ` at the start of every session.
+MOM remembers project decisions across sessions.
 
-For memory operations: mom_recall, mom_get, mom_landmarks, mom_record.
+At session start, call ` + "`mom_status`" + `.
 
-Do NOT skip mom_status — it contains your operating instructions.
+Prefer skills and CLI: /mom-status, /mom-recall, /mom-wrap-up. MCP fallback is for startup and discovery.
 `
 }
 
