@@ -81,22 +81,69 @@ func safeMomCLIName(input map[string]any) string {
 	}
 	command, _ := input["command"].(string)
 	fields := strings.Fields(strings.TrimSpace(command))
-	for len(fields) > 0 && strings.Contains(fields[0], "=") && !strings.HasPrefix(fields[0], "-") {
-		fields = fields[1:]
-	}
-	if len(fields) == 0 || fields[0] != "mom" {
-		return ""
-	}
-	if len(fields) == 1 || strings.HasPrefix(fields[1], "-") {
-		return "mom"
-	}
-	sub := fields[1]
-	for _, r := range sub {
-		if (r < 'a' || r > 'z') && r != '-' {
+	atCommandStart := true
+	for i := 0; i < len(fields); i++ {
+		field := strings.Trim(fields[i], "'")
+		if isCommandSeparator(field) {
+			atCommandStart = true
+			continue
+		}
+		if !atCommandStart {
+			continue
+		}
+		if field == "env" {
+			continue
+		}
+		if isEnvAssignment(field) {
+			continue
+		}
+		if field != "mom" {
+			atCommandStart = false
+			continue
+		}
+		if i+1 >= len(fields) {
 			return "mom"
 		}
+		sub := strings.Trim(fields[i+1], "'")
+		if sub == "" || strings.HasPrefix(sub, "-") || isCommandSeparator(sub) {
+			return "mom"
+		}
+		return "mom " + safeSubcommandName(sub)
 	}
-	return "mom " + sub
+	return ""
+}
+
+func isCommandSeparator(field string) bool {
+	return field == "&&" || field == ";" || field == "||"
+}
+
+func isEnvAssignment(field string) bool {
+	if strings.HasPrefix(field, "-") {
+		return false
+	}
+	idx := strings.Index(field, "=")
+	if idx <= 0 {
+		return false
+	}
+	for _, r := range field[:idx] {
+		if (r < 'A' || r > 'Z') && (r < 'a' || r > 'z') && (r < '0' || r > '9') && r != '_' {
+			return false
+		}
+	}
+	return true
+}
+
+func safeSubcommandName(sub string) string {
+	var b strings.Builder
+	for _, r := range sub {
+		if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') || r == '-' {
+			b.WriteRune(r)
+		}
+	}
+	if b.Len() == 0 {
+		return "unknown"
+	}
+	return b.String()
 }
 
 func isCodebaseRead(name string) bool {

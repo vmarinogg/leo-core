@@ -46,8 +46,14 @@ func TestCategorizeObservedToolCall_DetectsMomCLI(t *testing.T) {
 		wantSafe string
 	}{
 		{"Bash", map[string]any{"command": "mom recall release blocker details"}, "mom_cli", "mom recall"},
+		{"Bash", map[string]any{"command": "mom status"}, "mom_cli", "mom status"},
+		{"Bash", map[string]any{"command": "mom curate abc --type semantic --summary secret details"}, "mom_cli", "mom curate"},
+		{"Bash", map[string]any{"command": "mom upgrade --dry-run"}, "mom_cli", "mom upgrade"},
+		{"Bash", map[string]any{"command": "mom --version"}, "mom_cli", "mom"},
 		{"Bash", map[string]any{"command": "MOM_VAULT=/tmp/mom.db mom drafts --since 1h"}, "mom_cli", "mom drafts"},
-		{"Bash", map[string]any{"command": "echo mom recall is not first"}, "system", "Bash"},
+		{"Bash", map[string]any{"command": "env MOM_VAULT=/tmp/mom.db mom lens"}, "mom_cli", "mom lens"},
+		{"Bash", map[string]any{"command": "cd /tmp && mom doctor"}, "mom_cli", "mom doctor"},
+		{"Bash", map[string]any{"command": "echo mom recall is not executed"}, "system", "Bash"},
 		{"Read", map[string]any{"file_path": "CONTEXT.md"}, "codebase_read", "Read"},
 	}
 	for _, tc := range cases {
