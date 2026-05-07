@@ -487,11 +487,8 @@ func installGlobalSkills(p *ux.Printer, harnesses []string) {
 			continue
 		}
 		args, command := skillsInstallCommand(agent)
-		if output, err := runExternalCommand("npx", args...); err != nil {
+		if _, err := runExternalCommand("npx", args...); err != nil {
 			p.Warnf("skills install %s → %s failed: %v", h, agent, err)
-			if len(output) > 0 {
-				p.Muted(strings.TrimSpace(string(output)))
-			}
 			p.Muted(fmt.Sprintf("Retry: mom init --force, or run: %s", command))
 			continue
 		}

@@ -417,11 +417,8 @@ func installSkillsDuringUpgrade(harnesses []string, dryRun bool, addAction func(
 			addAction("+", "would run "+command)
 			continue
 		}
-		if output, err := runExternalCommand("npx", args...); err != nil {
+		if _, err := runExternalCommand("npx", args...); err != nil {
 			detail := fmt.Sprintf("skills install %s → %s failed: %v", h, agent, err)
-			if len(output) > 0 {
-				detail += ": " + strings.TrimSpace(string(output))
-			}
 			detail += fmt.Sprintf("; retry with mom upgrade, mom init --force, or run: %s", command)
 			addAction("⚠", detail)
 			continue

@@ -354,6 +354,9 @@ func TestInitCmd_SkillsInstallFailureIsSoft(t *testing.T) {
 			t.Fatalf("output missing %q:\n%s", want, out)
 		}
 	}
+	if strings.Contains(out, "network unavailable") {
+		t.Fatalf("init output should hide noisy skills CLI output:\n%s", out)
+	}
 }
 
 func TestInitCmd_RuntimesFlagIsNotRegistered(t *testing.T) {
