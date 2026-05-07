@@ -181,9 +181,9 @@ func TestOnboarding_MultipleRuntimesSelected(t *testing.T) {
 	}
 }
 
-// TestOnboarding_DefaultScopeIsRepo verifies that choosing the default scope
-// option (current dir) sets ScopeLabel to "repo" and InstallDir to cwd.
-func TestOnboarding_DefaultScopeIsRepo(t *testing.T) {
+// TestOnboarding_GlobalInitUsesCurrentDirForWatcher verifies onboarding keeps
+// legacy scope metadata stable and registers cwd for watcher metadata.
+func TestOnboarding_GlobalInitUsesCurrentDirForWatcher(t *testing.T) {
 	isolateHarnessDetection(t)
 	cwd := t.TempDir()
 	// 0=confirm runtimes, empty for mode, empty for confirm (default=yes).
@@ -203,9 +203,9 @@ func TestOnboarding_DefaultScopeIsRepo(t *testing.T) {
 	}
 }
 
-// TestOnboarding_NonInteractiveDefaultsToRepo verifies the non-interactive path
-// sets scope=repo and InstallDir=cwd.
-func TestOnboarding_NonInteractiveDefaultsToRepo(t *testing.T) {
+// TestOnboarding_NonInteractiveDefaultsToCurrentDir verifies the non-interactive
+// path keeps legacy scope metadata stable and registers cwd for watcher metadata.
+func TestOnboarding_NonInteractiveDefaultsToCurrentDir(t *testing.T) {
 	// Non-interactive is handled in runInit, not runOnboarding. Here we verify
 	// that the OnboardingResult produced for the non-interactive path has the
 	// correct scope fields by constructing it directly (as runInit does).

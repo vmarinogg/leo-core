@@ -114,10 +114,54 @@ func TestInitCmd_SkipsScaffoldIfAlreadyExists(t *testing.T) {
 	rootCmd.SetArgs([]string{"init", "--runtimes", "claude"})
 
 	if err := rootCmd.Execute(); err != nil {
-		t.Fatalf("expected graceful skip when .mom/ already exists, got error: %v", err)
+		t.Fatalf("expected graceful skip when MOM already exists, got error: %v", err)
 	}
 	if !strings.Contains(buf.String(), "already exists") {
 		t.Errorf("expected skip message in output, got: %s", buf.String())
+	}
+}
+
+func TestInitCmd_ReinitRepairsMissingGlobalFiles(t *testing.T) {
+	dir := t.TempDir()
+	centralDir := initTestCentralVault(t)
+	origDir, _ := os.Getwd()
+	os.Chdir(dir)
+	defer os.Chdir(origDir)
+
+	buf := new(bytes.Buffer)
+	rootCmd.SetOut(buf)
+	rootCmd.SetErr(buf)
+	rootCmd.SetArgs([]string{"init", "--runtimes", "claude"})
+	if err := rootCmd.Execute(); err != nil {
+		t.Fatalf("initial init failed: %v", err)
+	}
+
+	home := filepath.Dir(centralDir)
+	contextPath := filepath.Join(home, ".claude", "CLAUDE.md")
+	mcpPath := filepath.Join(home, ".claude.json")
+	if err := os.Remove(contextPath); err != nil {
+		t.Fatalf("removing global context file: %v", err)
+	}
+	if err := os.Remove(mcpPath); err != nil {
+		t.Fatalf("removing global MCP file: %v", err)
+	}
+
+	buf.Reset()
+	rootCmd.SetOut(buf)
+	rootCmd.SetErr(buf)
+	rootCmd.SetArgs([]string{"init", "--runtimes", "claude"})
+	if err := rootCmd.Execute(); err != nil {
+		t.Fatalf("reinit failed: %v", err)
+	}
+
+	if _, err := os.Stat(contextPath); err != nil {
+		t.Fatalf("global context file was not repaired: %v", err)
+	}
+	if _, err := os.Stat(mcpPath); err != nil {
+		t.Fatalf("global MCP file was not repaired: %v", err)
+	}
+	if !strings.Contains(buf.String(), "configuration up to date") {
+		t.Errorf("expected up-to-date reinit message, got: %s", buf.String())
 	}
 }
 
@@ -192,7 +236,7 @@ func TestInitCmd_MultiRuntime(t *testing.T) {
 	}
 }
 
-// Experimental warnings were removed from init output in v0.12 — too noisy for onboarding.
+// Experimental warnings are intentionally absent from init output — too noisy for onboarding.
 
 // TestInitCmd_DefaultDeliversMinimalContent verifies that init with default config
 // generates minimal MCP-first boot content (not the legacy full content).
@@ -330,32 +374,5 @@ func TestInitCmd_CreatesConstraintsInCentralVault(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(dir, ".mom")); err == nil {
 		t.Error("project-local .mom/ should not be created")
-	}
-}
-
-// TestParentScopeHasDir_Unit tests the parentScopeHasDir helper directly.
-func TestParentScopeHasDir_Unit(t *testing.T) {
-	// Setup: org/.mom/constraints/ with a file, repo under org.
-	orgDir := t.TempDir()
-	constraintsDir := filepath.Join(orgDir, ".mom", "constraints")
-	os.MkdirAll(constraintsDir, 0755)
-	os.WriteFile(filepath.Join(constraintsDir, "test.json"), []byte(`{}`), 0644)
-
-	repoDir := filepath.Join(orgDir, "repo-a")
-	os.MkdirAll(repoDir, 0755)
-
-	// From repo dir, parent should have constraints.
-	if !parentScopeHasDir(repoDir, "constraints") {
-		t.Error("expected parentScopeHasDir to find constraints in parent")
-	}
-
-	// From repo dir, parent should NOT have skills (none created).
-	if parentScopeHasDir(repoDir, "skills") {
-		t.Error("expected parentScopeHasDir to not find skills in parent")
-	}
-
-	// From org dir itself, no parent has constraints.
-	if parentScopeHasDir(orgDir, "constraints") {
-		t.Error("expected parentScopeHasDir to not find constraints above org")
 	}
 }

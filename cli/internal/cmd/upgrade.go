@@ -78,7 +78,7 @@ func upgradeSingleDir(cmd *cobra.Command, projectRoot string, dryRun bool) error
 		actions = append(actions, upgradeAction{symbol, desc})
 	}
 
-	// ── Phase -1: Migrate .leo/ → .mom/ (v0.10 path migration) ─────────────
+	// ── Phase -1: Migrate .leo/ → .mom/ legacy path ─────────────────────────
 	isLegacyLeoDir := filepath.Base(momDir) == ".leo"
 	if isLegacyLeoDir {
 		if dryRun {
@@ -174,7 +174,7 @@ func upgradeSingleDir(cmd *cobra.Command, projectRoot string, dryRun bool) error
 					return
 				}
 			}
-			addAction("✔", "profiles/ directory removed (retired in v0.8.0)")
+			addAction("✔", "profiles/ directory removed (retired legacy layout)")
 		}
 
 		retiredConstraints := []string{
@@ -413,9 +413,9 @@ func upgradeSingleDir(cmd *cobra.Command, projectRoot string, dryRun bool) error
 	return nil
 }
 
-// propagateUpgrade walks child directories and upgrades each .mom/ found.
-// Follows the same pattern as propagateInit: org folders (containing repos)
-// are upgraded and recursed into; repos (with .git/) are upgraded.
+// propagateUpgrade walks child directories and upgrades each legacy .mom/ found.
+// Org folders (containing repos) are upgraded and recursed into; repos (with
+// .git/) are upgraded.
 func propagateUpgrade(cmd *cobra.Command, rootDir string, dryRun bool) {
 	entries, err := os.ReadDir(rootDir)
 	if err != nil {
@@ -453,6 +453,25 @@ func propagateUpgrade(cmd *cobra.Command, rootDir string, dryRun bool) {
 			propagateUpgrade(cmd, childPath, dryRun)
 		}
 	}
+}
+
+// containsGitRepos returns true if dir has at least one immediate child
+// directory that itself contains a .git/ subdirectory.
+func containsGitRepos(dir string) bool {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return false
+	}
+	for _, e := range entries {
+		if !e.IsDir() {
+			continue
+		}
+		gitPath := filepath.Join(dir, e.Name(), ".git")
+		if info, err := os.Stat(gitPath); err == nil && info.IsDir() {
+			return true
+		}
+	}
+	return false
 }
 
 // fileChanged returns true if the file at path doesn't exist or differs from data.
@@ -537,7 +556,7 @@ func migrateKBLayout(leoDir string) ([]upgradeAction, error) {
 	}
 
 	if len(actions) > 0 {
-		actions = append([]upgradeAction{{"✔", "filesystem layout migrated to v0.8 (kb/ flattened)"}}, actions...)
+		actions = append([]upgradeAction{{"✔", "filesystem layout migrated (kb/ flattened)"}}, actions...)
 	}
 
 	return actions, nil
@@ -881,7 +900,7 @@ func removeYAMLKey(mapping *yaml.Node, key string) bool {
 
 // migrateLeoToMom copies a .leo/ directory to .mom/ at the same level.
 // The .leo/ directory is preserved (not deleted) — users can remove it manually
-// or it will be removed in v0.12. Returns actions describing what was done.
+// or it will be removed. Returns actions describing what was done.
 // If .mom/ already exists, the migration is skipped.
 func migrateLeoToMom(leoDir string) ([]upgradeAction, error) {
 	parent := filepath.Dir(leoDir)

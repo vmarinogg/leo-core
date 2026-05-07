@@ -7,7 +7,6 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
-	"strings"
 	"time"
 
 	"github.com/momhq/mom/cli/internal/adapters/harness"
@@ -23,13 +22,13 @@ var embeddedSchema embed.FS
 
 var initCmd = &cobra.Command{
 	Use:   "init",
-	Short: "Initialize a .mom/ directory in the current project",
+	Short: "Install MOM's global vault and agent integrations",
 	RunE:  runInit,
 }
 
 func init() {
 	initCmd.Flags().StringSlice("runtimes", nil, "AI runtimes to configure (claude, codex, windsurf, pi)")
-	initCmd.Flags().Bool("force", false, "Overwrite existing .mom/ directory")
+	initCmd.Flags().Bool("force", false, "Overwrite existing global MOM configuration")
 	initCmd.Flags().BoolP("no-interactive", "y", false, "Skip the interactive wizard and use defaults/flags")
 }
 
@@ -58,17 +57,12 @@ func runInit(cmd *cobra.Command, args []string) error {
 			return err
 		}
 
-		// Propagate: when scope is user/org, initialize child scopes automatically.
-		if result.ScopeLabel == "user" || result.ScopeLabel == "org" {
-			propagateInit(cmd, installDir, result)
-		}
-
 		// Cartographer-driven seeding was retired from `mom init` once
 		// MOM became global — the central vault aggregates memories
 		// from sessions across every project, so per-project bootstrap
 		// scanning no longer fits the model. The `mom map` command
 		// stays callable (hidden) for users with existing scripts;
-		// quality work lives in the v0.40 redesign.
+		// quality work belongs in the future redesign.
 		return nil
 	}
 
@@ -116,8 +110,9 @@ func runInitWithConfig(cmd *cobra.Command, cwd string, force bool, result Onboar
 
 	p := ux.NewPrinter(cmd.OutOrStdout())
 
-	// When .mom/ already exists: update config with new runtimes, regenerate
-	// runtime files, and reinstall daemon — but skip scaffold.
+	// When the central .mom/ already exists: update config with selected
+	// harnesses, refresh global integrations, and reinstall daemon — but skip
+	// scaffold.
 	if alreadyExists {
 		return runReinit(cmd, cwd, leoDir, result, p)
 	}
@@ -178,7 +173,8 @@ func runInitWithConfig(cmd *cobra.Command, cwd string, force bool, result Onboar
 			commMode = "concise"
 		}
 
-		// Determine scope label — default to "repo" for backward compat.
+		// Keep the legacy config field stable for existing readers. Storage and
+		// integrations are central/global regardless of this value.
 		scopeLabel := result.ScopeLabel
 		if scopeLabel == "" {
 			scopeLabel = "repo"
@@ -280,30 +276,9 @@ func runInitWithConfig(cmd *cobra.Command, cwd string, force bool, result Onboar
 			if !ok {
 				continue
 			}
-			global, ok := adapter.(harness.GlobalAdapter)
-			if !ok {
-				genErr = fmt.Errorf("%s does not support global install", rt)
-				return
-			}
-			if err := global.GenerateGlobalContextFile(runtimeCfg, runtimeConstraints, runtimeSkills, runtimeIdentity); err != nil {
+			if err := installGlobalHarness(adapter, rt, runtimeCfg, runtimeConstraints, runtimeSkills, runtimeIdentity); err != nil {
 				genErr = err
 				return
-			}
-			if err := global.RegisterGlobalMCP(); err != nil {
-				genErr = err
-				return
-			}
-			if h, ok := adapter.(harness.GlobalHookInstaller); ok {
-				if err := h.RegisterGlobalHooks(); err != nil {
-					genErr = err
-					return
-				}
-			}
-			if e, ok := adapter.(harness.GlobalExtensionInstaller); ok {
-				if err := e.RegisterGlobalExtension(); err != nil {
-					genErr = err
-					return
-				}
 			}
 		}
 
@@ -359,14 +334,18 @@ func runInitWithConfig(cmd *cobra.Command, cwd string, force bool, result Onboar
 	return nil
 }
 
-// runReinit handles `mom init` on an already-initialized project.
-// Updates runtimes in config, regenerates context files, and reinstalls daemon.
+// runReinit handles `mom init` when the central vault already exists. It
+// reconciles selected harnesses, refreshes global integrations even when config
+// is unchanged, and registers the current cwd with the global watch daemon.
 func runReinit(cmd *cobra.Command, cwd, leoDir string, result OnboardingResult, p *ux.Printer) error {
 	cfg, err := config.Load(leoDir)
 	if err != nil {
 		// Corrupt or missing config — fall back to informational message.
-		p.Muted(".mom/ already exists — run with --force to reinitialize from scratch.")
+		p.Muted("MOM already exists — run with --force to reinitialize from scratch.")
 		return nil
+	}
+	if cfg.Harnesses == nil {
+		cfg.Harnesses = make(map[string]config.HarnessConfig)
 	}
 
 	// Reconcile harnesses: enable selected, disable unselected.
@@ -389,127 +368,55 @@ func runReinit(cmd *cobra.Command, cwd, leoDir string, result OnboardingResult, 
 		}
 	}
 
-	if !changed {
-		// Still register with global daemon even if config unchanged.
-		if err := ensureGlobalDaemon(cwd, leoDir, cfg.EnabledRuntimes()); err != nil {
-			p.Warnf("watch daemon: %v", err)
+	if changed {
+		if err := config.Save(leoDir, cfg); err != nil {
+			return fmt.Errorf("saving config: %w", err)
 		}
-		p.Muted(".mom/ already up to date — nothing to update.")
-		return nil
 	}
 
-	// Save updated config.
-	if err := config.Save(leoDir, cfg); err != nil {
-		return fmt.Errorf("saving config: %w", err)
-	}
-
-	// Regenerate global context/tool integration for all enabled runtimes.
+	// Refresh global context/tool integration for all enabled harnesses. This
+	// doubles as a repair path when a user deletes one global file and reruns init.
 	registry := harness.NewRegistry(cwd)
 	runtimeCfg := buildRuntimeConfig(cfg)
 	runtimeConstraints := buildRuntimeConstraints()
 	runtimeSkills := buildRuntimeSkills()
 	runtimeIdentity := buildRuntimeIdentity()
+	installed := make([]string, 0, len(cfg.EnabledHarnesses()))
 
-	for _, rt := range cfg.EnabledRuntimes() {
+	for _, rt := range cfg.EnabledHarnesses() {
 		adapter, ok := registry.Get(rt)
 		if !ok {
 			continue
 		}
-		global, ok := adapter.(harness.GlobalAdapter)
-		if !ok {
-			p.Warnf("%s does not support global install", rt)
+		if err := installGlobalHarness(adapter, rt, runtimeCfg, runtimeConstraints, runtimeSkills, runtimeIdentity); err != nil {
+			p.Warnf("%s global integration: %v", rt, err)
 			continue
 		}
-		if err := global.GenerateGlobalContextFile(runtimeCfg, runtimeConstraints, runtimeSkills, runtimeIdentity); err != nil {
-			p.Warnf("generating %s context: %v", rt, err)
-			continue
-		}
-		if err := global.RegisterGlobalMCP(); err != nil {
-			p.Warnf("registering %s tools: %v", rt, err)
-			continue
-		}
-		if h, ok := adapter.(harness.GlobalHookInstaller); ok {
-			_ = h.RegisterGlobalHooks()
-		}
-		if e, ok := adapter.(harness.GlobalExtensionInstaller); ok {
-			_ = e.RegisterGlobalExtension()
-		}
+		installed = append(installed, rt)
 	}
 
-	// Register with global watch daemon (updated runtimes).
-	if err := ensureGlobalDaemon(cwd, leoDir, cfg.EnabledRuntimes()); err != nil {
+	// Register with global watch daemon (updated harnesses).
+	if err := ensureGlobalDaemon(cwd, leoDir, cfg.EnabledHarnesses()); err != nil {
 		p.Warnf("watch daemon: %v", err)
 	} else {
 		p.Check("watch daemon updated")
 	}
 
 	p.Blank()
-	p.Check("configuration updated")
-	for _, rt := range result.Harnesses {
+	if changed {
+		p.Check("configuration updated")
+	} else {
+		p.Check("configuration up to date")
+	}
+	for _, rt := range installed {
 		p.Checkf("%s global integration installed", harnessLabel(rt))
 	}
 	return nil
 }
 
-// propagateInit initializes .mom/ in child directories when the parent scope
-// is user or org. Org folders (dirs containing repos) get scope "org", and
-// repos (dirs with .git/) get scope "repo". Already-initialized dirs are skipped.
-func propagateInit(cmd *cobra.Command, rootDir string, parentResult OnboardingResult) {
-	entries, err := os.ReadDir(rootDir)
-	if err != nil {
-		return
-	}
-
-	for _, e := range entries {
-		if !e.IsDir() || strings.HasPrefix(e.Name(), ".") {
-			continue
-		}
-		childPath := filepath.Join(rootDir, e.Name())
-		childLeo := filepath.Join(childPath, ".mom")
-
-		// Skip if already initialized.
-		if _, statErr := os.Stat(childLeo); statErr == nil {
-			continue
-		}
-
-		childHasGit := false
-		if info, statErr := os.Stat(filepath.Join(childPath, ".git")); statErr == nil && info.IsDir() {
-			childHasGit = true
-		}
-		childHasRepos := containsGitRepos(childPath)
-
-		pp := ux.NewPrinter(cmd.OutOrStdout())
-		if childHasRepos {
-			// Org folder: init with scope "org" and recurse into repos.
-			childResult := parentResult
-			childResult.InstallDir = childPath
-			childResult.ScopeLabel = "org"
-			if err := runInitWithConfig(cmd, childPath, false, childResult); err != nil {
-				pp.Warnf("failed to init %s: %v", childPath, err)
-				continue
-			}
-			pp.Checkf("initialized %s (scope: org)", e.Name())
-
-			// Recurse: init repos inside this org folder.
-			propagateInit(cmd, childPath, parentResult)
-		} else if childHasGit {
-			// Repo: init with scope "repo".
-			childResult := parentResult
-			childResult.InstallDir = childPath
-			childResult.ScopeLabel = "repo"
-			if err := runInitWithConfig(cmd, childPath, false, childResult); err != nil {
-				pp.Warnf("failed to init %s: %v", childPath, err)
-				continue
-			}
-			pp.Checkf("initialized %s (scope: repo)", e.Name())
-		}
-	}
-}
-
 // buildRuntimeConfig converts a config.Config to a harness.Config.
-// Autonomy was retired from the persisted config in v0.9.0 (#74);
-// the generated context files still include the autonomy section using
-// the "balanced" default so the runtime retains the behavioral directive.
+// Autonomy was retired from the persisted config; generated context files still
+// include the balanced default so the runtime retains the behavioral directive.
 func buildRuntimeConfig(cfg *config.Config) harness.Config {
 	commMode := cfg.Communication.Mode
 	if commMode == "" {
@@ -583,49 +490,26 @@ func buildRuntimeIdentity() *harness.Identity {
 	}
 }
 
-// parentScopeHasDir walks up from dir looking for a parent .mom/ directory that
-// contains the given subdirectory (e.g. "constraints" or "skills") with at least
-// one .json file. This allows child scopes to inherit from a parent scope
-// instead of duplicating files. Only real parent directories are checked — dir
-// itself is skipped.
-func parentScopeHasDir(dir, subdir string) bool {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		home = string(filepath.Separator)
+func installGlobalHarness(adapter harness.Adapter, rt string, runtimeCfg harness.Config, constraints []harness.Constraint, skills []harness.Skill, identity *harness.Identity) error {
+	global, ok := adapter.(harness.GlobalAdapter)
+	if !ok {
+		return fmt.Errorf("%s does not support global install", rt)
 	}
-
-	current := dir
-	for {
-		parent := filepath.Dir(current)
-		if parent == current {
-			// Reached filesystem root.
-			break
-		}
-		current = parent
-
-		candidate := filepath.Join(current, ".mom", subdir)
-		if hasJSONFiles(candidate) {
-			return true
-		}
-
-		// Stop after processing $HOME (same boundary as scope.Walk).
-		if current == home {
-			break
+	if err := global.GenerateGlobalContextFile(runtimeCfg, constraints, skills, identity); err != nil {
+		return fmt.Errorf("generating context: %w", err)
+	}
+	if err := global.RegisterGlobalMCP(); err != nil {
+		return fmt.Errorf("registering tools: %w", err)
+	}
+	if h, ok := adapter.(harness.GlobalHookInstaller); ok {
+		if err := h.RegisterGlobalHooks(); err != nil {
+			return fmt.Errorf("registering hooks: %w", err)
 		}
 	}
-	return false
-}
-
-// hasJSONFiles returns true if dir exists and contains at least one .json file.
-func hasJSONFiles(dir string) bool {
-	entries, err := os.ReadDir(dir)
-	if err != nil {
-		return false
-	}
-	for _, e := range entries {
-		if !e.IsDir() && filepath.Ext(e.Name()) == ".json" {
-			return true
+	if e, ok := adapter.(harness.GlobalExtensionInstaller); ok {
+		if err := e.RegisterGlobalExtension(); err != nil {
+			return fmt.Errorf("registering extension: %w", err)
 		}
 	}
-	return false
+	return nil
 }
