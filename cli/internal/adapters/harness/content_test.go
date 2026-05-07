@@ -9,22 +9,18 @@ import (
 func TestBuildMinimalContextContent(t *testing.T) {
 	content := BuildMinimalContextContent()
 
-	if !strings.Contains(content, "mom_status") {
-		t.Error("minimal content must mention mom_status")
+	for _, want := range []string{"mom_status", "/mom-status", "/mom-recall", "/mom-wrap-up", "CLI", "MCP fallback"} {
+		if !strings.Contains(content, want) {
+			t.Errorf("minimal content must mention %q", want)
+		}
 	}
 
-	if !strings.Contains(content, "mom_recall") {
-		t.Error("minimal content must mention mom_recall")
-	}
-
-	// Under 100 words.
 	words := strings.Fields(content)
 	if len(words) >= 100 {
 		t.Errorf("minimal content should be <100 words, got %d", len(words))
 	}
 
-	// Must not contain the legacy verbose sections.
-	forbidden := []string{"## Voice", "## Constraints", "## Skills", "## During work"}
+	forbidden := []string{"## Voice", "## Constraints", "## Skills", "## During work", "mom" + "_" + "record", "recording", "install"}
 	for _, f := range forbidden {
 		if strings.Contains(content, f) {
 			t.Errorf("minimal content must not contain %q", f)

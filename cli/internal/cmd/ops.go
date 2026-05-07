@@ -9,6 +9,7 @@ import (
 
 	"github.com/momhq/mom/cli/internal/adapters/storage"
 	"github.com/momhq/mom/cli/internal/centralvault"
+	"github.com/momhq/mom/cli/internal/daemon"
 	"github.com/momhq/mom/cli/internal/librarian"
 	"github.com/momhq/mom/cli/internal/memory"
 	"github.com/momhq/mom/cli/internal/scope"
@@ -64,40 +65,36 @@ func runStatus(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return fmt.Errorf("loading op events: %w", err)
 	}
-	centralDir, err := centralvault.Dir()
+	cwd, err := os.Getwd()
 	if err != nil {
-		return err
+		return fmt.Errorf("getting working directory: %w", err)
 	}
-	constraints := countJSONFiles(filepath.Join(centralDir, "constraints"))
-	skills := countJSONFiles(filepath.Join(centralDir, "skills"))
 
 	p := ux.NewPrinter(cmd.OutOrStdout())
 	p.Bold("MOM")
+	p.KeyValue("cwd", cwd, 12)
 	p.KeyValue("vault", path, 12)
 	p.KeyValue("memories", fmt.Sprintf("total %d, curated %d, draft %d", len(memories), curated, draft), 12)
 	p.KeyValue("types", fmt.Sprintf("episodic %d, semantic %d, procedural %d, untyped %d", types["episodic"], types["semantic"], types["procedural"], types["untyped"]), 12)
 	p.KeyValue("landmarks", fmt.Sprintf("%d", len(landmarks)), 12)
 	p.KeyValue("op events", fmt.Sprintf("%d", len(opEvents)), 12)
-	p.KeyValue("constraints", fmt.Sprintf("%d", constraints), 12)
-	p.KeyValue("skills", fmt.Sprintf("%d", skills), 12)
+	p.KeyValue("recording", "continuous", 12)
+	p.KeyValue("watcher", cliWatcherState(), 12)
 	return nil
 }
 
-// printScopesSection prints the active scopes discovered by walk-up from cwd.
-func countJSONFiles(dir string) int {
-	entries, err := os.ReadDir(dir)
-	if err != nil {
-		return 0
+func cliWatcherState() string {
+	health, err := daemon.StatusGlobal()
+	if err != nil || len(health.Services) == 0 {
+		return "unknown"
 	}
-	n := 0
-	for _, e := range entries {
-		if !e.IsDir() && strings.HasSuffix(e.Name(), ".json") {
-			n++
-		}
+	if health.Services[0].DaemonRunning {
+		return "active"
 	}
-	return n
+	return "inactive"
 }
 
+// printScopesSection prints the active scopes discovered by walk-up from cwd.
 func printScopesSection(p *ux.Printer, cwd string) {
 	scopes := scope.Walk(cwd)
 	if len(scopes) == 0 {

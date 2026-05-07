@@ -102,9 +102,14 @@ func TestStatusCmd_CentralShape(t *testing.T) {
 		t.Fatalf("runStatus: %v", err)
 	}
 	out := buf.String()
-	for _, want := range []string{"MOM", "vault", "memories", "types", "landmarks", "op events", "constraints", "skills"} {
+	for _, want := range []string{"MOM", "cwd", "vault", "memories", "types", "landmarks", "op events", "recording", "watcher"} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("status output missing %q:\n%s", want, out)
+		}
+	}
+	for _, forbidden := range []string{"constraints", "skills"} {
+		if strings.Contains(out, forbidden) {
+			t.Fatalf("status output should not include %q:\n%s", forbidden, out)
 		}
 	}
 }
