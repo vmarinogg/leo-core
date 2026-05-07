@@ -17,8 +17,11 @@ func resetUpgradeFlags(t *testing.T) {
 	t.Helper()
 	t.Setenv("MOM_UPGRADE_SCAN_ROOT", t.TempDir())
 	t.Setenv("MOM_UPGRADE_ASSUME_YES", "1")
+	oldRunner := runExternalCommand
+	runExternalCommand = func(string, ...string) ([]byte, error) { return []byte("ok"), nil }
 	t.Cleanup(func() {
 		upgradeCmd.Flags().Set("dry-run", "false")
+		runExternalCommand = oldRunner
 	})
 }
 
@@ -133,13 +136,13 @@ func TestUpgradeCmd_MigratesConfig(t *testing.T) {
 		t.Fatalf("upgrade failed: %v\noutput:\n%s", err, buf.String())
 	}
 
-	// Config should be loadable and have runtimes map.
+	// Config should be loadable and have harnesses map.
 	cfg, err := config.Load(filepath.Join(dir, ".mom"))
 	if err != nil {
 		t.Fatalf("loading config after upgrade: %v", err)
 	}
-	if len(cfg.EnabledRuntimes()) == 0 {
-		t.Error("expected at least one enabled runtime after migration")
+	if len(cfg.EnabledHarnesses()) == 0 {
+		t.Error("expected at least one enabled harness after migration")
 	}
 
 	// User settings should be preserved.
@@ -414,7 +417,7 @@ func TestUpgradeCmd_MigratesMetricDocs(t *testing.T) {
 	}
 }
 
-func TestUpgradeCmd_GeneratesRuntimeFiles(t *testing.T) {
+func TestUpgradeCmd_GeneratesHarnessFiles(t *testing.T) {
 	resetUpgradeFlags(t)
 	dir := setupLegacyProject(t)
 
@@ -431,7 +434,7 @@ func TestUpgradeCmd_GeneratesRuntimeFiles(t *testing.T) {
 		t.Fatalf("upgrade failed: %v", err)
 	}
 
-	// CLAUDE.md should exist (claude is the migrated runtime).
+	// CLAUDE.md should exist (claude is the migrated harness).
 	claudeMD := filepath.Join(dir, ".claude", "CLAUDE.md")
 	if _, err := os.Stat(claudeMD); err != nil {
 		t.Error("CLAUDE.md not generated during upgrade")
@@ -650,7 +653,7 @@ func TestInitCmd_NewLayout_NoKBDir(t *testing.T) {
 	buf := new(bytes.Buffer)
 	rootCmd.SetOut(buf)
 	rootCmd.SetErr(buf)
-	rootCmd.SetArgs([]string{"init", "--runtimes", "claude"})
+	rootCmd.SetArgs([]string{"init", "--harnesses", "claude"})
 
 	if err := rootCmd.Execute(); err != nil {
 		t.Fatalf("init failed: %v", err)
@@ -694,7 +697,7 @@ func TestUpgradeCmd_ScrubsDeadConfigFields(t *testing.T) {
 
 	// Write a config that still has the retired fields.
 	staleConfig := `version: "1"
-runtimes:
+harnesses:
   claude:
     enabled: true
     tiers:
@@ -880,6 +883,66 @@ func TestUpgradeCmd_MigratesFactASTToPattern(t *testing.T) {
 	}
 }
 
+func TestUpgradeCmd_InstallsSkillsForConfiguredHarnesses(t *testing.T) {
+	resetUpgradeFlags(t)
+	dir := setupLegacyProject(t)
+	origDir, _ := os.Getwd()
+	os.Chdir(dir)
+	defer os.Chdir(origDir)
+
+	var calls []string
+	oldRunner := runExternalCommand
+	runExternalCommand = func(name string, args ...string) ([]byte, error) {
+		calls = append(calls, name+" "+strings.Join(args, " "))
+		return []byte("ok"), nil
+	}
+	t.Cleanup(func() { runExternalCommand = oldRunner })
+
+	buf := new(bytes.Buffer)
+	rootCmd.SetOut(buf)
+	rootCmd.SetErr(buf)
+	rootCmd.SetArgs([]string{"upgrade"})
+
+	if err := rootCmd.Execute(); err != nil {
+		t.Fatalf("upgrade failed: %v\noutput:\n%s", err, buf.String())
+	}
+	joined := strings.Join(calls, "\n")
+	if !strings.Contains(joined, "npx skills add momhq/mom -g -s * -a claude-code -y") {
+		t.Fatalf("skills install command missing, got: %v", calls)
+	}
+}
+
+func TestUpgradeCmd_DryRunPrintsPlannedSkillsInstallCommands(t *testing.T) {
+	resetUpgradeFlags(t)
+	dir := setupLegacyProject(t)
+	origDir, _ := os.Getwd()
+	os.Chdir(dir)
+	defer os.Chdir(origDir)
+
+	var calls []string
+	oldRunner := runExternalCommand
+	runExternalCommand = func(name string, args ...string) ([]byte, error) {
+		calls = append(calls, name+" "+strings.Join(args, " "))
+		return []byte("ok"), nil
+	}
+	t.Cleanup(func() { runExternalCommand = oldRunner })
+
+	buf := new(bytes.Buffer)
+	rootCmd.SetOut(buf)
+	rootCmd.SetErr(buf)
+	rootCmd.SetArgs([]string{"upgrade", "--dry-run"})
+
+	if err := rootCmd.Execute(); err != nil {
+		t.Fatalf("upgrade --dry-run failed: %v\noutput:\n%s", err, buf.String())
+	}
+	if len(calls) != 0 {
+		t.Fatalf("dry run should not install skills, got: %v", calls)
+	}
+	if !strings.Contains(buf.String(), "npx skills add momhq/mom -g -s '*' -a claude-code -y") {
+		t.Fatalf("dry run output missing planned skills command:\n%s", buf.String())
+	}
+}
+
 // TestUpgradeCmd_ScrubIdempotent verifies a second upgrade on an already-scrubbed
 // config does not fail or re-report the scrub action.
 func TestUpgradeCmd_ScrubIdempotent(t *testing.T) {
@@ -893,7 +956,7 @@ func TestUpgradeCmd_ScrubIdempotent(t *testing.T) {
 
 	// Write a clean (already-scrubbed) config.
 	cleanConfig := `version: "1"
-runtimes:
+harnesses:
   claude:
     enabled: true
 user:

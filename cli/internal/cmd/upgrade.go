@@ -19,7 +19,7 @@ import (
 var upgradeCmd = &cobra.Command{
 	Use:   "upgrade",
 	Short: "Upgrade .mom/ to the latest version (preserves your memory docs)",
-	Long: `Upgrades core infrastructure (schema, constraints, skills, runtime files)
+	Long: `Upgrades core infrastructure (schema, constraints, skills, harness files)
 to match the installed mom binary. Your documents in .mom/memory/ are never touched.
 
 Legacy central import scans $HOME and asks before writing.`,
@@ -328,18 +328,20 @@ func upgradeSingleDir(cmd *cobra.Command, projectRoot string, dryRun bool) error
 		return phase2Err
 	}
 
-	// ── Phase 3: Rebuild index and regenerate runtime files ─────────────────
+	// ── Phase 3: Rebuild index and regenerate harness files ─────────────────
 	var phase3Err error
 	doPhase3 := func() {
 		if !dryRun {
-			if err := regenerateRuntimeFiles(projectRoot, leoDir, cfg); err != nil {
+			if err := regenerateHarnessFiles(projectRoot, leoDir, cfg); err != nil {
 				phase3Err = err
 				return
 			}
 		}
 		for _, rt := range cfg.EnabledHarnesses() {
-			addAction("✔", fmt.Sprintf("runtime %s context file regenerated", rt))
+			addAction("✔", fmt.Sprintf("harness %s context file regenerated", rt))
 		}
+
+		installSkillsDuringUpgrade(cfg.EnabledHarnesses(), dryRun, addAction)
 
 		// Rebuild SQLite search index from JSON files.
 		if !dryRun {
@@ -359,7 +361,7 @@ func upgradeSingleDir(cmd *cobra.Command, projectRoot string, dryRun bool) error
 
 	if showSpinner {
 		sp := ux.NewSpinner(os.Stderr)
-		sp.Start("Regenerating runtime files")
+		sp.Start("Regenerating harness files")
 		doPhase3()
 		sp.Stop()
 	} else {
@@ -411,6 +413,31 @@ func upgradeSingleDir(cmd *cobra.Command, projectRoot string, dryRun bool) error
 	p.Blank()
 
 	return nil
+}
+
+func installSkillsDuringUpgrade(harnesses []string, dryRun bool, addAction func(string, string)) {
+	for _, h := range harnesses {
+		agent, ok := skillsAgentForHarness(h)
+		if !ok {
+			addAction("⚠", fmt.Sprintf("skills: unsupported harness %s", h))
+			continue
+		}
+		args, command := skillsInstallCommand(agent)
+		if dryRun {
+			addAction("+", "would run "+command)
+			continue
+		}
+		if output, err := runExternalCommand("npx", args...); err != nil {
+			detail := fmt.Sprintf("skills install %s → %s failed: %v", h, agent, err)
+			if len(output) > 0 {
+				detail += ": " + strings.TrimSpace(string(output))
+			}
+			detail += fmt.Sprintf("; retry with mom upgrade, mom init --force, or run: %s", command)
+			addAction("⚠", detail)
+			continue
+		}
+		addAction("✔", fmt.Sprintf("skills installed for %s → %s", h, agent))
+	}
 }
 
 // propagateUpgrade walks child directories and upgrades each legacy .mom/ found.
@@ -765,8 +792,8 @@ func kebabOnly(s string) string {
 	return result
 }
 
-// regenerateRuntimeFiles rebuilds all runtime context files from the current config.
-func regenerateRuntimeFiles(projectRoot, leoDir string, cfg *config.Config) error {
+// regenerateHarnessFiles rebuilds all harness context files from the current config.
+func regenerateHarnessFiles(projectRoot, leoDir string, cfg *config.Config) error {
 	registry := harness.NewRegistry(projectRoot)
 
 	runtimeCfg := buildRuntimeConfig(cfg)
@@ -802,7 +829,7 @@ func regenerateRuntimeFiles(projectRoot, leoDir string, cfg *config.Config) erro
 }
 
 // scrubDeadConfigFields reads config.yaml from leoDir, removes the retired
-// "tiers" key from every runtime block and the "autonomy" key from the user
+// "tiers" key from every harness block and the "autonomy" key from the user
 // block, and returns the cleaned bytes plus a changed flag. It does nothing
 // when the keys are already absent.
 //
