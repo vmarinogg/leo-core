@@ -14,14 +14,15 @@ import (
 
 	"github.com/momhq/mom/cli/internal/centralvault"
 	"github.com/momhq/mom/cli/internal/librarian"
-	"github.com/momhq/mom/cli/internal/ux"
 	"github.com/spf13/cobra"
 )
 
 type legacyVaultPlan struct {
-	Path        string
-	Fingerprint string
-	Docs        []legacyMemoryDoc
+	Path           string
+	Fingerprint    string
+	Docs           []legacyMemoryDoc
+	LogFingerprint string
+	Logs           []legacyLogEvent
 }
 
 type legacyMemoryDoc struct {
@@ -32,62 +33,15 @@ type legacyMemoryDoc struct {
 }
 
 type importSummary struct {
-	Vaults   int
-	Memories int
-	Mappings []librarian.LegacyImportMapping
-	Skipped  int
-	Audit    string
-}
-
-func runCentralMemoryImport(cmd *cobra.Command, dryRun, skip bool) error {
-	if skip {
-		ux.NewPrinter(cmd.OutOrStdout()).Muted("Central memory import skipped (--skip-memories).")
-		return nil
-	}
-	plans, err := discoverLegacyVaultsForImport()
-	if err != nil {
-		return err
-	}
-	p := ux.NewPrinter(cmd.OutOrStdout())
-	if len(plans) == 0 {
-		p.Muted("No legacy .mom/memory folders found for central import.")
-		return nil
-	}
-	memoryCount := 0
-	for _, plan := range plans {
-		memoryCount += len(plan.Docs)
-	}
-	p.Blank()
-	if dryRun {
-		p.Bold("Dry run — central memory import plan:")
-	} else {
-		p.Bold("Central memory import plan:")
-	}
-	for _, plan := range plans {
-		p.KeyValue(shortenPath(plan.Path), fmt.Sprintf("%d memories", len(plan.Docs)), 28)
-	}
-	p.KeyValue("Total", fmt.Sprintf("%d vaults, %d memories", len(plans), memoryCount), 28)
-	p.Blank()
-	if dryRun {
-		return nil
-	}
-	if !confirmUpgradeImport(cmd, len(plans), memoryCount) {
-		return fmt.Errorf("upgrade aborted by user")
-	}
-	summary, err := executeCentralMemoryImport(plans)
-	if err != nil {
-		return err
-	}
-	p.Bold("Central memory import complete:")
-	p.Checkf("vaults imported: %d", summary.Vaults)
-	p.Checkf("memories imported: %d", summary.Memories)
-	if summary.Skipped > 0 {
-		p.Warnf("vaults skipped (already imported): %d", summary.Skipped)
-	}
-	if summary.Audit != "" {
-		p.Checkf("ID mapping written: %s", summary.Audit)
-	}
-	return nil
+	Vaults      int
+	Memories    int
+	Mappings    []librarian.LegacyImportMapping
+	Skipped     int
+	Audit       string
+	LogEvents   int
+	LogMappings []librarian.LegacyLogImportMapping
+	LogSkipped  int
+	LogAudit    string
 }
 
 func discoverLegacyVaultsForImport() ([]legacyVaultPlan, error) {
@@ -119,9 +73,13 @@ func discoverLegacyVaultsForImport() ([]legacyVaultPlan, error) {
 			if samePath(path, centralDir) {
 				return filepath.SkipDir
 			}
-			docs, fingerprint, err := readLegacyMemoryDocs(path)
-			if err == nil && len(docs) > 0 {
-				plans = append(plans, legacyVaultPlan{Path: path, Fingerprint: fingerprint, Docs: docs})
+			docs, fingerprint, memErr := readLegacyMemoryDocs(path)
+			logs, logFingerprint, logErr := readLegacyLogEvents(path)
+			if logErr != nil && !os.IsNotExist(logErr) {
+				return logErr
+			}
+			if (memErr == nil && len(docs) > 0) || (logErr == nil && len(logs) > 0) {
+				plans = append(plans, legacyVaultPlan{Path: path, Fingerprint: fingerprint, Docs: docs, LogFingerprint: logFingerprint, Logs: logs})
 			}
 			return filepath.SkipDir
 		}
@@ -209,11 +167,15 @@ func legacyMemoryJSONPath(memDir string, e fs.DirEntry) (string, bool) {
 	return path, true
 }
 
-func confirmUpgradeImport(cmd *cobra.Command, vaults, memories int) bool {
+func confirmUpgradeImport(cmd *cobra.Command, vaults, memories int, logs ...int) bool {
 	if strings.EqualFold(os.Getenv("MOM_UPGRADE_ASSUME_YES"), "1") || strings.EqualFold(os.Getenv("MOM_UPGRADE_ASSUME_YES"), "true") {
 		return true
 	}
-	fmt.Fprintf(cmd.OutOrStdout(), "Import %d memories from %d legacy .mom folders into the central vault? [y/N] ", memories, vaults)
+	logCount := 0
+	if len(logs) > 0 {
+		logCount = logs[0]
+	}
+	fmt.Fprintf(cmd.OutOrStdout(), "Import %d memories and %d log events from %d legacy .mom folders into the central vault? [y/N] ", memories, logCount, vaults)
 	reader := bufio.NewReader(os.Stdin)
 	line, _ := reader.ReadString('\n')
 	line = strings.ToLower(strings.TrimSpace(line))
@@ -228,6 +190,9 @@ func executeCentralMemoryImport(plans []legacyVaultPlan) (importSummary, error) 
 	defer func() { _ = closeFn() }()
 	var summary importSummary
 	for _, plan := range plans {
+		if len(plan.Docs) == 0 {
+			continue
+		}
 		records := make([]librarian.LegacyImportMemory, 0, len(plan.Docs))
 		for _, d := range plan.Docs {
 			rec, err := legacyDocToImportRecord(d)
