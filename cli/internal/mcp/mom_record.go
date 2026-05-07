@@ -1,12 +1,10 @@
 package mcp
 
 import (
-	"errors"
 	"fmt"
-	"strings"
 
+	"github.com/momhq/mom/cli/internal/explicitrecord"
 	"github.com/momhq/mom/cli/internal/herald"
-	"github.com/momhq/mom/cli/internal/librarian"
 )
 
 // MemoryRecordEventType is re-exported from herald for backwards
@@ -18,31 +16,6 @@ import (
 // use herald.TurnObserved instead.
 var MemoryRecordEventType = herald.MemoryRecord
 
-// MemoryRecordPayload is the canonical payload shape for memory.record
-// events. Drafter reads these fields verbatim; nothing else inspects
-// the payload, so the contract is defined here.
-//
-// Provenance is filled in by the handler:
-//   - ProvenanceTriggerEvent = "record"
-//   - ProvenanceSourceType   = "manual-draft"
-//   - ProvenanceActor        = ActorAgent (claude-code, codex, …) or
-//     "mcp" when the caller did not announce.
-//
-// Tags are normalised via librarian.NormalizeTagName before publish;
-// every entry in Tags is the canonical form. If any input tag
-// normalised to empty the handler rejects the WHOLE request before
-// publishing — mirroring the lesson that prevented the orphan-row bug
-// in the previous attempt.
-type MemoryRecordPayload struct {
-	SessionID              string
-	Summary                string
-	Tags                   []string
-	Content                map[string]any
-	ProvenanceActor        string
-	ProvenanceSourceType   string
-	ProvenanceTriggerEvent string
-}
-
 // toolMomRecord is the MCP handler. It validates inputs, normalises
 // tags, then publishes the record event on the v0.30 bus. It does NOT
 // call Librarian directly — Drafter is the worker that subscribes to
@@ -50,7 +23,8 @@ type MemoryRecordPayload struct {
 //
 // Validation rules (locked):
 //   - content is required, must be an object/map (not empty).
-//   - session_id is required.
+//   - session_id must be real when supplied; otherwise MOM resolves known harness
+//     session env vars. If no real session is available, the record is rejected.
 //   - summary is optional.
 //   - tags is optional. Each tag is normalised; if any normalises to
 //     empty, the entire request is rejected with a clear error and no
@@ -60,65 +34,28 @@ func (s *Server) toolMomRecord(args map[string]any) (toolCallResult, error) {
 	if err != nil {
 		return toolCallResult{}, err
 	}
-	sessionID := stringArg(args, "session_id")
-	if strings.TrimSpace(sessionID) == "" {
-		return toolCallResult{}, errors.New("session_id is required")
-	}
-	summary := stringArg(args, "summary")
-
 	rawTags, err := optionalStringSliceArg(args, "tags")
 	if err != nil {
 		return toolCallResult{}, err
 	}
-	normalisedTags, err := normaliseTagsOrReject(rawTags)
+
+	result, err := explicitrecord.Publish(s.bus, explicitrecord.Request{
+		SessionID: stringArg(args, "session_id"),
+		Summary:   stringArg(args, "summary"),
+		Tags:      rawTags,
+		Content:   content,
+		Actor:     stringArg(args, "actor"),
+	})
 	if err != nil {
 		return toolCallResult{}, err
 	}
 
-	actor := stringArg(args, "actor")
-	if strings.TrimSpace(actor) == "" {
-		actor = "mcp"
-	}
-
-	payload := MemoryRecordPayload{
-		SessionID:              sessionID,
-		Summary:                summary,
-		Tags:                   normalisedTags,
-		Content:                content,
-		ProvenanceActor:        actor,
-		ProvenanceSourceType:   "manual-draft",
-		ProvenanceTriggerEvent: "record",
-	}
-
-	s.bus.Publish(herald.Event{
-		Type:      herald.MemoryRecord,
-		SessionID: payload.SessionID,
-		Payload:   payloadAsMap(payload),
-	})
-
 	return toolCallResult{
 		Content: []toolContent{{
 			Type: "text",
-			Text: fmt.Sprintf("recorded: session=%s tags=%v summary=%q", sessionID, normalisedTags, summary),
+			Text: fmt.Sprintf("recorded: session=%s tags=%v summary=%q", result.SessionID, result.Tags, result.Summary),
 		}},
 	}, nil
-}
-
-// normaliseTagsOrReject applies librarian.NormalizeTagName to every
-// input tag. If any tag normalises to empty (e.g., "!!!", "  "), the
-// whole slice is rejected with an error — the previous attempt's
-// orphan-row bug came from publishing the memory then failing later on
-// a per-tag UpsertTag("").
-func normaliseTagsOrReject(raw []string) ([]string, error) {
-	out := make([]string, 0, len(raw))
-	for i, t := range raw {
-		n := librarian.NormalizeTagName(t)
-		if n == "" {
-			return nil, fmt.Errorf("tag %d (%q) normalises to empty; reject the request rather than persist a partial memory", i, t)
-		}
-		out = append(out, n)
-	}
-	return out, nil
 }
 
 // requireMapArg returns the named argument as a map[string]any. Each
@@ -160,25 +97,4 @@ func optionalStringSliceArg(args map[string]any, key string) ([]string, error) {
 		out = append(out, s)
 	}
 	return out, nil
-}
-
-// payloadAsMap converts a MemoryRecordPayload to a map for the Herald
-// payload bag. SessionID is NOT included — it lives on the envelope
-// (herald.Event.SessionID), not in the bag. Including it here would
-// duplicate the contract and re-introduce the silent-drop class of
-// bug Theme A retired.
-func payloadAsMap(p MemoryRecordPayload) map[string]any {
-	m := map[string]any{
-		"content":                  p.Content,
-		"provenance_actor":         p.ProvenanceActor,
-		"provenance_source_type":   p.ProvenanceSourceType,
-		"provenance_trigger_event": p.ProvenanceTriggerEvent,
-	}
-	if p.Summary != "" {
-		m["summary"] = p.Summary
-	}
-	if len(p.Tags) > 0 {
-		m["tags"] = p.Tags
-	}
-	return m
 }

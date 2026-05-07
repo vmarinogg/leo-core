@@ -95,6 +95,7 @@ func TestPiAdapter_RegisterExtension_LaysDownExtension(t *testing.T) {
 		"export default",
 		"pi.registerTool",
 		"mom",
+		"ctx.sessionManager.getSessionId()",
 	} {
 		if !strings.Contains(s, want) {
 			t.Errorf("mom-tools.ts missing expected token %q", want)

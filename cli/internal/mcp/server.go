@@ -209,7 +209,7 @@ func (s *Server) handleInitialize(_ json.RawMessage) (any, *rpcError) {
 			"name":    "mom-mcp-server",
 			"version": Version,
 		},
-		"instructions": "Use MOM for persistent memory. Available tools: mom_status, mom_recall, mom_get, mom_landmarks, mom_record. Call mom_recall before memory-derived claims and cite returned memory IDs.",
+		"instructions": "Use MOM for persistent memory. Prefer MOM skills and CLI; use MCP as fallback/startup. Call mom_recall before memory-derived claims and cite returned memory IDs. For explicit saves, prefer `mom record`; if using mom_record, never invent session_id.",
 	}, nil
 }
 
