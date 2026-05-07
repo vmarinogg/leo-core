@@ -3,6 +3,7 @@ package cmd
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -994,6 +995,40 @@ func TestUpgradeCmd_RemovesDeadHookCommands(t *testing.T) {
 	}
 	if !strings.Contains(buf.String(), "dead hook entries removed") {
 		t.Fatalf("upgrade output should mention dead hook cleanup:\n%s", buf.String())
+	}
+}
+
+func TestUpgradeCmd_SkillsInstallFailureHidesToolOutput(t *testing.T) {
+	resetUpgradeFlags(t)
+	dir := setupLegacyProject(t)
+	origDir, _ := os.Getwd()
+	os.Chdir(dir)
+	defer os.Chdir(origDir)
+
+	oldRunner := runExternalCommand
+	runExternalCommand = func(name string, args ...string) ([]byte, error) {
+		return []byte("npm warn exec installing skills\nSKILLS ASCII BANNER\nSource: https://github.com/momhq/mom.git"), fmt.Errorf("npx failed")
+	}
+	t.Cleanup(func() { runExternalCommand = oldRunner })
+
+	buf := new(bytes.Buffer)
+	rootCmd.SetOut(buf)
+	rootCmd.SetErr(buf)
+	rootCmd.SetArgs([]string{"upgrade"})
+
+	if err := rootCmd.Execute(); err != nil {
+		t.Fatalf("upgrade should soft-fail skills install, got: %v\noutput:\n%s", err, buf.String())
+	}
+	out := buf.String()
+	for _, want := range []string{"skills install", "mom upgrade", "mom init --force", "npx skills add momhq/mom -g -s '*' -a claude-code -y"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("output missing %q:\n%s", want, out)
+		}
+	}
+	for _, leak := range []string{"npm warn exec", "SKILLS ASCII BANNER", "Source: https://github.com/momhq/mom.git"} {
+		if strings.Contains(out, leak) {
+			t.Fatalf("upgrade output should hide noisy skills CLI output %q:\n%s", leak, out)
+		}
 	}
 }
 
