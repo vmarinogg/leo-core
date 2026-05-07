@@ -194,7 +194,7 @@ func upsertMCPEntryWithEnv(path, projectRoot string) error {
 
 func windsurfHookSettings(workingDir string) map[string][]map[string]any {
 	hooks := []HookDef{
-		{Event: "post_cascade_response_with_transcript", Command: "mom draft"},
+		{Event: "post_cascade_response_with_transcript", Command: "mom watch --sweep"},
 	}
 	byEvent := make(map[string][]map[string]any)
 	for _, h := range hooks {

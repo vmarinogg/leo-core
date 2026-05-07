@@ -52,8 +52,7 @@ func (a *CodexAdapter) GenerateContextFile(config Config, constraints []Constrai
 
 func (a *CodexAdapter) RegisterHooks() error {
 	hooks := []HookDef{
-		{Event: "Stop", Command: "mom record"},
-		{Event: "Stop", Command: "mom draft"},
+		{Event: "Stop", Command: "mom watch --sweep"},
 	}
 	codexDir := filepath.Join(a.projectRoot, ".codex")
 	hooksPath := filepath.Join(codexDir, "hooks.json")

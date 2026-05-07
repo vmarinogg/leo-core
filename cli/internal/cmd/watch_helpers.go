@@ -7,8 +7,10 @@ import (
 	"strings"
 
 	"github.com/momhq/mom/cli/internal/adapters/harness"
+	"github.com/momhq/mom/cli/internal/centralvault"
 	"github.com/momhq/mom/cli/internal/config"
 	"github.com/momhq/mom/cli/internal/daemon"
+	"github.com/momhq/mom/cli/internal/scope"
 	"github.com/momhq/mom/cli/internal/ux"
 	"github.com/momhq/mom/cli/internal/watcher"
 )
@@ -28,7 +30,19 @@ func harnessTranscriptDir(name string) string {
 	return ""
 }
 
-
+func resolveMomContext(cwd string) (projectDir string, momDir string, err error) {
+	if sc, ok := scope.NearestWritable(cwd); ok {
+		return filepath.Dir(sc.Path), sc.Path, nil
+	}
+	centralDir, err := centralvault.Dir()
+	if err != nil {
+		return "", "", err
+	}
+	if _, err := os.Stat(filepath.Join(centralDir, "config.yaml")); err != nil {
+		return "", "", fmt.Errorf("no MOM configuration found from %q — run mom init first", cwd)
+	}
+	return cwd, centralDir, nil
+}
 
 // ensureGlobalDaemon registers the project in the global watch registry and
 // ensures the single global daemon is running. Also cleans up legacy per-project agents.
@@ -92,8 +106,7 @@ func unregisterProject(projectRoot, momDir string) error {
 }
 
 // runWatchInstall handles `mom watch --install`.
-func runWatchInstall(momDir string, p *ux.Printer) error {
-	projectRoot := filepath.Dir(momDir)
+func runWatchInstall(projectRoot, momDir string, p *ux.Printer) error {
 	cfg, err := config.Load(momDir)
 	if err != nil {
 		return fmt.Errorf("loading config: %w", err)
@@ -121,9 +134,7 @@ func runWatchInstall(momDir string, p *ux.Printer) error {
 }
 
 // runWatchUninstall handles `mom watch --uninstall`.
-func runWatchUninstall(momDir string, p *ux.Printer) error {
-	projectRoot := filepath.Dir(momDir)
-
+func runWatchUninstall(projectRoot, momDir string, p *ux.Printer) error {
 	sp := ux.NewSpinner(os.Stderr)
 	sp.Start("Removing watch daemon")
 	uninstallErr := unregisterProject(projectRoot, momDir)
@@ -139,13 +150,12 @@ func runWatchUninstall(momDir string, p *ux.Printer) error {
 
 // sweepTranscripts runs a one-shot catch-up sweep for all watcher-capable
 // runtimes. Best-effort: errors are logged to stderr, never returned.
-func sweepTranscripts(momDir string) {
+func sweepTranscripts(projectDir, momDir string) {
 	cfg, err := config.Load(momDir)
 	if err != nil {
 		return
 	}
 
-	projectDir := filepath.Dir(momDir)
 	sources := buildWatcherSources(cfg, projectDir)
 	if len(sources) == 0 {
 		return

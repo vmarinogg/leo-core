@@ -204,8 +204,8 @@ func (a *ClaudeAdapter) Capabilities() AdapterCapability {
 
 func claudeHookSettings() map[string]any {
 	hooks := []HookDef{
-		{Event: "Stop", Command: "mom draft"},
-		{Event: "SessionEnd", Command: "mom draft"},
+		{Event: "Stop", Command: "mom watch --sweep"},
+		{Event: "SessionEnd", Command: "mom watch --sweep"},
 	}
 	hooksMap := make(map[string]any)
 	byEvent := make(map[string][]HookDef)

@@ -227,29 +227,29 @@ func TestClaudeAdapter_RegisterHooks(t *testing.T) {
 		t.Fatal("hooks.Stop should be an array")
 	}
 	if len(stop) != 1 {
-		t.Fatalf("expected 1 Stop matcher group (draft only, record removed), got %d", len(stop))
+		t.Fatalf("expected 1 Stop matcher group (sweep only), got %d", len(stop))
 	}
 
 	group0 := stop[0].(map[string]any)
 	innerHooks0 := group0["hooks"].([]any)
 	hookEntry0 := innerHooks0[0].(map[string]any)
-	if hookEntry0["command"] != "mom draft" {
-		t.Errorf("expected command 'mom draft', got %v", hookEntry0["command"])
+	if hookEntry0["command"] != "mom watch --sweep" {
+		t.Errorf("expected command 'mom watch --sweep', got %v", hookEntry0["command"])
 	}
 
-	// SessionEnd should have a fallback "mom draft" to catch the last response.
+	// SessionEnd has a fallback sweep to catch the last response.
 	sessionEnd, ok := hooksMap["SessionEnd"].([]any)
 	if !ok {
 		t.Fatal("hooks.SessionEnd should be an array")
 	}
 	if len(sessionEnd) != 1 {
-		t.Fatalf("expected 1 SessionEnd matcher group (draft), got %d", len(sessionEnd))
+		t.Fatalf("expected 1 SessionEnd matcher group (sweep), got %d", len(sessionEnd))
 	}
 	seGroup := sessionEnd[0].(map[string]any)
 	seHooks := seGroup["hooks"].([]any)
 	seEntry := seHooks[0].(map[string]any)
-	if seEntry["command"] != "mom draft" {
-		t.Errorf("expected SessionEnd command 'mom draft', got %v", seEntry["command"])
+	if seEntry["command"] != "mom watch --sweep" {
+		t.Errorf("expected SessionEnd command 'mom watch --sweep', got %v", seEntry["command"])
 	}
 }
 
