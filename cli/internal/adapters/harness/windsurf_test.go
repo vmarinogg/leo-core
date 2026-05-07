@@ -108,16 +108,15 @@ func TestWindsurfAdapter_RegisterHooks(t *testing.T) {
 	if !ok {
 		t.Fatal("hooks.json missing post_cascade_response_with_transcript event")
 	}
-	// Recording is done by the filesystem watcher (mom watch --runtime windsurf).
-	// Only mom draft should remain — mom record is intentionally absent (#145).
+	// Recording is done by the filesystem watcher sweep.
 	if len(event) != 1 {
-		t.Fatalf("expected 1 hook entry (mom draft only), got %d", len(event))
+		t.Fatalf("expected 1 hook entry (sweep only), got %d", len(event))
 	}
 
-	// Verify the sole hook command is "mom draft" with working_directory.
+	// Verify the sole hook command sweeps with working_directory.
 	entry0 := event[0].(map[string]any)
-	if entry0["command"] != "mom draft" {
-		t.Errorf("expected command 'mom draft', got %v", entry0["command"])
+	if entry0["command"] != "mom watch --sweep" {
+		t.Errorf("expected command 'mom watch --sweep', got %v", entry0["command"])
 	}
 	if entry0["working_directory"] != dir {
 		t.Errorf("expected working_directory %q, got %v", dir, entry0["working_directory"])
@@ -181,25 +180,18 @@ func TestWindsurfAdapter_GeneratedFiles(t *testing.T) {
 	}
 }
 
-func TestWindsurfAdapter_GitIgnorePaths(t *testing.T) {
-	a := NewWindsurfAdapter("/tmp/test")
-	paths := a.GitIgnorePaths()
-
-	if len(paths) != 1 || paths[0] != ".windsurf/" {
-		t.Errorf("expected [.windsurf/], got %v", paths)
-	}
-}
-
 func TestWindsurfAdapter_DetectHarness(t *testing.T) {
-	dir := t.TempDir()
-	a := NewWindsurfAdapter(dir)
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("PATH", t.TempDir())
+	a := NewWindsurfAdapter(t.TempDir())
 
 	if a.DetectHarness() {
-		t.Error("expected false when .windsurf/ does not exist")
+		t.Error("expected false when global Windsurf config does not exist")
 	}
 
-	os.MkdirAll(filepath.Join(dir, ".windsurf"), 0755)
+	os.MkdirAll(filepath.Join(home, ".codeium", "windsurf"), 0755)
 	if !a.DetectHarness() {
-		t.Error("expected true when .windsurf/ exists")
+		t.Error("expected true when global Windsurf config exists")
 	}
 }

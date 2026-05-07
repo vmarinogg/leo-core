@@ -18,7 +18,6 @@ import (
 	"github.com/momhq/mom/cli/internal/drafter"
 	"github.com/momhq/mom/cli/internal/herald"
 	"github.com/momhq/mom/cli/internal/logbook"
-	"github.com/momhq/mom/cli/internal/scope"
 	"github.com/momhq/mom/cli/internal/ux"
 	"github.com/momhq/mom/cli/internal/watcher"
 	"github.com/spf13/cobra"
@@ -52,9 +51,10 @@ Cursor files in .mom/cache/ track the last ingested byte offset per session,
 so restarts are safe and idempotent.
 
 The watcher runs in the foreground. Use Ctrl-C to stop.`,
+	Args:          cobra.NoArgs,
 	RunE:          runWatch,
 	SilenceUsage:  true,
-	SilenceErrors: true,
+	SilenceErrors: false,
 }
 
 func init() {
@@ -89,11 +89,10 @@ func runWatch(cmd *cobra.Command, _ []string) error {
 	if envDir := os.Getenv("MOM_PROJECT_DIR"); envDir != "" {
 		cwd = envDir
 	}
-	sc, ok := scope.NearestWritable(cwd)
-	if !ok {
-		return fmt.Errorf("no .mom/ found from %q — run mom init first", cwd)
+	projectDir, momDir, err := resolveMomContext(cwd)
+	if err != nil {
+		return err
 	}
-	momDir := sc.Path
 
 	if watchStatus {
 		return runWatchStatus(momDir)
@@ -102,13 +101,11 @@ func runWatch(cmd *cobra.Command, _ []string) error {
 	p := ux.NewPrinter(os.Stderr)
 
 	if watchInstall {
-		return runWatchInstall(momDir, p)
+		return runWatchInstall(projectDir, momDir, p)
 	}
 	if watchUninstall {
-		return runWatchUninstall(momDir, p)
+		return runWatchUninstall(projectDir, momDir, p)
 	}
-
-	projectDir := filepath.Dir(momDir)
 
 	// Open the central vault once for this watch process. Worker is
 	// shared across the per-project buses below.
@@ -469,17 +466,17 @@ func runWatchGlobal(sweepOnly bool) error {
 	}
 }
 
-// runWatchStatus prints cursor files in .mom/raw/ for inspection.
+// runWatchStatus prints watcher cursor files for inspection.
 func runWatchStatus(momDir string) error {
 	p := ux.NewPrinter(os.Stderr)
-	rawDir := filepath.Join(momDir, "raw")
-	entries, err := os.ReadDir(rawDir)
+	cursorDir := filepath.Join(momDir, "cache")
+	entries, err := os.ReadDir(cursorDir)
 	if err != nil {
 		if os.IsNotExist(err) {
-			p.Warn(fmt.Sprintf("no raw dir at %s — nothing recorded yet", rawDir))
+			p.Warn(fmt.Sprintf("no cache dir at %s — watcher has not run yet", cursorDir))
 			return nil
 		}
-		return fmt.Errorf("reading raw dir: %w", err)
+		return fmt.Errorf("reading cache dir: %w", err)
 	}
 
 	type cursor struct {
@@ -493,7 +490,7 @@ func runWatchStatus(momDir string) error {
 		}
 		if strings.HasPrefix(e.Name(), ".watch-cursor-") {
 			sid := strings.TrimPrefix(e.Name(), ".watch-cursor-")
-			cf := filepath.Join(rawDir, e.Name())
+			cf := filepath.Join(cursorDir, e.Name())
 			data, err := os.ReadFile(cf)
 			if err != nil {
 				continue

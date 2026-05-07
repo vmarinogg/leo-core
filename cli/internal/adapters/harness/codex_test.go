@@ -16,16 +16,19 @@ func TestCodexAdapter_Name(t *testing.T) {
 }
 
 func TestCodexAdapter_DetectHarness(t *testing.T) {
-	dir := t.TempDir()
-	a := NewCodexAdapter(dir)
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("CODEX_HOME", "")
+	t.Setenv("PATH", t.TempDir())
+	a := NewCodexAdapter(t.TempDir())
 
 	if a.DetectHarness() {
-		t.Error("expected false when AGENTS.md does not exist")
+		t.Error("expected false when global Codex config does not exist")
 	}
 
-	os.WriteFile(filepath.Join(dir, "AGENTS.md"), []byte("# agents"), 0644)
+	os.MkdirAll(filepath.Join(home, ".codex"), 0755)
 	if !a.DetectHarness() {
-		t.Error("expected true when AGENTS.md exists")
+		t.Error("expected true when global .codex/ exists")
 	}
 }
 
@@ -111,46 +114,27 @@ func TestCodexAdapter_RegisterHooks(t *testing.T) {
 	if !ok {
 		t.Fatal("hooks.Stop should be an array")
 	}
-	if len(stop) != 2 {
-		t.Fatalf("expected 2 Stop matcher groups, got %d", len(stop))
+	if len(stop) != 1 {
+		t.Fatalf("expected 1 Stop matcher group, got %d", len(stop))
 	}
 
-	// Verify both "mom record" and "mom draft" are present.
-	var commands []string
-	for _, entry := range stop {
-		group, ok := entry.(map[string]any)
-		if !ok {
-			t.Fatal("matcher group should be a map")
-		}
-		innerHooks, ok := group["hooks"].([]any)
-		if !ok || len(innerHooks) == 0 {
-			t.Fatal("matcher group should have a hooks array")
-		}
-		hookEntry, ok := innerHooks[0].(map[string]any)
-		if !ok {
-			t.Fatal("hook entry should be a map")
-		}
-		if hookEntry["type"] != "command" {
-			t.Errorf("expected type 'command', got %v", hookEntry["type"])
-		}
-		commands = append(commands, hookEntry["command"].(string))
+	group, ok := stop[0].(map[string]any)
+	if !ok {
+		t.Fatal("matcher group should be a map")
 	}
-
-	hasRecord := false
-	hasDraft := false
-	for _, cmd := range commands {
-		if cmd == "mom record" {
-			hasRecord = true
-		}
-		if cmd == "mom draft" {
-			hasDraft = true
-		}
+	innerHooks, ok := group["hooks"].([]any)
+	if !ok || len(innerHooks) == 0 {
+		t.Fatal("matcher group should have a hooks array")
 	}
-	if !hasRecord {
-		t.Error("hooks.json missing 'mom record' command")
+	hookEntry, ok := innerHooks[0].(map[string]any)
+	if !ok {
+		t.Fatal("hook entry should be a map")
 	}
-	if !hasDraft {
-		t.Error("hooks.json missing 'mom draft' command")
+	if hookEntry["type"] != "command" {
+		t.Errorf("expected type 'command', got %v", hookEntry["type"])
+	}
+	if hookEntry["command"] != "mom watch --sweep" {
+		t.Errorf("expected command 'mom watch --sweep', got %v", hookEntry["command"])
 	}
 }
 
@@ -243,20 +227,6 @@ func TestCodexAdapter_GeneratedFiles(t *testing.T) {
 	for i, f := range files {
 		if f != expected[i] {
 			t.Errorf("expected files[%d] = %q, got %q", i, expected[i], f)
-		}
-	}
-}
-
-func TestCodexAdapter_GitIgnorePaths(t *testing.T) {
-	a := NewCodexAdapter("/tmp/test")
-	paths := a.GitIgnorePaths()
-	expected := []string{"AGENTS.md", ".codex/"}
-	if len(paths) != len(expected) {
-		t.Fatalf("expected %d paths, got %d: %v", len(expected), len(paths), paths)
-	}
-	for i, p := range paths {
-		if p != expected[i] {
-			t.Errorf("expected paths[%d] = %q, got %q", i, expected[i], p)
 		}
 	}
 }

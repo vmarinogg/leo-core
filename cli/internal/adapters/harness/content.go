@@ -12,8 +12,7 @@ func BuildMinimalContextContent() string {
 
 You have MOM tools via MCP. Call ` + "`mom_status`" + ` at the start of every session.
 
-For memory operations: mom_recall, search_memories, get_memory,
-create_memory_draft, list_landmarks, list_scopes.
+For memory operations: mom_recall, mom_get, mom_landmarks, mom_record.
 
 Do NOT skip mom_status — it contains your operating instructions.
 `

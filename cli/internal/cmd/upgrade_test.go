@@ -11,7 +11,7 @@ import (
 	"github.com/momhq/mom/cli/internal/config"
 )
 
-// setupV060Project creates a .mom/ with v0.6.0-style config and minimal structure.
+// setupLegacyProject creates a .mom/ with legacy config and minimal structure.
 // resetUpgradeFlags resets cobra flag state between tests.
 func resetUpgradeFlags(t *testing.T) {
 	t.Helper()
@@ -22,7 +22,7 @@ func resetUpgradeFlags(t *testing.T) {
 	})
 }
 
-func setupV060Project(t *testing.T) string {
+func setupLegacyProject(t *testing.T) string {
 	t.Helper()
 	dir := t.TempDir()
 	t.Setenv("HOME", dir)
@@ -30,7 +30,7 @@ func setupV060Project(t *testing.T) string {
 	t.Setenv("MOM_UPGRADE_ASSUME_YES", "1")
 	leoDir := filepath.Join(dir, ".mom")
 
-	// Create directories using the legacy kb/ layout to simulate a pre-v0.8 install.
+	// Create directories using the legacy kb/ layout.
 	for _, d := range []string{
 		leoDir,
 		filepath.Join(leoDir, "profiles"),
@@ -42,7 +42,7 @@ func setupV060Project(t *testing.T) string {
 		os.MkdirAll(d, 0755)
 	}
 
-	// Write v0.6.0-style config (legacy format with "owner:" key).
+	// Write legacy config with the retired "owner:" key.
 	legacyConfig := `version: "1"
 runtime: claude
 owner:
@@ -71,7 +71,7 @@ kb:
 		0644,
 	)
 
-	// Write retired constraint and skill files (simulating a pre-v0.8 install).
+	// Write retired constraint and skill files from the legacy layout.
 	os.WriteFile(
 		filepath.Join(leoDir, "kb", "constraints", "delegation-mandatory.json"),
 		[]byte(`{"id":"delegation-mandatory","type":"constraint"}`),
@@ -118,7 +118,7 @@ kb:
 
 func TestUpgradeCmd_MigratesConfig(t *testing.T) {
 	resetUpgradeFlags(t)
-	dir := setupV060Project(t)
+	dir := setupLegacyProject(t)
 
 	origDir, _ := os.Getwd()
 	os.Chdir(dir)
@@ -155,7 +155,7 @@ func TestUpgradeCmd_MigratesConfig(t *testing.T) {
 
 func TestUpgradeCmd_RemovesProfilesDir(t *testing.T) {
 	resetUpgradeFlags(t)
-	dir := setupV060Project(t)
+	dir := setupLegacyProject(t)
 
 	origDir, _ := os.Getwd()
 	os.Chdir(dir)
@@ -179,7 +179,7 @@ func TestUpgradeCmd_RemovesProfilesDir(t *testing.T) {
 
 func TestUpgradeCmd_RemovesRetiredConstraints(t *testing.T) {
 	resetUpgradeFlags(t)
-	dir := setupV060Project(t)
+	dir := setupLegacyProject(t)
 
 	origDir, _ := os.Getwd()
 	os.Chdir(dir)
@@ -220,7 +220,7 @@ func TestUpgradeCmd_RemovesRetiredConstraints(t *testing.T) {
 // TestUpgradeCmd_Idempotent verifies running upgrade twice is a no-op on the second run.
 func TestUpgradeCmd_Idempotent(t *testing.T) {
 	resetUpgradeFlags(t)
-	dir := setupV060Project(t)
+	dir := setupLegacyProject(t)
 
 	origDir, _ := os.Getwd()
 	os.Chdir(dir)
@@ -251,7 +251,7 @@ func TestUpgradeCmd_Idempotent(t *testing.T) {
 
 func TestUpgradeCmd_UpdatesSchema(t *testing.T) {
 	resetUpgradeFlags(t)
-	dir := setupV060Project(t)
+	dir := setupLegacyProject(t)
 
 	origDir, _ := os.Getwd()
 	os.Chdir(dir)
@@ -281,7 +281,7 @@ func TestUpgradeCmd_UpdatesSchema(t *testing.T) {
 
 func TestUpgradeCmd_PreservesUserDocs(t *testing.T) {
 	resetUpgradeFlags(t)
-	dir := setupV060Project(t)
+	dir := setupLegacyProject(t)
 
 	origDir, _ := os.Getwd()
 	os.Chdir(dir)
@@ -309,7 +309,7 @@ func TestUpgradeCmd_PreservesUserDocs(t *testing.T) {
 
 func TestUpgradeCmd_CreatesLogsDir(t *testing.T) {
 	resetUpgradeFlags(t)
-	dir := setupV060Project(t)
+	dir := setupLegacyProject(t)
 
 	origDir, _ := os.Getwd()
 	os.Chdir(dir)
@@ -337,13 +337,13 @@ func TestUpgradeCmd_CreatesLogsDir(t *testing.T) {
 
 func TestUpgradeCmd_DryRun(t *testing.T) {
 	resetUpgradeFlags(t)
-	dir := setupV060Project(t)
+	dir := setupLegacyProject(t)
 
 	origDir, _ := os.Getwd()
 	os.Chdir(dir)
 	defer os.Chdir(origDir)
 
-	// Read schema before (still in legacy location since dry-run, but the file is there from setupV060Project).
+	// Read schema before (still in legacy location since dry-run, but the file is there from setupLegacyProject).
 	schemaBefore, _ := os.ReadFile(filepath.Join(dir, ".mom", "kb", "schema.json"))
 
 	buf := new(bytes.Buffer)
@@ -374,7 +374,7 @@ func TestUpgradeCmd_DryRun(t *testing.T) {
 
 func TestUpgradeCmd_MigratesMetricDocs(t *testing.T) {
 	resetUpgradeFlags(t)
-	dir := setupV060Project(t)
+	dir := setupLegacyProject(t)
 	leoDir := filepath.Join(dir, ".mom")
 
 	// Write a doc with type "metric".
@@ -416,7 +416,7 @@ func TestUpgradeCmd_MigratesMetricDocs(t *testing.T) {
 
 func TestUpgradeCmd_GeneratesRuntimeFiles(t *testing.T) {
 	resetUpgradeFlags(t)
-	dir := setupV060Project(t)
+	dir := setupLegacyProject(t)
 
 	origDir, _ := os.Getwd()
 	os.Chdir(dir)
@@ -442,7 +442,7 @@ func TestUpgradeCmd_GeneratesRuntimeFiles(t *testing.T) {
 // CLAUDE.md does not contain any orchestration/profile references.
 func TestUpgradeCmd_GeneratedCLAUDEmd_NoRetiredContent(t *testing.T) {
 	resetUpgradeFlags(t)
-	dir := setupV060Project(t)
+	dir := setupLegacyProject(t)
 
 	origDir, _ := os.Getwd()
 	os.Chdir(dir)
@@ -481,7 +481,7 @@ func TestUpgradeCmd_GeneratedCLAUDEmd_NoRetiredContent(t *testing.T) {
 
 func TestUpgradeCmd_OutputShowsActions(t *testing.T) {
 	resetUpgradeFlags(t)
-	dir := setupV060Project(t)
+	dir := setupLegacyProject(t)
 
 	origDir, _ := os.Getwd()
 	os.Chdir(dir)
@@ -509,7 +509,7 @@ func TestUpgradeCmd_OutputShowsActions(t *testing.T) {
 
 func TestUpgradeCmd_MigratesKBLayout(t *testing.T) {
 	resetUpgradeFlags(t)
-	dir := setupV060Project(t)
+	dir := setupLegacyProject(t)
 
 	origDir, _ := os.Getwd()
 	os.Chdir(dir)
@@ -564,7 +564,7 @@ func TestUpgradeCmd_MigratesKBLayout(t *testing.T) {
 
 func TestUpgradeCmd_MigrationIdempotent(t *testing.T) {
 	resetUpgradeFlags(t)
-	dir := setupV060Project(t)
+	dir := setupLegacyProject(t)
 
 	origDir, _ := os.Getwd()
 	os.Chdir(dir)
@@ -642,6 +642,7 @@ func TestUpgradeCmd_PartialMigrationSkipsExisting(t *testing.T) {
 
 func TestInitCmd_NewLayout_NoKBDir(t *testing.T) {
 	dir := t.TempDir()
+	centralDir := initTestCentralVault(t)
 	origDir, _ := os.Getwd()
 	os.Chdir(dir)
 	defer os.Chdir(origDir)
@@ -655,7 +656,10 @@ func TestInitCmd_NewLayout_NoKBDir(t *testing.T) {
 		t.Fatalf("init failed: %v", err)
 	}
 
-	leoDir := filepath.Join(dir, ".mom")
+	leoDir := centralDir
+	if _, err := os.Stat(filepath.Join(dir, ".mom")); err == nil {
+		t.Error("init must not create project-local .mom/ directory")
+	}
 
 	// kb/ must NEVER be created by init.
 	if _, err := os.Stat(filepath.Join(leoDir, "kb")); err == nil {

@@ -9,11 +9,25 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/momhq/mom/cli/internal/centralvault"
 	"github.com/momhq/mom/cli/internal/config"
 )
 
+func initTestCentralVault(t *testing.T) string {
+	t.Helper()
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("MOM_VAULT", filepath.Join(home, ".mom", "central.db"))
+	dir, err := centralvault.Dir()
+	if err != nil {
+		t.Fatalf("centralvault.Dir: %v", err)
+	}
+	return dir
+}
+
 func TestInitCmd_CreatesLeoStructure(t *testing.T) {
 	dir := t.TempDir()
+	centralDir := initTestCentralVault(t)
 	origDir, _ := os.Getwd()
 	os.Chdir(dir)
 	defer os.Chdir(origDir)
@@ -27,16 +41,20 @@ func TestInitCmd_CreatesLeoStructure(t *testing.T) {
 		t.Fatalf("init failed: %v", err)
 	}
 
-	// Verify .mom/ structure.
-	expected := []string{
-		".mom/config.yaml",
-		".mom/identity.json",
-		".mom/schema.json",
-		".mom/logs",
-		".claude/CLAUDE.md",
-		".mcp.json",
-		".mom/constraints/anti-hallucination.json",
-		".mom/skills/session-wrap-up.json",
+	// Verify central .mom/ structure and global agent files.
+	home := filepath.Dir(centralDir)
+	centralExpected := []string{
+		"config.yaml",
+		"identity.json",
+		"schema.json",
+		"logs",
+		"central.db",
+		"constraints/anti-hallucination.json",
+		"skills/session-wrap-up.json",
+	}
+	globalExpected := []string{
+		filepath.Join(home, ".claude", "CLAUDE.md"),
+		filepath.Join(home, ".claude.json"),
 	}
 	// Retired files must NOT exist.
 	retired := []string{
@@ -47,26 +65,34 @@ func TestInitCmd_CreatesLeoStructure(t *testing.T) {
 		".mom/kb",
 	}
 	for _, path := range retired {
-		full := filepath.Join(dir, path)
+		full := filepath.Join(centralDir, strings.TrimPrefix(path, ".mom/"))
 		if _, err := os.Stat(full); err == nil {
 			t.Errorf("retired file should not exist: %s", path)
 		}
 	}
 
-	for _, path := range expected {
-		full := filepath.Join(dir, path)
+	for _, path := range centralExpected {
+		full := filepath.Join(centralDir, path)
 		if _, err := os.Stat(full); err != nil {
-			t.Errorf("missing expected file: %s", path)
+			t.Errorf("missing expected central file: %s", path)
 		}
 	}
+	for _, path := range globalExpected {
+		if _, err := os.Stat(path); err != nil {
+			t.Errorf("missing expected global file: %s", path)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(dir, ".mom")); err == nil {
+		t.Error("project-local .mom/ should not be created")
+	}
 
-	// Verify directories.
-	dirs := []string{".mom/memory", ".mom/skills", ".mom/constraints", ".mom/logs", ".mom/cache"}
+	// Verify central directories.
+	dirs := []string{"memory", "skills", "constraints", "logs", "cache"}
 	for _, d := range dirs {
-		full := filepath.Join(dir, d)
+		full := filepath.Join(centralDir, d)
 		info, err := os.Stat(full)
 		if err != nil {
-			t.Errorf("missing expected dir: %s", d)
+			t.Errorf("missing expected central dir: %s", d)
 		} else if !info.IsDir() {
 			t.Errorf("expected %s to be a directory", d)
 		}
@@ -75,11 +101,12 @@ func TestInitCmd_CreatesLeoStructure(t *testing.T) {
 
 func TestInitCmd_SkipsScaffoldIfAlreadyExists(t *testing.T) {
 	dir := t.TempDir()
+	centralDir := initTestCentralVault(t)
 	origDir, _ := os.Getwd()
 	os.Chdir(dir)
 	defer os.Chdir(origDir)
 
-	os.MkdirAll(filepath.Join(dir, ".mom"), 0755)
+	os.MkdirAll(centralDir, 0755)
 
 	buf := new(bytes.Buffer)
 	rootCmd.SetOut(buf)
@@ -87,20 +114,65 @@ func TestInitCmd_SkipsScaffoldIfAlreadyExists(t *testing.T) {
 	rootCmd.SetArgs([]string{"init", "--runtimes", "claude"})
 
 	if err := rootCmd.Execute(); err != nil {
-		t.Fatalf("expected graceful skip when .mom/ already exists, got error: %v", err)
+		t.Fatalf("expected graceful skip when MOM already exists, got error: %v", err)
 	}
 	if !strings.Contains(buf.String(), "already exists") {
 		t.Errorf("expected skip message in output, got: %s", buf.String())
 	}
 }
 
-func TestInitCmd_ForceOverwrite(t *testing.T) {
+func TestInitCmd_ReinitRepairsMissingGlobalFiles(t *testing.T) {
 	dir := t.TempDir()
+	centralDir := initTestCentralVault(t)
 	origDir, _ := os.Getwd()
 	os.Chdir(dir)
 	defer os.Chdir(origDir)
 
-	os.MkdirAll(filepath.Join(dir, ".mom"), 0755)
+	buf := new(bytes.Buffer)
+	rootCmd.SetOut(buf)
+	rootCmd.SetErr(buf)
+	rootCmd.SetArgs([]string{"init", "--runtimes", "claude"})
+	if err := rootCmd.Execute(); err != nil {
+		t.Fatalf("initial init failed: %v", err)
+	}
+
+	home := filepath.Dir(centralDir)
+	contextPath := filepath.Join(home, ".claude", "CLAUDE.md")
+	mcpPath := filepath.Join(home, ".claude.json")
+	if err := os.Remove(contextPath); err != nil {
+		t.Fatalf("removing global context file: %v", err)
+	}
+	if err := os.Remove(mcpPath); err != nil {
+		t.Fatalf("removing global MCP file: %v", err)
+	}
+
+	buf.Reset()
+	rootCmd.SetOut(buf)
+	rootCmd.SetErr(buf)
+	rootCmd.SetArgs([]string{"init", "--runtimes", "claude"})
+	if err := rootCmd.Execute(); err != nil {
+		t.Fatalf("reinit failed: %v", err)
+	}
+
+	if _, err := os.Stat(contextPath); err != nil {
+		t.Fatalf("global context file was not repaired: %v", err)
+	}
+	if _, err := os.Stat(mcpPath); err != nil {
+		t.Fatalf("global MCP file was not repaired: %v", err)
+	}
+	if !strings.Contains(buf.String(), "configuration up to date") {
+		t.Errorf("expected up-to-date reinit message, got: %s", buf.String())
+	}
+}
+
+func TestInitCmd_ForceOverwrite(t *testing.T) {
+	dir := t.TempDir()
+	centralDir := initTestCentralVault(t)
+	origDir, _ := os.Getwd()
+	os.Chdir(dir)
+	defer os.Chdir(origDir)
+
+	os.MkdirAll(centralDir, 0755)
 
 	buf := new(bytes.Buffer)
 	rootCmd.SetOut(buf)
@@ -111,14 +183,18 @@ func TestInitCmd_ForceOverwrite(t *testing.T) {
 		t.Fatalf("init --force failed: %v", err)
 	}
 
-	// Should have created the structure despite existing .mom/.
-	if _, err := os.Stat(filepath.Join(dir, ".mom", "config.yaml")); err != nil {
+	// Should have created the central structure despite existing .mom/.
+	if _, err := os.Stat(filepath.Join(centralDir, "config.yaml")); err != nil {
 		t.Error("config.yaml not created with --force")
+	}
+	if _, err := os.Stat(filepath.Join(dir, ".mom")); err == nil {
+		t.Error("project-local .mom/ should not be created with --force")
 	}
 }
 
 func TestInitCmd_MultiRuntime(t *testing.T) {
 	dir := t.TempDir()
+	centralDir := initTestCentralVault(t)
 	origDir, _ := os.Getwd()
 	os.Chdir(dir)
 	defer os.Chdir(origDir)
@@ -132,21 +208,24 @@ func TestInitCmd_MultiRuntime(t *testing.T) {
 		t.Fatalf("init failed: %v", err)
 	}
 
-	// Both runtime outputs should exist.
+	// Both global runtime outputs should exist.
+	home := filepath.Dir(centralDir)
 	files := map[string]string{
-		".claude/CLAUDE.md": "Claude",
-		"AGENTS.md":         "Codex",
+		filepath.Join(home, ".claude", "CLAUDE.md"): "Claude",
+		filepath.Join(home, ".codex", "AGENTS.md"):  "Codex",
 	}
 
 	for path, name := range files {
-		full := filepath.Join(dir, path)
-		if _, err := os.Stat(full); err != nil {
+		if _, err := os.Stat(path); err != nil {
 			t.Errorf("missing %s output: %s", name, path)
 		}
 	}
+	if _, err := os.Stat(filepath.Join(dir, ".mom")); err == nil {
+		t.Error("project-local .mom/ should not be created")
+	}
 
 	// Config should have both runtimes.
-	cfg, err := config.Load(filepath.Join(dir, ".mom"))
+	cfg, err := config.Load(centralDir)
 	if err != nil {
 		t.Fatalf("loading config: %v", err)
 	}
@@ -157,12 +236,13 @@ func TestInitCmd_MultiRuntime(t *testing.T) {
 	}
 }
 
-// Experimental warnings were removed from init output in v0.12 — too noisy for onboarding.
+// Experimental warnings are intentionally absent from init output — too noisy for onboarding.
 
 // TestInitCmd_DefaultDeliversMinimalContent verifies that init with default config
 // generates minimal MCP-first boot content (not the legacy full content).
 func TestInitCmd_DefaultDeliversMinimalContent(t *testing.T) {
 	dir := t.TempDir()
+	centralDir := initTestCentralVault(t)
 	origDir, _ := os.Getwd()
 	os.Chdir(dir)
 	defer os.Chdir(origDir)
@@ -176,7 +256,7 @@ func TestInitCmd_DefaultDeliversMinimalContent(t *testing.T) {
 		t.Fatalf("init failed: %v", err)
 	}
 
-	content, err := os.ReadFile(filepath.Join(dir, ".claude", "CLAUDE.md"))
+	content, err := os.ReadFile(filepath.Join(filepath.Dir(centralDir), ".claude", "CLAUDE.md"))
 	if err != nil {
 		t.Fatalf("reading CLAUDE.md: %v", err)
 	}
@@ -199,6 +279,7 @@ func TestInitCmd_DefaultDeliversMinimalContent(t *testing.T) {
 
 func TestInitCmd_BackupExistingFile(t *testing.T) {
 	dir := t.TempDir()
+	centralDir := initTestCentralVault(t)
 	origDir, _ := os.Getwd()
 	os.Chdir(dir)
 	defer os.Chdir(origDir)
@@ -215,84 +296,53 @@ func TestInitCmd_BackupExistingFile(t *testing.T) {
 		t.Fatalf("init failed: %v", err)
 	}
 
-	// Original should be backed up
-	bkpContent, err := os.ReadFile(filepath.Join(dir, "AGENTS.md.bkp"))
+	// Project-local user file should be untouched because init installs globally.
+	content, err := os.ReadFile(filepath.Join(dir, "AGENTS.md"))
 	if err != nil {
-		t.Fatal("backup file not created")
+		t.Fatal("AGENTS.md should still exist")
 	}
-	if string(bkpContent) != "# My custom agents" {
-		t.Error("backup content doesn't match original")
+	if string(content) != "# My custom agents" {
+		t.Error("project AGENTS.md was modified")
+	}
+	if _, err := os.Stat(filepath.Join(dir, "AGENTS.md.bkp")); err == nil {
+		t.Error("project AGENTS.md should not be backed up during global init")
+	}
+	if _, err := os.Stat(filepath.Join(filepath.Dir(centralDir), ".codex", "AGENTS.md")); err != nil {
+		t.Error("global Codex AGENTS.md not created")
 	}
 }
 
-// TestInitCmd_InheritsConstraintsFromParent verifies that when a parent scope
-// already has constraints/ and skills/, child init skips creating local copies.
-func TestInitCmd_InheritsConstraintsFromParent(t *testing.T) {
-	// Create org/repo directory structure.
-	orgDir := t.TempDir()
-	repoDir := filepath.Join(orgDir, "repo-a")
-	os.MkdirAll(repoDir, 0755)
+func TestInitCmd_DoesNotCreateProjectLocalMom(t *testing.T) {
+	projectDir := t.TempDir()
+	centralDir := initTestCentralVault(t)
 
-	// Initialize the org scope using runInitWithConfig directly to avoid
-	// cobra global state issues when tests run in parallel/sequence.
 	cmd := &cobra.Command{}
 	cmd.SetOut(new(bytes.Buffer))
-
-	orgResult := OnboardingResult{
+	result := OnboardingResult{
 		Harnesses:  []string{"claude"},
 		Language:   "en",
 		Mode:       "concise",
-		InstallDir: orgDir,
-		ScopeLabel: "org",
-	}
-	if err := runInitWithConfig(cmd, orgDir, false, orgResult); err != nil {
-		t.Fatalf("org init failed: %v", err)
-	}
-
-	// Verify org has constraints.
-	orgConstraints := filepath.Join(orgDir, ".mom", "constraints")
-	entries, err := os.ReadDir(orgConstraints)
-	if err != nil || len(entries) == 0 {
-		t.Fatal("org scope should have constraint files")
-	}
-
-	// Now init the child repo — should inherit constraints from org.
-	repoResult := OnboardingResult{
-		Harnesses:  []string{"claude"},
-		Language:   "en",
-		Mode:       "concise",
-		InstallDir: repoDir,
+		InstallDir: projectDir,
 		ScopeLabel: "repo",
 	}
-	if err := runInitWithConfig(cmd, repoDir, false, repoResult); err != nil {
-		t.Fatalf("repo init failed: %v", err)
+	if err := runInitWithConfig(cmd, projectDir, false, result); err != nil {
+		t.Fatalf("init failed: %v", err)
 	}
 
-	// Child constraints dir should exist but be empty (no duplicated files).
-	repoConstraints := filepath.Join(repoDir, ".mom", "constraints")
-	repoEntries, err := os.ReadDir(repoConstraints)
-	if err != nil {
-		t.Fatalf("repo constraints dir should exist: %v", err)
+	if _, err := os.Stat(filepath.Join(projectDir, ".mom")); err == nil {
+		t.Fatal("project-local .mom/ should not be created")
 	}
-	if len(repoEntries) > 0 {
-		t.Errorf("repo constraints should be empty (inherited from org), got %d files", len(repoEntries))
+	if _, err := os.Stat(filepath.Join(centralDir, "config.yaml")); err != nil {
+		t.Fatalf("central config.yaml missing: %v", err)
 	}
-
-	// Child skills dir should also be empty.
-	repoSkills := filepath.Join(repoDir, ".mom", "skills")
-	repoSkillEntries, err := os.ReadDir(repoSkills)
-	if err != nil {
-		t.Fatalf("repo skills dir should exist: %v", err)
-	}
-	if len(repoSkillEntries) > 0 {
-		t.Errorf("repo skills should be empty (inherited from org), got %d files", len(repoSkillEntries))
+	if _, err := os.Stat(filepath.Join(filepath.Dir(centralDir), ".claude", "CLAUDE.md")); err != nil {
+		t.Fatalf("global agent context file missing: %v", err)
 	}
 }
 
-// TestInitCmd_CreatesConstraintsWhenNoParent verifies that a standalone repo
-// (no parent scope) still gets local constraints and skills.
-func TestInitCmd_CreatesConstraintsWhenNoParent(t *testing.T) {
+func TestInitCmd_CreatesConstraintsInCentralVault(t *testing.T) {
 	dir := t.TempDir()
+	centralDir := initTestCentralVault(t)
 	origDir, _ := os.Getwd()
 	os.Chdir(dir)
 	defer os.Chdir(origDir)
@@ -305,50 +355,24 @@ func TestInitCmd_CreatesConstraintsWhenNoParent(t *testing.T) {
 		t.Fatalf("init failed: %v", err)
 	}
 
-	// Standalone repo should have constraints written locally.
-	constraintsDir := filepath.Join(dir, ".mom", "constraints")
+	constraintsDir := filepath.Join(centralDir, "constraints")
 	entries, err := os.ReadDir(constraintsDir)
 	if err != nil {
 		t.Fatalf("constraints dir should exist: %v", err)
 	}
 	if len(entries) == 0 {
-		t.Error("standalone repo should have local constraint files")
+		t.Error("central vault should have constraint files")
 	}
 
-	// And skills too.
-	skillsDir := filepath.Join(dir, ".mom", "skills")
+	skillsDir := filepath.Join(centralDir, "skills")
 	skillEntries, err := os.ReadDir(skillsDir)
 	if err != nil {
 		t.Fatalf("skills dir should exist: %v", err)
 	}
 	if len(skillEntries) == 0 {
-		t.Error("standalone repo should have local skill files")
+		t.Error("central vault should have skill files")
 	}
-}
-
-// TestParentScopeHasDir_Unit tests the parentScopeHasDir helper directly.
-func TestParentScopeHasDir_Unit(t *testing.T) {
-	// Setup: org/.mom/constraints/ with a file, repo under org.
-	orgDir := t.TempDir()
-	constraintsDir := filepath.Join(orgDir, ".mom", "constraints")
-	os.MkdirAll(constraintsDir, 0755)
-	os.WriteFile(filepath.Join(constraintsDir, "test.json"), []byte(`{}`), 0644)
-
-	repoDir := filepath.Join(orgDir, "repo-a")
-	os.MkdirAll(repoDir, 0755)
-
-	// From repo dir, parent should have constraints.
-	if !parentScopeHasDir(repoDir, "constraints") {
-		t.Error("expected parentScopeHasDir to find constraints in parent")
-	}
-
-	// From repo dir, parent should NOT have skills (none created).
-	if parentScopeHasDir(repoDir, "skills") {
-		t.Error("expected parentScopeHasDir to not find skills in parent")
-	}
-
-	// From org dir itself, no parent has constraints.
-	if parentScopeHasDir(orgDir, "constraints") {
-		t.Error("expected parentScopeHasDir to not find constraints above org")
+	if _, err := os.Stat(filepath.Join(dir, ".mom")); err == nil {
+		t.Error("project-local .mom/ should not be created")
 	}
 }
