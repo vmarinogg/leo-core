@@ -24,18 +24,18 @@ const (
 	dbFileName = "index.db"
 
 	// pragmas applied once after opening the DB.
-	pragmaWAL          = "PRAGMA journal_mode=WAL"
-	pragmaForeignKeys  = "PRAGMA foreign_keys=ON"
-	pragmaSynchronous  = "PRAGMA synchronous=NORMAL"
-	pragmaCacheSize    = "PRAGMA cache_size=-8000" // 8 MB page cache
+	pragmaWAL         = "PRAGMA journal_mode=WAL"
+	pragmaForeignKeys = "PRAGMA foreign_keys=ON"
+	pragmaSynchronous = "PRAGMA synchronous=NORMAL"
+	pragmaCacheSize   = "PRAGMA cache_size=-8000" // 8 MB page cache
 )
 
 // sqliteIndex wraps a SQLite database providing FTS5-backed search for
 // memory documents. All methods are safe for sequential use; concurrent
 // access is serialised by SQLite's WAL reader/writer locking.
 type sqliteIndex struct {
-	db      *sql.DB
-	dbPath  string
+	db     *sql.DB
+	dbPath string
 }
 
 // openSQLiteIndex opens (or creates) the SQLite index at
@@ -243,16 +243,16 @@ func boolToInt(b bool) int {
 
 // SearchResult is a result from the SQLite FTS5 search.
 type SearchResult struct {
-	ID             string
-	Summary        string
-	Tags           []string
-	Score          float64 // BM25 score from FTS5 (negative → higher is better after negation)
-	ScopePath      string
-	PromotionState string
-	Landmark       bool
+	ID              string
+	Summary         string
+	Tags            []string
+	Score           float64 // BM25 score from FTS5 (negative → higher is better after negation)
+	ScopePath       string
+	PromotionState  string
+	Landmark        bool
 	CentralityScore *float64
-	Created        string
-	SessionID      string
+	Created         string
+	SessionID       string
 }
 
 // QueryType controls FTS5 token matching behaviour.
@@ -515,9 +515,21 @@ func (idx *sqliteIndex) ReindexScope(scopePath string, docs []*Doc) error {
 	}
 	defer tx.Rollback() //nolint:errcheck
 
-	// Delete stale records.
+	// Delete stale records for this scope. Then also delete each incoming ID
+	// regardless of scope_path so path canonicalization changes cannot leave an
+	// old row with the same primary key under a previous path spelling.
 	if _, err := tx.Exec(`DELETE FROM memories WHERE scope_path = ?`, scopePath); err != nil {
 		return fmt.Errorf("deleting scope records: %w", err)
+	}
+	deleteByID, err := tx.Prepare(`DELETE FROM memories WHERE id = ?`)
+	if err != nil {
+		return fmt.Errorf("preparing stale id delete: %w", err)
+	}
+	defer deleteByID.Close()
+	for _, doc := range docs {
+		if _, err := deleteByID.Exec(doc.ID); err != nil {
+			return fmt.Errorf("deleting stale row %q: %w", doc.ID, err)
+		}
 	}
 
 	stmt, err := tx.Prepare(`

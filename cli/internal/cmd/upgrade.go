@@ -8,28 +8,26 @@ import (
 	"strings"
 	"time"
 
-	"github.com/spf13/cobra"
 	"github.com/momhq/mom/cli/internal/adapters/harness"
 	"github.com/momhq/mom/cli/internal/adapters/storage"
 	"github.com/momhq/mom/cli/internal/config"
 	"github.com/momhq/mom/cli/internal/ux"
+	"github.com/spf13/cobra"
 	"gopkg.in/yaml.v3"
 )
 
 var upgradeCmd = &cobra.Command{
 	Use:   "upgrade",
 	Short: "Upgrade .mom/ to the latest version (preserves your memory docs)",
-	Long: `Upgrades core infrastructure (schema, constraints, skills, runtime files)
+	Long: `Upgrades core infrastructure (schema and harness files)
 to match the installed mom binary. Your documents in .mom/memory/ are never touched.
 
-Use --all to propagate the upgrade to all child scopes in the hierarchy
-(org folders and repos beneath the current scope).`,
+Legacy central import scans $HOME and asks before writing.`,
 	RunE: runUpgrade,
 }
 
 func init() {
 	upgradeCmd.Flags().Bool("dry-run", false, "Show what would change without modifying anything")
-	upgradeCmd.Flags().Bool("all", false, "Upgrade all child scopes in the hierarchy")
 }
 
 // upgradeAction tracks a single change for reporting.
@@ -40,7 +38,6 @@ type upgradeAction struct {
 
 func runUpgrade(cmd *cobra.Command, args []string) error {
 	dryRun, _ := cmd.Flags().GetBool("dry-run")
-	all, _ := cmd.Flags().GetBool("all")
 
 	momDir, err := findMomDir()
 	if err != nil {
@@ -54,12 +51,7 @@ func runUpgrade(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	// Propagate to child scopes if --all.
-	if all {
-		propagateUpgrade(cmd, projectRoot, dryRun)
-	}
-
-	return nil
+	return runCentralImport(cmd, dryRun)
 }
 
 // upgradeSingleDir runs the full upgrade pipeline on a single .mom/ directory.
@@ -86,7 +78,7 @@ func upgradeSingleDir(cmd *cobra.Command, projectRoot string, dryRun bool) error
 		actions = append(actions, upgradeAction{symbol, desc})
 	}
 
-	// ── Phase -1: Migrate .leo/ → .mom/ (v0.10 path migration) ─────────────
+	// ── Phase -1: Migrate .leo/ → .mom/ legacy path ─────────────────────────
 	isLegacyLeoDir := filepath.Base(momDir) == ".leo"
 	if isLegacyLeoDir {
 		if dryRun {
@@ -182,7 +174,7 @@ func upgradeSingleDir(cmd *cobra.Command, projectRoot string, dryRun bool) error
 					return
 				}
 			}
-			addAction("✔", "profiles/ directory removed (retired in v0.8.0)")
+			addAction("✔", "profiles/ directory removed (retired legacy layout)")
 		}
 
 		retiredConstraints := []string{
@@ -226,6 +218,24 @@ func upgradeSingleDir(cmd *cobra.Command, projectRoot string, dryRun bool) error
 			}
 		}
 
+		removedGenerated, err := removeKnownGeneratedCentralDocs(leoDir, dryRun)
+		if err != nil {
+			phase1Err = err
+			return
+		}
+		for _, action := range removedGenerated {
+			addAction(action.symbol, action.desc)
+		}
+
+		cleanedHooks, err := removeDeadHookCommands(projectRoot, dryRun)
+		if err != nil {
+			phase1Err = err
+			return
+		}
+		for _, action := range cleanedHooks {
+			addAction(action.symbol, action.desc)
+		}
+
 		if showSpinner {
 			time.Sleep(500 * time.Millisecond)
 		}
@@ -243,7 +253,7 @@ func upgradeSingleDir(cmd *cobra.Command, projectRoot string, dryRun bool) error
 		return phase1Err
 	}
 
-	// ── Phase 2: Update core memory docs ──────────────────────────────────────
+	// ── Phase 2: Update core files ─────────────────────────────────────────────
 	var phase2Err error
 	doPhase2 := func() {
 		schemaData, err := embeddedSchema.ReadFile("schema.json")
@@ -272,34 +282,6 @@ func upgradeSingleDir(cmd *cobra.Command, projectRoot string, dryRun bool) error
 				}
 			}
 			addAction("✔", "identity.json updated")
-		}
-
-		constraintsDir := filepath.Join(leoDir, "constraints")
-		for name, content := range coreConstraints() {
-			path := filepath.Join(constraintsDir, name+".json")
-			if changed := fileChanged(path, []byte(content)); changed {
-				if !dryRun {
-					if err := os.WriteFile(path, []byte(content), 0644); err != nil {
-						phase2Err = fmt.Errorf("writing constraint %s: %w", name, err)
-						return
-					}
-				}
-				addAction("✔", fmt.Sprintf("constraint %s updated", name))
-			}
-		}
-
-		skillsDir := filepath.Join(leoDir, "skills")
-		for name, content := range coreSkills() {
-			path := filepath.Join(skillsDir, name+".json")
-			if changed := fileChanged(path, []byte(content)); changed {
-				if !dryRun {
-					if err := os.WriteFile(path, []byte(content), 0644); err != nil {
-						phase2Err = fmt.Errorf("writing skill %s: %w", name, err)
-						return
-					}
-				}
-				addAction("✔", fmt.Sprintf("skill %s updated", name))
-			}
 		}
 
 		docsDir := filepath.Join(leoDir, "memory")
@@ -336,18 +318,20 @@ func upgradeSingleDir(cmd *cobra.Command, projectRoot string, dryRun bool) error
 		return phase2Err
 	}
 
-	// ── Phase 3: Rebuild index and regenerate runtime files ─────────────────
+	// ── Phase 3: Rebuild index and regenerate harness files ─────────────────
 	var phase3Err error
 	doPhase3 := func() {
 		if !dryRun {
-			if err := regenerateRuntimeFiles(projectRoot, leoDir, cfg); err != nil {
+			if err := regenerateHarnessFiles(projectRoot, leoDir, cfg); err != nil {
 				phase3Err = err
 				return
 			}
 		}
 		for _, rt := range cfg.EnabledHarnesses() {
-			addAction("✔", fmt.Sprintf("runtime %s context file regenerated", rt))
+			addAction("✔", fmt.Sprintf("harness %s context file regenerated", rt))
 		}
+
+		installSkillsDuringUpgrade(cfg.EnabledHarnesses(), dryRun, addAction)
 
 		// Rebuild SQLite search index from JSON files.
 		if !dryRun {
@@ -367,7 +351,7 @@ func upgradeSingleDir(cmd *cobra.Command, projectRoot string, dryRun bool) error
 
 	if showSpinner {
 		sp := ux.NewSpinner(os.Stderr)
-		sp.Start("Regenerating runtime files")
+		sp.Start("Regenerating harness files")
 		doPhase3()
 		sp.Stop()
 	} else {
@@ -383,17 +367,6 @@ func upgradeSingleDir(cmd *cobra.Command, projectRoot string, dryRun bool) error
 			addAction("⚠", fmt.Sprintf("watch daemon: %v", err))
 		} else {
 			addAction("✔", "watch daemon installed/updated")
-		}
-	}
-
-	// ── Phase 4: Update .gitignore ──────────────────────────────────────────
-	if !dryRun {
-		registry := harness.NewRegistry(projectRoot)
-		enabledRTs := cfg.EnabledHarnesses()
-		if added, gitErr := ensureGitIgnore(projectRoot, registry, enabledRTs); gitErr != nil {
-			addAction("⚠", fmt.Sprintf(".gitignore: %v", gitErr))
-		} else if len(added) > 0 {
-			addAction("✔", fmt.Sprintf(".gitignore updated (%d entries added)", len(added)))
 		}
 	}
 
@@ -432,45 +405,25 @@ func upgradeSingleDir(cmd *cobra.Command, projectRoot string, dryRun bool) error
 	return nil
 }
 
-// propagateUpgrade walks child directories and upgrades each .mom/ found.
-// Follows the same pattern as propagateInit: org folders (containing repos)
-// are upgraded and recursed into; repos (with .git/) are upgraded.
-func propagateUpgrade(cmd *cobra.Command, rootDir string, dryRun bool) {
-	entries, err := os.ReadDir(rootDir)
-	if err != nil {
-		return
-	}
-
-	for _, e := range entries {
-		if !e.IsDir() || strings.HasPrefix(e.Name(), ".") {
+func installSkillsDuringUpgrade(harnesses []string, dryRun bool, addAction func(string, string)) {
+	for _, h := range harnesses {
+		agent, ok := skillsAgentForHarness(h)
+		if !ok {
+			addAction("⚠", fmt.Sprintf("skills: unsupported harness %s", h))
 			continue
 		}
-		childPath := filepath.Join(rootDir, e.Name())
-		childMom := filepath.Join(childPath, ".mom")
-
-		// Only upgrade dirs that have .mom/.
-		if _, statErr := os.Stat(childMom); statErr != nil {
+		args, command := skillsInstallCommand(agent)
+		if dryRun {
+			addAction("+", "would run "+command)
 			continue
 		}
-		if !isMomProject(childMom) {
+		if _, err := runExternalCommand("npx", args...); err != nil {
+			detail := fmt.Sprintf("skills install %s → %s failed: %v", h, agent, err)
+			detail += fmt.Sprintf("; retry with mom upgrade, mom init --force, or run: %s", command)
+			addAction("⚠", detail)
 			continue
 		}
-
-		if err := upgradeSingleDir(cmd, childPath, dryRun); err != nil {
-			home, _ := os.UserHomeDir()
-			display := childPath
-			if strings.HasPrefix(display, home) {
-				display = "~" + display[len(home):]
-			}
-			up := ux.NewPrinter(cmd.OutOrStdout())
-			up.Warnf("failed to upgrade %s: %v", display, err)
-			continue
-		}
-
-		// Recurse into org folders (dirs that contain repos).
-		if containsGitRepos(childPath) {
-			propagateUpgrade(cmd, childPath, dryRun)
-		}
+		addAction("✔", fmt.Sprintf("skills installed for %s → %s", h, agent))
 	}
 }
 
@@ -481,6 +434,138 @@ func fileChanged(path string, data []byte) bool {
 		return true
 	}
 	return string(existing) != string(data)
+}
+
+func removeKnownGeneratedCentralDocs(leoDir string, dryRun bool) ([]upgradeAction, error) {
+	var actions []upgradeAction
+	for _, doc := range knownGeneratedCentralDocs {
+		path := filepath.Join(leoDir, doc.DirName, doc.Name+".json")
+		if _, statErr := os.Stat(path); statErr != nil {
+			if os.IsNotExist(statErr) {
+				continue
+			}
+			return nil, fmt.Errorf("checking generated %s %s: %w", doc.Kind, doc.Name, statErr)
+		}
+		if !dryRun {
+			if err := os.Remove(path); err != nil {
+				return nil, fmt.Errorf("removing generated %s %s: %w", doc.Kind, doc.Name, err)
+			}
+		}
+		actions = append(actions, upgradeAction{"✔", fmt.Sprintf("generated %s %s removed", doc.Kind, doc.Name)})
+	}
+	return actions, nil
+}
+
+func removeDeadHookCommands(projectRoot string, dryRun bool) ([]upgradeAction, error) {
+	paths := []string{
+		filepath.Join(projectRoot, ".claude", "settings.json"),
+		filepath.Join(projectRoot, ".codex", "hooks.json"),
+		filepath.Join(projectRoot, ".windsurf", "hooks.json"),
+	}
+	if home, err := os.UserHomeDir(); err == nil {
+		paths = append(paths,
+			filepath.Join(home, ".claude", "settings.json"),
+			filepath.Join(home, ".codex", "hooks.json"),
+			filepath.Join(home, ".codeium", "windsurf", "hooks.json"),
+		)
+	}
+
+	seen := map[string]bool{}
+	var actions []upgradeAction
+	for _, path := range paths {
+		clean := filepath.Clean(path)
+		if seen[clean] {
+			continue
+		}
+		seen[clean] = true
+		changed, err := removeDeadHookCommandsFromFile(clean, dryRun)
+		if err != nil {
+			actions = append(actions, upgradeAction{"⚠", fmt.Sprintf("dead hook cleanup skipped for %s: %v", clean, err)})
+			continue
+		}
+		if changed {
+			actions = append(actions, upgradeAction{"✔", fmt.Sprintf("dead hook entries removed from %s", clean)})
+		}
+	}
+	return actions, nil
+}
+
+func removeDeadHookCommandsFromFile(path string, dryRun bool) (bool, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return false, nil
+		}
+		return false, fmt.Errorf("reading hook config %s: %w", path, err)
+	}
+	var root any
+	if err := json.Unmarshal(data, &root); err != nil {
+		return false, fmt.Errorf("parsing hook config %s: %w", path, err)
+	}
+	cleaned, keep, changed := stripDeadHookEntries(root)
+	if !keep {
+		cleaned = map[string]any{}
+	}
+	if !changed {
+		return false, nil
+	}
+	if dryRun {
+		return true, nil
+	}
+	out, err := json.MarshalIndent(cleaned, "", "  ")
+	if err != nil {
+		return false, fmt.Errorf("marshaling hook config %s: %w", path, err)
+	}
+	out = append(out, '\n')
+	if err := os.WriteFile(path, out, 0644); err != nil {
+		return false, fmt.Errorf("writing hook config %s: %w", path, err)
+	}
+	return true, nil
+}
+
+func stripDeadHookEntries(v any) (any, bool, bool) {
+	switch x := v.(type) {
+	case map[string]any:
+		if command, ok := x["command"].(string); ok && isDeadHookCommand(command) {
+			return nil, false, true
+		}
+		changed := false
+		for k, child := range x {
+			cleaned, keep, childChanged := stripDeadHookEntries(child)
+			if childChanged {
+				changed = true
+			}
+			if keep {
+				x[k] = cleaned
+			} else {
+				delete(x, k)
+			}
+		}
+		return x, true, changed
+	case []any:
+		out := make([]any, 0, len(x))
+		changed := false
+		for _, child := range x {
+			cleaned, keep, childChanged := stripDeadHookEntries(child)
+			if childChanged {
+				changed = true
+			}
+			if keep {
+				out = append(out, cleaned)
+			}
+		}
+		if len(out) != len(x) {
+			changed = true
+		}
+		return out, true, changed
+	default:
+		return v, true, false
+	}
+}
+
+func isDeadHookCommand(command string) bool {
+	fields := strings.Fields(command)
+	return len(fields) >= 2 && fields[0] == "mom" && (fields[1] == "draft" || fields[1] == "record")
 }
 
 // migrateKBLayout detects a legacy .mom/kb/ layout and promotes each subdirectory
@@ -556,7 +641,7 @@ func migrateKBLayout(leoDir string) ([]upgradeAction, error) {
 	}
 
 	if len(actions) > 0 {
-		actions = append([]upgradeAction{{"✔", "filesystem layout migrated to v0.8 (kb/ flattened)"}}, actions...)
+		actions = append([]upgradeAction{{"✔", "filesystem layout migrated (kb/ flattened)"}}, actions...)
 	}
 
 	return actions, nil
@@ -765,8 +850,8 @@ func kebabOnly(s string) string {
 	return result
 }
 
-// regenerateRuntimeFiles rebuilds all runtime context files from the current config.
-func regenerateRuntimeFiles(projectRoot, leoDir string, cfg *config.Config) error {
+// regenerateHarnessFiles rebuilds all harness context files from the current config.
+func regenerateHarnessFiles(projectRoot, leoDir string, cfg *config.Config) error {
 	registry := harness.NewRegistry(projectRoot)
 
 	runtimeCfg := buildRuntimeConfig(cfg)
@@ -802,7 +887,7 @@ func regenerateRuntimeFiles(projectRoot, leoDir string, cfg *config.Config) erro
 }
 
 // scrubDeadConfigFields reads config.yaml from leoDir, removes the retired
-// "tiers" key from every runtime block and the "autonomy" key from the user
+// "tiers" key from every harness block and the "autonomy" key from the user
 // block, and returns the cleaned bytes plus a changed flag. It does nothing
 // when the keys are already absent.
 //
@@ -900,7 +985,7 @@ func removeYAMLKey(mapping *yaml.Node, key string) bool {
 
 // migrateLeoToMom copies a .leo/ directory to .mom/ at the same level.
 // The .leo/ directory is preserved (not deleted) — users can remove it manually
-// or it will be removed in v0.12. Returns actions describing what was done.
+// or it will be removed. Returns actions describing what was done.
 // If .mom/ already exists, the migration is skipped.
 func migrateLeoToMom(leoDir string) ([]upgradeAction, error) {
 	parent := filepath.Dir(leoDir)

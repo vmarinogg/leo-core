@@ -172,7 +172,7 @@ func (a *IndexedAdapter) ListLandmarks(scopePaths []string, limit int) ([]Search
 }
 
 // Reindex drops and rebuilds the SQLite index from JSON files.
-// Called by `mom reindex` or on schema version mismatch.
+// Called internally on schema/version or cache-count mismatch.
 func (a *IndexedAdapter) Reindex() error {
 	if a.idx == nil {
 		return fmt.Errorf("SQLite index not available")

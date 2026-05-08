@@ -1,136 +1,109 @@
 package cmd
 
 import (
-	"encoding/json"
 	"fmt"
 	"io"
 	"os"
-	"path/filepath"
 	"strings"
-	"time"
 
-	"github.com/momhq/mom/cli/internal/recorder"
-	"github.com/momhq/mom/cli/internal/scope"
+	"github.com/momhq/mom/cli/internal/centralvault"
+	"github.com/momhq/mom/cli/internal/drafter"
+	"github.com/momhq/mom/cli/internal/explicitrecord"
+	"github.com/momhq/mom/cli/internal/herald"
 	"github.com/spf13/cobra"
 )
 
-var recordRaw bool
+var (
+	recordSession string
+	recordSummary string
+	recordTags    []string
+	recordActor   string
+)
 
 var recordCmd = &cobra.Command{
-	Use:   "record",
-	Short:  "Record raw conversation data from hook stdin",
+	Use:    "record",
+	Short:  "Save an explicit memory from CLI input (CLI mirror of the mom_record MCP tool)",
 	Hidden: true,
-	Long: `Reads hook JSON from stdin, extracts transcript_path, and appends
-new turns to .mom/raw/ as JSONL. Idempotent — safe to call multiple times.
+	Long: `Reads memory text from stdin and persists it to the central vault
+($HOME/.mom/mom.db) as an explicit-write memory — bypassing Drafter's
+content filters per ADR 0014. Tags are normalised before insert; if
+any tag normalises to empty the request is dropped without persisting.
 
-With --raw, reads plain text from stdin instead of Claude Code hook JSON.
-This mode is used by runtimes that don't provide transcript_path (e.g. Cline).
+This command is the CLI mirror of the mom_record MCP tool. It is the
+human-driven path for recording a memory from a shell pipeline:
 
-Used as a hook command. Not typically called directly.`,
-	RunE:          runRecord,
-	SilenceUsage:  true,
-	SilenceErrors: true,
+  echo "decided to use Postgres for the canary deploy" | \
+    mom record --tags decision,deploy
+
+Hook-friendly behaviour: legacy hook configs that pipe JSON to this
+command silently exit 0 — the JSON shape is detected and discarded
+rather than persisted as memory text.`,
+	RunE:         runRecord,
+	SilenceUsage: true,
 }
 
 func init() {
-	recordCmd.Flags().BoolVar(&recordRaw, "raw", false, "Read plain text from stdin instead of Claude Code hook JSON")
+	recordCmd.Flags().StringVar(&recordSession, "session", "", "Real runtime session ID (optional; MOM also checks harness env vars)")
+	recordCmd.Flags().StringVar(&recordSummary, "summary", "", "One-line summary")
+	recordCmd.Flags().StringSliceVar(&recordTags, "tags", nil, "Tag names (comma-separated; normalised before insert)")
+	recordCmd.Flags().StringVar(&recordActor, "actor", "cli", "Calling agent / human label (defaults to 'cli')")
 }
 
 func runRecord(cmd *cobra.Command, _ []string) error {
-	// Read stdin.
 	data, err := io.ReadAll(os.Stdin)
 	if err != nil {
-		logRecordError(err)
-		return nil // never fail the hook
-	}
-
-	// Find nearest .mom/
-	cwd, _ := os.Getwd()
-	if envDir := os.Getenv("MOM_PROJECT_DIR"); envDir != "" {
-		cwd = envDir
-	}
-
-	if recordRaw {
-		return runRecordRaw(data, cwd)
-	}
-
-	var input recorder.HookInput
-	if err := json.Unmarshal(data, &input); err != nil {
-		logRecordError(err)
+		// Hooks pipe whatever they have; never fail at the read step.
 		return nil
 	}
-
-	// Windsurf puts transcript_path inside tool_info, not at the root.
-	if input.TranscriptPath == "" {
-		var wrapper struct {
-			ToolInfo struct {
-				TranscriptPath string `json:"transcript_path"`
-			} `json:"tool_info"`
-			TrajectoryID string `json:"trajectory_id"`
-		}
-		if json.Unmarshal(data, &wrapper) == nil && wrapper.ToolInfo.TranscriptPath != "" {
-			input.TranscriptPath = wrapper.ToolInfo.TranscriptPath
-			if input.SessionID == "" {
-				input.SessionID = wrapper.TrajectoryID
-			}
-		}
-	}
-
-	if input.Cwd != "" {
-		cwd = input.Cwd
-	}
-	sc, ok := scope.NearestWritable(cwd)
-	if !ok {
-		logRecordError(fmt.Errorf("no .mom/ found from %q", cwd))
-		return nil
-	}
-
-	if err := recorder.Record(sc.Path, input); err != nil {
-		logRecordError(err)
-	}
-	return nil // always exit 0
-}
-
-// runRecordRaw handles --raw mode: plain text from stdin written directly to
-// .mom/raw/ as a JSONL entry. Used by runtimes that don't provide
-// transcript_path (Cline, Windsurf, etc.).
-func runRecordRaw(data []byte, cwd string) error {
 	text := strings.TrimSpace(string(data))
-	if text == "" {
-		return nil // nothing to record
-	}
 
-	sc, ok := scope.NearestWritable(cwd)
-	if !ok {
-		logRecordError(fmt.Errorf("no .mom/ found from %q", cwd))
+	// Hook-friendly bail-outs: empty input or JSON-shaped input (legacy hook
+	// payload from old Claude/Codex configs) exit 0 without writing. Missing
+	// session ID for real text is now an error: agents must not invent session IDs.
+	if text == "" {
+		return nil
+	}
+	if strings.HasPrefix(text, "{") {
+		fmt.Fprintln(os.Stderr, "mom record: input looks like JSON (legacy hook payload?) — skipping")
 		return nil
 	}
 
-	if err := recorder.RecordText(sc.Path, text, ""); err != nil {
-		logRecordError(err)
+	// From here on we are on the human path: stdin is non-empty and non-JSON.
+	// Failures are real errors that should propagate to the user with a non-zero
+	// exit; they no longer fit the hook-friendly silent-bail contract.
+	lib, closeFn, err := centralvault.OpenLibrarian()
+	if err != nil {
+		return fmt.Errorf("mom record: %w", err)
 	}
-	return nil
-}
+	defer func() { _ = closeFn() }()
 
-// logRecordError appends an error to .mom/logs/record.log, best-effort.
-// It uses os.Getwd() to find .mom/ if available; otherwise discards.
-func logRecordError(err error) {
-	cwd, werr := os.Getwd()
-	if werr != nil {
-		return
+	bus := herald.NewBus()
+	stopDrafter := drafter.New(lib).SubscribeAll(bus)
+	defer stopDrafter()
+
+	var memoryID string
+	stopCapture := bus.Subscribe(herald.OpMemoryCreated, func(e herald.Event) {
+		if id, _ := e.Payload["memory_id"].(string); id != "" {
+			memoryID = id
+		}
+	})
+	defer stopCapture()
+
+	result, err := explicitrecord.Publish(bus, explicitrecord.Request{
+		SessionID: recordSession,
+		Summary:   recordSummary,
+		Tags:      recordTags,
+		Content:   map[string]any{"text": text},
+		Actor:     recordActor,
+	})
+	if err != nil {
+		return fmt.Errorf("mom record: %w", err)
 	}
-	sc, ok := scope.NearestWritable(cwd)
-	if !ok {
-		return
+
+	if memoryID != "" {
+		fmt.Fprintf(cmd.OutOrStdout(), "recorded: id=%s session=%s tags=%v\n", memoryID, result.SessionID, result.Tags)
+		return nil
 	}
-	logsDir := filepath.Join(sc.Path, "logs")
-	_ = os.MkdirAll(logsDir, 0755)
-	logFile := filepath.Join(logsDir, "record.log")
-	f, ferr := os.OpenFile(logFile, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
-	if ferr != nil {
-		return
-	}
-	defer f.Close()
-	ts := time.Now().UTC().Format(time.RFC3339)
-	fmt.Fprintf(f, "%s record cmd error: %v\n", ts, err)
+	fmt.Fprintf(cmd.OutOrStdout(), "recorded: session=%s tags=%v\n", result.SessionID, result.Tags)
+	return nil
 }

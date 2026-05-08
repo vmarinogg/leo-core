@@ -11,10 +11,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/spf13/cobra"
 	"github.com/momhq/mom/cli/internal/mcp"
-	"github.com/momhq/mom/cli/internal/scope"
 	"github.com/momhq/mom/cli/internal/ux"
+	"github.com/spf13/cobra"
 )
 
 var serveCmd = &cobra.Command{
@@ -69,17 +68,28 @@ func runServeMCP(_ *cobra.Command, _ []string) error {
 		cwd = envDir
 	}
 
-	sc, ok := scope.NearestWritable(cwd)
-	if !ok {
-		return fmt.Errorf("no .mom/ directory found. Run 'mom init' first")
+	projectDir, momDir, err := resolveMomContext(cwd)
+	if err != nil {
+		return err
 	}
 
 	// Layer 2: one-shot sweep catches unprocessed transcripts.
 	// Covers the scenario where the daemon is not installed yet.
-	sweepTranscripts(sc.Path)
+	sweepTranscripts(projectDir, momDir)
 
 	mcp.Version = Version
-	srv := mcp.New(sc.Path)
+	srv := mcp.New(momDir)
+
+	// Wire central-vault workers (Drafter + Logbook) onto the MCP
+	// server's bus so mom_record events are persisted, and so any
+	// turn.observed events the MCP process generates (none today,
+	// but future hooks will) are recorded. Same workers as the
+	// watcher — opened against $HOME/.mom/mom.db with WAL-safe
+	// concurrent access. AttachToBus encapsulates the topic set
+	// (Drafter on write events; Logbook on turn.observed +
+	// op.memory.* events).
+	openCentralWorkers().AttachToBus(srv.Bus())
+
 	// Blocks until stdin is closed.
 	srv.Serve(os.Stdin, os.Stdout)
 	return nil
@@ -94,12 +104,12 @@ func runServerStatus(cmd *cobra.Command, _ []string) error {
 		return fmt.Errorf("getting working directory: %w", err)
 	}
 
-	sc, ok := scope.NearestWritable(cwd)
-	if !ok {
-		return fmt.Errorf("no .mom/ directory found. Run 'mom init' first")
+	_, momDir, err := resolveMomContext(cwd)
+	if err != nil {
+		return err
 	}
 
-	logPath := filepath.Join(sc.Path, "logs", "mcp-server.log")
+	logPath := filepath.Join(momDir, "logs", "mcp-server.log")
 	p := ux.NewPrinter(cmd.OutOrStdout())
 
 	if follow {

@@ -2,7 +2,6 @@ package cmd
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"os"
 	"os/signal"
@@ -10,36 +9,32 @@ import (
 	"strings"
 	"sync"
 	"syscall"
+	"time"
 
 	"github.com/fsnotify/fsnotify"
-	"github.com/momhq/mom/cli/internal/adapters/storage"
+	"github.com/momhq/mom/cli/internal/centralvault"
 	"github.com/momhq/mom/cli/internal/config"
 	"github.com/momhq/mom/cli/internal/daemon"
 	"github.com/momhq/mom/cli/internal/drafter"
 	"github.com/momhq/mom/cli/internal/herald"
 	"github.com/momhq/mom/cli/internal/logbook"
-	"github.com/momhq/mom/cli/internal/scope"
 	"github.com/momhq/mom/cli/internal/ux"
 	"github.com/momhq/mom/cli/internal/watcher"
 	"github.com/spf13/cobra"
 )
 
 var (
-	watchTranscriptDir string
-	watchDebounceMs    int
-	watchStatus        bool
-	watchHarness       string
-	watchSweep         bool
-	watchInstall       bool
-	watchUninstall     bool
-	watchGlobal        bool
+	watchStatus bool
+	watchSweep  bool
+	watchGlobal bool
 )
 
 var watchCmd = &cobra.Command{
 	Use:   "watch",
 	Short: "Watch runtime transcripts and ingest turns automatically",
 	Long: `Starts a filesystem watcher on a runtime transcript directory and
-ingests new conversation turns into .mom/raw/ without MCP calls or hook overhead.
+ingests new conversation turns into the central vault at $HOME/.mom/mom.db
+without MCP calls or hook overhead.
 
 Supported runtimes:
   claude    — ~/.claude/projects/ (default)
@@ -47,35 +42,24 @@ Supported runtimes:
   pi        — ~/.pi/agent/sessions/
 
 Each session's JSONL transcript is tailed incrementally.
-Cursor files in .mom/raw/ track the last ingested byte offset per session,
+Cursor files in .mom/cache/ track the last ingested byte offset per session,
 so restarts are safe and idempotent.
 
 The watcher runs in the foreground. Use Ctrl-C to stop.`,
+	Args:          cobra.NoArgs,
 	RunE:          runWatch,
 	SilenceUsage:  true,
-	SilenceErrors: true,
+	SilenceErrors: false,
 }
 
 func init() {
-	watchCmd.Flags().StringVar(&watchHarness, "harness", "claude",
-		`Harness to watch: "claude" (default), "windsurf", or "pi"`)
-	watchCmd.Flags().StringVar(&watchHarness, "runtime", "claude",
-		`deprecated: use --harness`)
-	_ = watchCmd.Flags().MarkDeprecated("runtime", "use --harness instead")
-	watchCmd.Flags().StringVar(&watchTranscriptDir, "dir", "",
-		"Transcript directory to watch (overrides the runtime default)")
-	watchCmd.Flags().IntVar(&watchDebounceMs, "debounce", 300,
-		"Milliseconds to wait after a write event before reading (debounce)")
 	watchCmd.Flags().BoolVar(&watchStatus, "status", false,
 		"Show watch cursors and ingested sessions, then exit")
 	watchCmd.Flags().BoolVar(&watchSweep, "sweep", false,
 		"One-shot mode: catch up on unprocessed transcripts and exit")
-	watchCmd.Flags().BoolVar(&watchInstall, "install", false,
-		"Install system daemon and periodic sweep timer for background recording")
-	watchCmd.Flags().BoolVar(&watchUninstall, "uninstall", false,
-		"Remove system daemon and periodic sweep timer")
 	watchCmd.Flags().BoolVar(&watchGlobal, "global", false,
 		"Run as a single global daemon watching all registered projects")
+	_ = watchCmd.Flags().MarkHidden("global")
 }
 
 func runWatch(cmd *cobra.Command, _ []string) error {
@@ -88,11 +72,10 @@ func runWatch(cmd *cobra.Command, _ []string) error {
 	if envDir := os.Getenv("MOM_PROJECT_DIR"); envDir != "" {
 		cwd = envDir
 	}
-	sc, ok := scope.NearestWritable(cwd)
-	if !ok {
-		return fmt.Errorf("no .mom/ found from %q — run mom init first", cwd)
+	projectDir, momDir, err := resolveMomContext(cwd)
+	if err != nil {
+		return err
 	}
-	momDir := sc.Path
 
 	if watchStatus {
 		return runWatchStatus(momDir)
@@ -100,63 +83,24 @@ func runWatch(cmd *cobra.Command, _ []string) error {
 
 	p := ux.NewPrinter(os.Stderr)
 
-	if watchInstall {
-		return runWatchInstall(momDir, p)
+	// Open the central vault once for this watch process. Worker is
+	// shared across the per-project buses below.
+	workers := openCentralWorkers()
+
+	// Config-driven multi-harness mode. Manual per-harness overrides were kept
+	// out of the v1 public CLI; init/upgrade own harness configuration.
+	momCfg, err := config.Load(momDir)
+	if err != nil {
+		return fmt.Errorf("loading config: %w", err)
 	}
-	if watchUninstall {
-		return runWatchUninstall(momDir, p)
-	}
-
-	projectDir := filepath.Dir(momDir)
-
-	// Build watcher sources: if --harness is explicitly set, use single source;
-	// otherwise read config and watch all enabled harnesses.
-	var sources []watcher.Source
-	harnessExplicit := cmd.Flags().Changed("harness") || cmd.Flags().Changed("runtime")
-
-	if harnessExplicit {
-		// Manual single-Harness mode.
-		transcriptDir := watchTranscriptDir
-		var adapter watcher.Adapter
-
-		switch watchHarness {
-		case "windsurf":
-			adapter = &watcher.WindsurfAdapter{ProjectDir: projectDir}
-		case "pi":
-			adapter = watcher.NewPiAdapter()
-		case "claude", "":
-			adapter = watcher.NewClaudeAdapter()
-		default:
-			return fmt.Errorf("unknown harness %q — supported: claude, windsurf, pi", watchHarness)
-		}
-		if transcriptDir == "" {
-			transcriptDir = harnessTranscriptDir(watchHarness)
-		}
-
-		sources = []watcher.Source{{
-			Harness:       watchHarness,
-			TranscriptDir: transcriptDir,
-			Adapter:       adapter,
-		}}
-	} else {
-		// Config-driven multi-Harness mode (daemon default).
-		momCfg, err := config.Load(momDir)
-		if err != nil {
-			return fmt.Errorf("loading config: %w", err)
-		}
-		sources = buildWatcherSources(momCfg, projectDir)
-		if len(sources) == 0 {
-			return fmt.Errorf("no watcher-capable runtimes enabled in config")
-		}
+	sources := buildWatcherSources(momCfg, projectDir)
+	if len(sources) == 0 {
+		return fmt.Errorf("no watcher-capable runtimes enabled in config")
 	}
 
 	// Sweep mode: one-shot catch-up and exit.
 	if watchSweep {
-		adapterMap := make(map[string]watcher.Adapter, len(sources))
-		for _, src := range sources {
-			adapterMap[src.Harness] = src.Adapter
-		}
-		bus := newProjectBus(momDir, adapterMap)
+		bus := newProjectBus(workers)
 		w, err := watcher.New(watcher.Config{
 			ProjectDir: projectDir,
 			MomDir:     momDir,
@@ -178,19 +122,16 @@ func runWatch(cmd *cobra.Command, _ []string) error {
 		return nil
 	}
 
-	// Herald event bus: watcher publishes RecordAppended events,
-	// Logbook and Drafter subscribe as downstream processors.
-	adapterMap := make(map[string]watcher.Adapter, len(sources))
-	for _, src := range sources {
-		adapterMap[src.Harness] = src.Adapter
-	}
-	bus := newProjectBus(momDir, adapterMap)
+	// Herald event bus: watcher publishes turn.observed events,
+	// Logbook and Drafter (via centralWorkers) subscribe as
+	// downstream processors.
+	bus := newProjectBus(workers)
 
 	w, err := watcher.New(watcher.Config{
 		ProjectDir: projectDir,
 		MomDir:     momDir,
 		Sources:    sources,
-		DebounceMs: watchDebounceMs,
+		DebounceMs: 300,
 		Bus:        bus,
 	})
 	if err != nil {
@@ -206,9 +147,25 @@ func runWatch(cmd *cobra.Command, _ []string) error {
 	for rt, dir := range w.TranscriptDirs() {
 		p.Chevron(fmt.Sprintf("%s: %s", rt, dir))
 	}
-	p.Chevron(fmt.Sprintf("target: %s/raw/", momDir))
+	if path, err := centralvault.Path(); err == nil {
+		p.Chevron(fmt.Sprintf("vault: %s", path))
+	}
 	p.Muted("press Ctrl-C to stop")
 	p.Blank()
+
+	// Start the Drafter idle-flush ticker and ensure FlushAll runs
+	// when the watcher exits. Without these, sessions under
+	// flushAtTurnCount turns never persist; clean shutdown loses
+	// every pending buffer.
+	tickCtx, tickCancel := context.WithCancel(context.Background())
+	tickDone := startDrafterTicker(tickCtx, workers)
+	defer func() {
+		tickCancel()
+		<-tickDone
+		if workers.drafter != nil {
+			workers.drafter.FlushAll()
+		}
+	}()
 
 	if err := w.Run(); err != nil {
 		return fmt.Errorf("watcher stopped: %w", err)
@@ -216,72 +173,49 @@ func runWatch(cmd *cobra.Command, _ []string) error {
 	return nil
 }
 
-// newProjectBus creates a Herald event bus with Logbook and Drafter subscribers
-// wired for a given momDir. Used by both single-project and global watch modes.
-// adapters maps Harness name → Adapter for Harness-specific logbook parsing.
-func newProjectBus(momDir string, adapters map[string]watcher.Adapter) *herald.Bus {
-	bus := herald.NewBus()
+// drafterTickInterval is the cadence at which the global daemon
+// invokes Drafter.Tick. Sessions whose lastSeen is older than the
+// drafter's idleFlushAfter (default 90s) are flushed at the next
+// tick — so the worst-case persistence delay is
+// idleFlushAfter + drafterTickInterval. 30s keeps that sub-2-minute.
+const drafterTickInterval = 30 * time.Second
 
-	// Logbook: parse transcript → write session metrics to .mom/logs/.
-	bus.Subscribe(herald.RecordAppended, func(e herald.Event) {
-		tp, _ := e.Payload["transcript_path"].(string)
-		sid, _ := e.Payload["session_id"].(string)
-		md, _ := e.Payload["mom_dir"].(string)
-		if tp == "" || sid == "" || md == "" {
-			return
-		}
-		logsDir := filepath.Join(md, "logs")
-		_ = os.MkdirAll(logsDir, 0755)
-
-		// Use Harness-specific parser when available, fall back to Claude format.
-		var sessionLog *logbook.SessionLog
-		var err error
-		if rt, ok := e.Payload["runtime"].(string); ok {
-			if adapter, ok := adapters[rt]; ok {
-				if sp, ok := adapter.(watcher.SessionParser); ok {
-					sessionLog, err = sp.ParseSession(tp, sid)
-				}
+// startDrafterTicker spawns a goroutine that calls drafter.Tick on a
+// fixed cadence until ctx is done. Returns a channel that closes
+// when the goroutine has exited so callers can sequence FlushAll
+// after Tick has stopped.
+func startDrafterTicker(ctx context.Context, workers centralWorkers) <-chan struct{} {
+	done := make(chan struct{})
+	if workers.drafter == nil {
+		close(done)
+		return done
+	}
+	go func() {
+		defer close(done)
+		t := time.NewTicker(drafterTickInterval)
+		defer t.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case now := <-t.C:
+				workers.drafter.Tick(now)
 			}
 		}
-		if sessionLog == nil && err == nil {
-			sessionLog, err = logbook.ParseTranscript(tp, sid)
-		}
-		if err != nil || sessionLog == nil {
-			return
-		}
-		outPath := filepath.Join(logsDir, fmt.Sprintf("session-%s.json", sid))
-		data, _ := json.MarshalIndent(sessionLog, "", "  ")
-		_ = os.WriteFile(outPath, append(data, '\n'), 0644)
-	})
+	}()
+	return done
+}
 
-	// Drafter: process raw → write draft memories to .mom/memory/.
-	bus.Subscribe(herald.RecordAppended, func(e herald.Event) {
-		md, _ := e.Payload["mom_dir"].(string)
-		if md == "" {
-			return
-		}
-		rawDir := filepath.Join(md, "raw")
-		memDir := filepath.Join(md, "memory")
-		_ = os.MkdirAll(memDir, 0755)
-
-		since := lastDraftTime(md)
-		vocabFn := func() []string { return collectVocab(memDir) }
-
-		d := drafter.New(rawDir, memDir, vocabFn)
-		drafts, err := d.Process(since)
-		if err != nil || len(drafts) == 0 {
-			return
-		}
-
-		idx := storage.NewIndexedAdapter(md)
-		defer idx.Close()
-
-		for _, dr := range drafts {
-			_ = writeDraftDoc(idx, memDir, dr)
-		}
-		updateDraftMarker(md)
-	})
-
+// newProjectBus creates a Herald event bus with the central Drafter
+// and Logbook attached. Used by both single-project and global watch
+// modes. The shared workers consume turn.observed, memory.record,
+// and op.memory.* and persist into the central vault at
+// $HOME/.mom/mom.db. The legacy RecordAppended subscribers (v1
+// drafter writing .mom/memory/*.json, v1 logbook writing
+// session-*.json) retired in #240 PR 3 and PR 4.
+func newProjectBus(workers centralWorkers) *herald.Bus {
+	bus := herald.NewBus()
+	workers.AttachToBus(bus)
 	return bus
 }
 
@@ -291,6 +225,11 @@ func runWatchGlobal(sweepOnly bool) error {
 	if err != nil {
 		return fmt.Errorf("loading registry: %w", err)
 	}
+
+	// Open the central vault ONCE for the entire global daemon. The
+	// same Logbook worker is shared across every per-project bus
+	// below — no N-vault-handle leak in multi-project mode.
+	workers := openCentralWorkers()
 
 	if sweepOnly {
 		p := ux.NewPrinter(os.Stderr)
@@ -306,11 +245,7 @@ func runWatchGlobal(sweepOnly bool) error {
 			if len(sources) == 0 {
 				continue
 			}
-			adapterMap := make(map[string]watcher.Adapter, len(sources))
-			for _, src := range sources {
-				adapterMap[src.Harness] = src.Adapter
-			}
-			bus := newProjectBus(entry.MomDir, adapterMap)
+			bus := newProjectBus(workers)
 			w, err := watcher.New(watcher.Config{
 				ProjectDir: projDir,
 				MomDir:     entry.MomDir,
@@ -342,6 +277,17 @@ func runWatchGlobal(sweepOnly bool) error {
 	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer cancel()
 
+	// Drafter idle-flush ticker + shutdown FlushAll. Without these,
+	// sessions under flushAtTurnCount turns never persist and clean
+	// shutdown loses every pending buffer.
+	tickDone := startDrafterTicker(ctx, workers)
+	defer func() {
+		<-tickDone
+		if workers.drafter != nil {
+			workers.drafter.FlushAll()
+		}
+	}()
+
 	type runningWatcher struct {
 		cancel context.CancelFunc
 	}
@@ -358,11 +304,7 @@ func runWatchGlobal(sweepOnly bool) error {
 		if len(sources) == 0 {
 			return
 		}
-		adapterMap := make(map[string]watcher.Adapter, len(sources))
-		for _, src := range sources {
-			adapterMap[src.Harness] = src.Adapter
-		}
-		bus := newProjectBus(entry.MomDir, adapterMap)
+		bus := newProjectBus(workers)
 		w, err := watcher.New(watcher.Config{
 			ProjectDir: projDir,
 			MomDir:     entry.MomDir,
@@ -470,17 +412,17 @@ func runWatchGlobal(sweepOnly bool) error {
 	}
 }
 
-// runWatchStatus prints cursor files in .mom/raw/ for inspection.
+// runWatchStatus prints watcher cursor files for inspection.
 func runWatchStatus(momDir string) error {
 	p := ux.NewPrinter(os.Stderr)
-	rawDir := filepath.Join(momDir, "raw")
-	entries, err := os.ReadDir(rawDir)
+	cursorDir := filepath.Join(momDir, "cache")
+	entries, err := os.ReadDir(cursorDir)
 	if err != nil {
 		if os.IsNotExist(err) {
-			p.Warn(fmt.Sprintf("no raw dir at %s — nothing recorded yet", rawDir))
+			p.Warn(fmt.Sprintf("no cache dir at %s — watcher has not run yet", cursorDir))
 			return nil
 		}
-		return fmt.Errorf("reading raw dir: %w", err)
+		return fmt.Errorf("reading cache dir: %w", err)
 	}
 
 	type cursor struct {
@@ -494,7 +436,7 @@ func runWatchStatus(momDir string) error {
 		}
 		if strings.HasPrefix(e.Name(), ".watch-cursor-") {
 			sid := strings.TrimPrefix(e.Name(), ".watch-cursor-")
-			cf := filepath.Join(rawDir, e.Name())
+			cf := filepath.Join(cursorDir, e.Name())
 			data, err := os.ReadFile(cf)
 			if err != nil {
 				continue
@@ -515,4 +457,69 @@ func runWatchStatus(momDir string) error {
 		p.Chevron(fmt.Sprintf("%s: %s bytes", c.sid, c.offset))
 	}
 	return nil
+}
+
+// centralWorkers bundles the two Herald subscribers that need a
+// Librarian: Drafter (filter pipeline + memory persistence) and
+// Logbook (operational stream). Returned together because they share
+// the same Vault — we open the vault once per process and use it for
+// both.
+type centralWorkers struct {
+	drafter *drafter.Drafter
+	logbook *logbook.Worker
+}
+
+// AttachToBus subscribes both workers to the given bus with the
+// correct topic set:
+//
+//   - Drafter consumes turn.observed and memory.record (write path)
+//   - Logbook consumes turn.observed (privacy-projected audit) AND
+//     op.memory.created / op.memory.redacted / op.memory.dropped
+//     (Drafter's outcome events, persisted as audit rows)
+//
+// No-op when the workers are nil — openCentralWorkers returns a zero
+// value when vault.Open fails. The bus continues to function for
+// legacy v1 subscribers in that case.
+//
+// Encapsulating both subscriptions here is the single place a future
+// "what does Logbook record for this bus?" change needs to land.
+func (cw centralWorkers) AttachToBus(bus *herald.Bus) {
+	if cw.drafter != nil {
+		cw.drafter.SubscribeAll(bus)
+	}
+	if cw.logbook != nil {
+		cw.logbook.SubscribeTurnObserved(bus)
+		cw.logbook.SubscribeAll(bus,
+			herald.OpMemoryCreated,
+			herald.OpMemoryRedacted,
+			herald.OpMemoryDropped,
+		)
+	}
+}
+
+// openCentralWorkers opens the central vault at $HOME/.mom/mom.db,
+// runs migrations, and constructs the workers bound to it. Returns
+// zero values + logs to stderr on any failure (HOME resolution,
+// MkdirAll, vault.Open) — callers can still use the bus for legacy
+// subscribers.
+//
+// Called once per process, NOT per project. The same workers are
+// subscribed to every project's bus by newProjectBus; SQLite WAL +
+// the librarian/vault concurrency contract keep this safe across
+// goroutines.
+//
+// The vault stays open for the process's lifetime. The runtime owns
+// the lifecycle; on shutdown the OS reclaims the handle. A future
+// refactor should plumb an explicit Close, but for alpha this is
+// acceptable.
+func openCentralWorkers() centralWorkers {
+	lib, _, err := centralvault.OpenLibrarian()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "watch: %v — central workers not wired\n", err)
+		return centralWorkers{}
+	}
+	return centralWorkers{
+		drafter: drafter.New(lib),
+		logbook: logbook.New(lib),
+	}
 }

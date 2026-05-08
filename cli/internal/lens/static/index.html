@@ -1,0 +1,1077 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>MOM — Sessions</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@300;400;500;600&family=Lora:ital,wght@1,600&display=swap" rel="stylesheet">
+<style>
+/* ── Tokens ─────────────────────────────────────────────────────────────── */
+:root {
+  --mantle:      oklch(30% 0.10 218);
+  --mantle-deep: oklch(22% 0.08 218);
+  --paper:       oklch(97% 0.015 85);
+  --ink:         oklch(12% 0.018 235);
+  --gold:        oklch(76% 0.14 72);
+  --rosa:        oklch(58% 0.12 28);
+  --agave:       oklch(50% 0.09 150);
+
+  --paper-70:  oklch(97% 0.015 85 / 0.70);
+  --paper-35:  oklch(97% 0.015 85 / 0.35);
+  --paper-20:  oklch(97% 0.015 85 / 0.20);
+  --paper-15:  oklch(97% 0.015 85 / 0.15);
+  --paper-10:  oklch(97% 0.015 85 / 0.10);
+  --paper-06:  oklch(97% 0.015 85 / 0.06);
+  --paper-03:  oklch(97% 0.015 85 / 0.03);
+
+  --grid-cols: 140px 1fr 108px 52px 60px 84px;
+  --grid-gap:  20px;
+  --nav-h:     56px;
+  --panel-w:   42%;
+}
+
+/* ── Reset ───────────────────────────────────────────────────────────────── */
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+html, body { height: 100%; overflow: hidden; }
+
+body {
+  background: var(--mantle);
+  color: var(--paper);
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 1rem;
+  font-weight: 300;
+  line-height: 1.65;
+  -webkit-font-smoothing: antialiased;
+  display: flex;
+  flex-direction: column;
+}
+
+/* ── Cursor blink ────────────────────────────────────────────────────────── */
+@keyframes blink { 50% { opacity: 0; } }
+
+/* ── Nav ─────────────────────────────────────────────────────────────────── */
+.nav {
+  position: relative;
+  z-index: 20;
+  height: var(--nav-h);
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 24px;
+  background: var(--mantle);
+  border-bottom: 1px solid var(--paper-15);
+}
+
+.nav-wordmark {
+  display: inline-flex;
+  align-items: baseline;
+  color: var(--paper);
+  line-height: 1;
+}
+
+.nav-wordmark-text {
+  font-family: 'Lora', Georgia, serif;
+  font-size: 18px;
+  font-style: italic;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+
+.nav-cursor {
+  display: inline-block;
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 13px;
+  font-style: normal;
+  font-weight: 400;
+  color: var(--gold);
+  animation: blink 1.2s steps(2) infinite;
+  margin-left: 1px;
+  position: relative;
+  top: 1px;
+}
+
+.nav-meta {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 11px;
+  font-weight: 400;
+  letter-spacing: 0.10em;
+  text-transform: uppercase;
+  color: var(--paper-35);
+}
+
+/* ── Stat grid (accepted variant 3) ─────────────────────────────────────── */
+.filter-bar-v3 {
+  display: flex;
+  flex-direction: column;
+  flex-shrink: 0;
+  border-bottom: 1px solid var(--paper-10);
+}
+.v3-stat-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  border-bottom: 1px solid var(--paper-06);
+}
+.v3-cell {
+  padding: 16px 24px;
+  border-right: 1px solid var(--paper-06);
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+.v3-cell:last-child { border-right: none; }
+.v3-val {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 28px;
+  font-weight: 600;
+  color: var(--paper);
+  line-height: 1;
+  letter-spacing: -0.02em;
+}
+.v3-val.is-gold { color: var(--gold); }
+.v3-key {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 10px;
+  font-weight: 400;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--paper-35);
+}
+.v3-filter-row {
+  padding: 10px 24px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.v3-section-label {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 11px;
+  font-weight: 400;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--paper-35);
+  white-space: nowrap;
+}
+.v3-line { flex: 1; height: 1px; background: var(--paper-10); }
+.v3-count {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 11px;
+  color: var(--paper-35);
+  letter-spacing: 0.06em;
+}
+.v3-filters { display: flex; align-items: center; gap: 4px; flex-wrap: wrap; }
+.v3-fsep { width: 1px; height: 14px; background: var(--paper-15); margin: 0 4px; }
+/* ── Tags / Pills ────────────────────────────────────────────────────────── */
+.tag {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 11px;
+  font-weight: 400;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  background: transparent;
+  border: 1px solid var(--paper-20);
+  color: var(--paper-35);
+  padding: 3px 10px;
+  cursor: pointer;
+  transition: background 0.12s ease, color 0.12s ease, border-color 0.12s ease;
+  line-height: 1.5;
+}
+.tag:hover {
+  border-color: var(--paper-35);
+  color: var(--paper-70);
+}
+.tag.active {
+  background: var(--paper-10);
+  border-color: var(--paper-35);
+  color: var(--paper);
+}
+
+/* ── Main layout ─────────────────────────────────────────────────────────── */
+.main {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  transition: none; /* explicit: no transition when panel opens */
+}
+.main.panel-open {
+  padding-right: var(--panel-w);
+}
+
+/* ── Sessions table ──────────────────────────────────────────────────────── */
+.sessions-header {
+  flex-shrink: 0;
+  display: grid;
+  grid-template-columns: var(--grid-cols);
+  gap: var(--grid-gap);
+  padding: 10px 24px;
+  border-bottom: 1px solid var(--paper-10);
+}
+.col-header {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 10px;
+  font-weight: 400;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--paper-35);
+}
+.col-header.align-right { text-align: right; }
+
+.sessions-list {
+  flex: 1;
+  overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: var(--paper-15) transparent;
+}
+
+.session-row {
+  display: grid;
+  grid-template-columns: var(--grid-cols);
+  gap: var(--grid-gap);
+  padding: 18px 24px;
+  border-bottom: 1px solid var(--paper-06);
+  background: var(--paper-03);
+  cursor: pointer;
+  align-items: center;
+  transition: background 0.12s ease;
+  user-select: none;
+}
+.session-row:hover {
+  background: var(--paper-10);
+}
+.session-row.active {
+  background: var(--paper-10);
+  border-bottom-color: var(--paper-15);
+}
+
+/* ── Column cells ────────────────────────────────────────────────────────── */
+.cell-date { line-height: 1.35; }
+.cell-date-day {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--paper);
+}
+.cell-date-time {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 11px;
+  color: var(--paper-35);
+  margin-top: 2px;
+}
+
+.cell-session { min-width: 0; }
+.cell-session-id {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--paper-70);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.cell-session-dur {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 11px;
+  color: var(--paper-35);
+  margin-top: 2px;
+}
+
+.cell-harness {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--paper-35);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.cell-turns {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--paper);
+  text-align: right;
+}
+
+.cell-mem {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 13px;
+  font-weight: 600;
+  text-align: right;
+}
+.cell-mem.has-mem  { color: var(--gold); }
+.cell-mem.zero-mem { color: var(--paper-20); }
+
+.cell-tokens {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 12px;
+  color: var(--paper-35);
+  text-align: right;
+}
+
+/* ── Empty & error states ────────────────────────────────────────────────── */
+.empty-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 80px 32px;
+  gap: 10px;
+  text-align: center;
+}
+.empty-eyebrow {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 11px;
+  font-weight: 400;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--paper-20);
+}
+.empty-text {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 14px;
+  font-weight: 300;
+  color: var(--paper-35);
+  max-width: 44ch;
+  line-height: 1.6;
+}
+.empty-eyebrow.is-error { color: var(--rosa); }
+
+/* ── Skeleton ────────────────────────────────────────────────────────────── */
+@keyframes skeleton-pulse {
+  0%, 100% { opacity: 0.3; }
+  50%       { opacity: 0.7; }
+}
+.skeleton-row {
+  display: grid;
+  grid-template-columns: var(--grid-cols);
+  gap: var(--grid-gap);
+  padding: 18px 24px;
+  border-bottom: 1px solid var(--paper-06);
+  align-items: center;
+}
+.skel {
+  height: 13px;
+  background: var(--paper-10);
+  animation: skeleton-pulse 1.5s ease-in-out infinite;
+}
+.skel-sm { height: 10px; }
+
+/* ── Detail panel ────────────────────────────────────────────────────────── */
+.detail-panel {
+  position: fixed;
+  top: var(--nav-h);
+  right: 0;
+  bottom: 0;
+  width: var(--panel-w);
+  min-width: 380px;
+  background: var(--mantle-deep);
+  border-left: 1px solid var(--paper-15);
+  transform: translateX(100%);
+  transition: transform 200ms cubic-bezier(0.16, 1, 0.3, 1);
+  overflow-y: auto;
+  z-index: 10;
+  display: flex;
+  flex-direction: column;
+  scrollbar-width: thin;
+  scrollbar-color: var(--paper-10) transparent;
+}
+.detail-panel.open {
+  transform: translateX(0);
+}
+
+.panel-header {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  background: var(--mantle-deep);
+  border-bottom: 1px solid var(--paper-10);
+  padding: 14px 20px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.panel-session-id {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--paper-70);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+  letter-spacing: 0.02em;
+}
+.panel-close {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 13px;
+  background: transparent;
+  border: none;
+  color: var(--paper-35);
+  cursor: pointer;
+  padding: 4px 8px;
+  flex-shrink: 0;
+  transition: color 0.12s ease;
+  line-height: 1;
+}
+.panel-close:hover { color: var(--paper); }
+
+/* ── Stat strip ──────────────────────────────────────────────────────────── */
+.stat-strip {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  border-bottom: 1px solid var(--paper-10);
+  flex-shrink: 0;
+}
+.stat-cell {
+  padding: 18px 14px 16px;
+  border-right: 1px solid var(--paper-06);
+}
+.stat-cell:last-child { border-right: none; }
+.stat-value {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 22px;
+  font-weight: 600;
+  color: var(--paper);
+  line-height: 1;
+  letter-spacing: -0.01em;
+}
+.stat-label {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 9px;
+  font-weight: 400;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--paper-35);
+  margin-top: 7px;
+}
+
+/* ── Panel content ───────────────────────────────────────────────────────── */
+.panel-content {
+  padding: 0 20px 32px;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+}
+
+.panel-section {
+  padding-top: 20px;
+}
+.panel-section + .panel-section {
+  border-top: 1px solid var(--paper-06);
+  margin-top: 20px;
+}
+
+.panel-section-label {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 10px;
+  font-weight: 400;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--paper-35);
+  margin-bottom: 12px;
+}
+
+/* ── Info grid ───────────────────────────────────────────────────────────── */
+.info-grid {
+  display: grid;
+  grid-template-columns: 72px 1fr;
+  row-gap: 6px;
+  column-gap: 12px;
+}
+.info-key {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 11px;
+  color: var(--paper-35);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  padding-top: 1px;
+}
+.info-val {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 11px;
+  color: var(--paper-70);
+  word-break: break-all;
+}
+
+/* ── Tool rows ───────────────────────────────────────────────────────────── */
+.tool-rows { display: flex; flex-direction: column; gap: 3px; }
+.tool-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 8px 12px;
+  background: var(--paper-03);
+  border: 1px solid var(--paper-06);
+}
+.tool-cat {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 11px;
+  color: var(--paper-35);
+  letter-spacing: 0.04em;
+}
+.tool-total {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--paper);
+}
+
+/* ── Info tooltip ────────────────────────────────────────────────────────── */
+.info-tip {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 13px;
+  height: 13px;
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 9px;
+  font-weight: 500;
+  text-transform: none;
+  letter-spacing: 0;
+  color: var(--paper-35);
+  border: 1px solid var(--paper-20);
+  cursor: default;
+  position: relative;
+  vertical-align: middle;
+  margin-left: 6px;
+  flex-shrink: 0;
+  line-height: 1;
+}
+.info-tip::after {
+  content: attr(data-tip);
+  position: absolute;
+  bottom: calc(100% + 8px);
+  left: 50%;
+  transform: translateX(-50%);
+  background: var(--mantle-deep);
+  border: 1px solid var(--paper-15);
+  color: var(--paper-35);
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 12px;
+  font-style: normal;
+  font-weight: 300;
+  text-transform: none;
+  letter-spacing: 0;
+  line-height: 1.55;
+  padding: 10px 14px;
+  width: 230px;
+  white-space: normal;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.15s ease;
+  z-index: 100;
+}
+.info-tip:hover::after { opacity: 1; }
+
+/* ── Memory items ────────────────────────────────────────────────────────── */
+.panel-section-label--split {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+.mem-label-counts { display: flex; gap: 10px; }
+.mem-label-curated, .mem-label-draft {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+.mem-label-curated { color: var(--gold); }
+.mem-label-draft   { color: var(--paper-35); }
+
+.memory-items { display: flex; flex-direction: column; gap: 4px; }
+.memory-item {
+  padding: 12px 14px;
+  background: var(--paper-03);
+  border: 1px solid var(--paper-06);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.memory-item-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px;
+}
+.memory-id {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--paper-70);
+  word-break: break-all;
+  line-height: 1.3;
+}
+.badge {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 9px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  padding: 2px 7px;
+  flex-shrink: 0;
+  line-height: 1.6;
+}
+.badge-landmark { background: var(--paper-10); color: var(--gold); border: 1px solid oklch(76% 0.14 72 / 0.30); }
+.badge-curated  { background: var(--gold); color: var(--ink); }
+.badge-draft    { background: var(--paper-10); color: var(--paper-35); }
+
+.memory-summary {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 13px;
+  font-weight: 300;
+  color: var(--paper-35);
+  line-height: 1.5;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.memory-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 3px;
+}
+.memory-tag {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 10px;
+  color: var(--paper-35);
+  border: 1px solid var(--paper-10);
+  padding: 1px 6px;
+}
+</style>
+</head>
+<body>
+
+<!-- Nav -->
+<nav class="nav">
+  <div class="nav-wordmark" aria-label="mom"><span class="nav-wordmark-text">mom</span><span class="nav-cursor" aria-hidden="true">_</span></div>
+  <div class="nav-meta" id="nav-vault">—</div>
+</nav>
+
+<!-- Filter bar -->
+<div class="filter-bar-v3" id="v3-root">
+  <div class="v3-stat-grid">
+    <div class="v3-cell"><span class="v3-val" id="v3-sessions">—</span><span class="v3-key">Sessions</span></div>
+    <div class="v3-cell"><span class="v3-val is-gold" id="v3-memories">—</span><span class="v3-key">Memories</span></div>
+    <div class="v3-cell"><span class="v3-val" id="v3-tokens">—</span><span class="v3-key">Tokens</span></div>
+    <div class="v3-cell"><span class="v3-val" id="v3-avg-dur">—</span><span class="v3-key">Avg. Duration</span></div>
+  </div>
+  <div class="v3-filter-row">
+    <span class="v3-section-label">Showing</span>
+    <div class="v3-line"></div>
+    <span class="v3-count" id="v3-count">—</span>
+    <div class="v3-filters">
+      <div id="v3-harness-filters"></div>
+      <div class="v3-fsep" id="v3-filter-sep" style="display:none"></div>
+      <div id="v3-memory-filters">
+        <button class="tag" data-mem="has">Has Memories</button>
+        <button class="tag" data-mem="no">No Memories</button>
+        <button class="tag" data-mem="curated">Curated</button>
+        <button class="tag" data-mem="draft">Draft</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Main -->
+<div class="main" id="main">
+  <div class="sessions-header">
+    <span class="col-header">Date</span>
+    <span class="col-header">Session</span>
+    <span class="col-header">Harness</span>
+    <span class="col-header align-right">Turns</span>
+    <span class="col-header align-right">Mem</span>
+    <span class="col-header align-right">Tokens</span>
+  </div>
+  <div class="sessions-list" id="sessions-list"></div>
+</div>
+
+<!-- Detail panel -->
+<aside class="detail-panel" id="detail-panel" aria-label="Session detail">
+  <div class="panel-header">
+    <div class="panel-session-id" id="panel-session-id">—</div>
+    <button class="panel-close" id="panel-close" aria-label="Close panel">&#x2715;</button>
+  </div>
+  <div class="stat-strip" id="stat-strip"></div>
+  <div class="panel-content" id="panel-content"></div>
+</aside>
+
+<script>
+/* ── State ─────────────────────────────────────────────────────────────── */
+const state = {
+  sessions: [],
+  filtered: [],
+  activeSession: null,
+  activeHarness: null,
+  activeMemFilter: null, // 'has' | 'no' | null
+  totalMemories: 0,
+};
+
+/* ── Init ──────────────────────────────────────────────────────────────── */
+async function init() {
+  renderSkeleton();
+  await Promise.all([loadMeta(), loadSessions()]);
+}
+
+async function loadMeta() {
+  try {
+    const res = await fetch('/api/meta');
+    if (!res.ok) return;
+    const meta = await res.json();
+    state.totalMemories = meta.total_memories || 0;
+    const nav = document.getElementById('nav-vault');
+    if (nav) nav.textContent = 'CENTRAL';
+  } catch (_) {}
+}
+
+async function loadSessions() {
+  try {
+    const res = await fetch('/api/sessions');
+    if (!res.ok) throw new Error(res.status + ' ' + res.statusText);
+    state.sessions = await res.json();
+    buildHarnessFilters();
+    populateVariantMetrics();
+    applyFilters();
+  } catch (e) {
+    renderError('Could not load sessions: ' + e.message);
+  }
+}
+
+function populateVariantMetrics() {
+  const s = state.sessions;
+  const totalTokens = s.reduce((n, x) => n + (x.total_tokens || 0), 0);
+  const durSessions = s.filter(x => x.duration_secs > 0);
+  const avgDur = durSessions.length > 0
+    ? durSessions.reduce((n, x) => n + x.duration_secs, 0) / durSessions.length
+    : 0;
+
+  const set = (id, val) => { const el = document.getElementById(id); if (el) el.textContent = val; };
+  set('v3-sessions', s.length);
+  set('v3-memories', state.totalMemories);
+  set('v3-tokens',   fmtTokens(totalTokens));
+  set('v3-avg-dur',  avgDur > 0 ? fmtDuration(avgDur) : '\u2014');
+}
+
+/* ── Filters ───────────────────────────────────────────────────────────── */
+function buildHarnessFilters() {
+  const harnesses = [...new Set(state.sessions.map(s => s.provider).filter(Boolean))].sort();
+  const container = document.getElementById('v3-harness-filters');
+  const sep = document.getElementById('v3-filter-sep');
+  if (!container) return;
+  container.innerHTML = '';
+  if (harnesses.length === 0) { if (sep) sep.style.display = 'none'; return; }
+  if (sep) sep.style.display = '';
+  const all = makeTag('All', null === state.activeHarness);
+  all.addEventListener('click', () => setHarness(null));
+  container.appendChild(all);
+  harnesses.forEach(h => {
+    const btn = makeTag(h, h === state.activeHarness);
+    btn.addEventListener('click', () => setHarness(h));
+    container.appendChild(btn);
+  });
+}
+
+function makeTag(label, active) {
+  const btn = document.createElement('button');
+  btn.className = 'tag' + (active ? ' active' : '');
+  btn.textContent = label;
+  return btn;
+}
+
+function setHarness(h) {
+  state.activeHarness = h;
+  buildHarnessFilters();
+  applyFilters();
+}
+
+document.addEventListener('click', e => {
+  const btn = e.target.closest('[data-mem]');
+  if (!btn) return;
+  const f = btn.dataset.mem;
+  state.activeMemFilter = state.activeMemFilter === f ? null : f;
+  document.querySelectorAll('[data-mem]').forEach(b => {
+    b.classList.toggle('active', b.dataset.mem === state.activeMemFilter);
+  });
+  applyFilters();
+});
+
+function applyFilters() {
+  state.filtered = state.sessions.filter(s => {
+    if (state.activeHarness && s.provider !== state.activeHarness) return false;
+    if (state.activeMemFilter === 'has' && s.memory_count === 0) return false;
+    if (state.activeMemFilter === 'no' && s.memory_count > 0) return false;
+    if (state.activeMemFilter === 'curated' && s.curated_count === 0) return false;
+    if (state.activeMemFilter === 'draft' && (s.memory_count - s.curated_count) === 0) return false;
+    return true;
+  });
+  updateCount();
+  renderSessions();
+}
+
+function updateCount() {
+  const total = state.sessions.length;
+  const shown = state.filtered.length;
+  const el = document.getElementById('v3-count');
+  if (el) el.textContent = shown === total ? String(total) : shown + ' / ' + total;
+}
+
+/* ── Render sessions ───────────────────────────────────────────────────── */
+function renderSessions() {
+  const list = document.getElementById('sessions-list');
+  if (state.filtered.length === 0) {
+    const msg = state.sessions.length === 0
+      ? 'No sessions recorded yet. Start an AI session with MOM active to capture your first one.'
+      : 'No sessions match the current filters.';
+    list.innerHTML = emptyState('No sessions', msg, false);
+    return;
+  }
+  list.innerHTML = state.filtered.map(rowHTML).join('');
+  list.querySelectorAll('.session-row').forEach(row => {
+    row.addEventListener('click', () => openSession(row.dataset.id, row));
+  });
+  if (state.activeSession) {
+    const el = list.querySelector(`[data-id="${CSS.escape(state.activeSession)}"]`);
+    if (el) el.classList.add('active');
+  }
+}
+
+function rowHTML(s) {
+  const d = fmtDate(s.started);
+  const dur = s.duration_secs > 0 ? fmtDuration(s.duration_secs) : '\u2014';
+  const tokens = s.total_tokens > 0 ? fmtTokens(s.total_tokens) : '\u2014';
+  const harness = s.provider ? s.provider : '\u2014';
+  const shortId = s.session_id ? s.session_id.slice(0, 18) : '\u2014';
+  const memClass = s.memory_count > 0 ? 'has-mem' : 'zero-mem';
+
+  return `<div class="session-row" data-id="${esc(s.session_id)}">
+    <div class="cell-date">
+      <div class="cell-date-day">${esc(d.day)}</div>
+      <div class="cell-date-time">${esc(d.time)}</div>
+    </div>
+    <div class="cell-session">
+      <div class="cell-session-id">${esc(shortId)}</div>
+      <div class="cell-session-dur">${esc(dur)}</div>
+    </div>
+    <div class="cell-harness">${esc(harness)}</div>
+    <div class="cell-turns">${s.interactions}</div>
+    <div class="cell-mem ${memClass}">${s.memory_count}</div>
+    <div class="cell-tokens">${esc(tokens)}</div>
+  </div>`;
+}
+
+function renderSkeleton() {
+  const row = (opacity) => `<div class="skeleton-row" style="opacity:${opacity}">
+    <div><div class="skel" style="width:72px"></div><div class="skel skel-sm" style="width:48px;margin-top:5px"></div></div>
+    <div><div class="skel" style="width:65%"></div><div class="skel skel-sm" style="width:40%;margin-top:5px"></div></div>
+    <div><div class="skel" style="width:64px"></div></div>
+    <div style="text-align:right"><div class="skel" style="width:28px;margin-left:auto"></div></div>
+    <div style="text-align:right"><div class="skel" style="width:22px;margin-left:auto"></div></div>
+    <div style="text-align:right"><div class="skel" style="width:36px;margin-left:auto"></div></div>
+  </div>`;
+  const opacities = [1, 0.85, 0.7, 0.55, 0.4, 0.28, 0.18, 0.10];
+  document.getElementById('sessions-list').innerHTML = opacities.map(o => row(o)).join('');
+}
+
+function renderError(msg) {
+  document.getElementById('sessions-list').innerHTML = emptyState('Error', msg, true);
+}
+
+function emptyState(label, text, isError) {
+  return `<div class="empty-state">
+    <div class="empty-eyebrow${isError ? ' is-error' : ''}">${esc(label)}</div>
+    <div class="empty-text">${esc(text)}</div>
+  </div>`;
+}
+
+/* ── Detail panel ──────────────────────────────────────────────────────── */
+async function openSession(id, rowEl) {
+  document.querySelectorAll('.session-row.active').forEach(r => r.classList.remove('active'));
+  if (rowEl) rowEl.classList.add('active');
+  state.activeSession = id;
+
+  const panel = document.getElementById('detail-panel');
+  const main  = document.getElementById('main');
+  panel.classList.add('open');
+  main.classList.add('panel-open');
+
+  document.getElementById('panel-session-id').textContent = id ? id.slice(0, 20) + '\u2026' : '\u2014';
+  document.getElementById('stat-strip').innerHTML = statSkeleton();
+  document.getElementById('panel-content').innerHTML = '';
+
+  try {
+    const res = await fetch('/api/sessions/' + encodeURIComponent(id));
+    if (!res.ok) throw new Error(res.status + ' ' + res.statusText);
+    const detail = await res.json();
+    renderPanel(detail);
+  } catch (e) {
+    document.getElementById('panel-content').innerHTML =
+      `<div class="panel-section">${emptyState('Failed to load', e.message, true)}</div>`;
+  }
+}
+
+function closePanel() {
+  state.activeSession = null;
+  document.getElementById('detail-panel').classList.remove('open');
+  document.getElementById('main').classList.remove('panel-open');
+  document.querySelectorAll('.session-row.active').forEach(r => r.classList.remove('active'));
+}
+
+function renderPanel(d) {
+  document.getElementById('panel-session-id').textContent = d.session_id || '\u2014';
+
+  const dur    = d.duration_secs > 0 ? fmtDuration(d.duration_secs) : '\u2014';
+  const tokens = d.total_tokens > 0 ? fmtTokens(d.total_tokens) : '\u2014';
+
+  document.getElementById('stat-strip').innerHTML = `
+    <div class="stat-cell"><div class="stat-value">${d.memory_count}</div><div class="stat-label">Memories</div></div>
+    <div class="stat-cell"><div class="stat-value">${d.tools_total}</div><div class="stat-label">Tool Calls</div></div>
+    <div class="stat-cell"><div class="stat-value">${esc(tokens)}</div><div class="stat-label">Tokens</div></div>
+    <div class="stat-cell"><div class="stat-value">${esc(dur)}</div><div class="stat-label">Duration</div></div>
+  `;
+
+  let html = '';
+
+  const missingTip = `I was here the whole time, but some things didn't get written down. This session may have been recorded before I knew to track this — or something slipped past me.`;
+
+  // Session info
+  const sd = fmtDate(d.started);
+  const ed = d.ended && d.ended !== d.started ? fmtDate(d.ended) : null;
+  const turnsVal = d.interactions > 0
+    ? String(d.interactions)
+    : `\u2014<span class="info-tip" data-tip="${esc(missingTip)}">i</span>`;
+  const modelVal   = d.model    ? esc(d.model)    : `\u2014`;
+  const providerVal= d.provider ? esc(d.provider) : `\u2014`;
+  const costVal    = d.cost_usd > 0 ? `$${d.cost_usd.toFixed(4)}` : `\u2014`;
+  html += `<div class="panel-section">
+    <div class="panel-section-label">Session</div>
+    <div class="info-grid">
+      <span class="info-key">Started</span><span class="info-val">${esc(sd.day + ' ' + sd.time)}</span>
+      ${ed ? `<span class="info-key">Ended</span><span class="info-val">${esc(ed.day + ' ' + ed.time)}</span>` : ''}
+      <span class="info-key">Turns</span><span class="info-val">${turnsVal}</span>
+      <span class="info-key">Model</span><span class="info-val">${modelVal}</span>
+      <span class="info-key">Harness</span><span class="info-val">${providerVal}</span>
+      <span class="info-key">Cost</span><span class="info-val">${costVal}</span>
+    </div>
+  </div>`;
+
+  // Tool calls — always shown
+  const tools = d.tool_calls ? Object.entries(d.tool_calls).sort((a, b) => b[1].total - a[1].total) : [];
+  const toolsLabel = tools.length === 0
+    ? `Tool Calls<span class="info-tip" data-tip="${esc(missingTip)}">i</span>`
+    : 'Tool Calls';
+  html += `<div class="panel-section">
+    <div class="panel-section-label" style="display:flex;align-items:center;gap:0">${toolsLabel}</div>
+    <div class="tool-rows">
+      ${tools.length > 0
+        ? tools.map(([cat, g]) => `
+            <div class="tool-row">
+              <span class="tool-cat">${esc(cat.replace(/_/g, ' '))}</span>
+              <span class="tool-total">${g.total}</span>
+            </div>`).join('')
+        : `<div class="tool-row"><span class="tool-cat">\u2014</span></div>`
+      }
+    </div>
+  </div>`;
+
+  // Memories
+  const mems = d.memories || [];
+  if (mems.length > 0) {
+    const draft   = mems.length - (d.curated_count || 0);
+    const curated = d.curated_count || 0;
+    const memCounts = curated + draft > 0
+      ? `<span class="mem-label-counts">
+           ${curated > 0 ? `<span class="mem-label-curated">${curated} curated</span>` : ''}
+           ${draft   > 0 ? `<span class="mem-label-draft">${draft} draft</span>` : ''}
+         </span>`
+      : '';
+    html += `<div class="panel-section">
+      <div class="panel-section-label panel-section-label--split">
+        <span>Memories &middot; ${mems.length}</span>${memCounts}
+      </div>
+      <div class="memory-items">
+        ${mems.map(memHTML).join('')}
+      </div>
+    </div>`;
+  }
+
+  document.getElementById('panel-content').innerHTML = html;
+}
+
+function memHTML(m) {
+  const badge = m.landmark
+    ? `<span class="badge badge-landmark">Landmark</span>`
+    : m.promotion_state === 'curated'
+      ? `<span class="badge badge-curated">Curated</span>`
+      : `<span class="badge badge-draft">Draft</span>`;
+  const summary = m.summary
+    ? `<div class="memory-summary">${esc(m.summary)}</div>`
+    : '';
+  const tags = (m.tags || []).length > 0
+    ? `<div class="memory-tags">${m.tags.map(t => `<span class="memory-tag">${esc(t)}</span>`).join('')}</div>`
+    : '';
+  return `<div class="memory-item">
+    <div class="memory-item-head"><span class="memory-id">${esc(m.id)}</span>${badge}</div>
+    ${summary}
+    ${tags}
+  </div>`;
+}
+
+function statSkeleton() {
+  return Array(4).fill(0).map(() =>
+    `<div class="stat-cell">
+      <div class="skel" style="width:40px;height:22px;animation-duration:1.2s"></div>
+      <div class="skel skel-sm" style="width:56px;margin-top:8px;animation-duration:1.2s"></div>
+    </div>`
+  ).join('');
+}
+
+/* ── Format helpers ────────────────────────────────────────────────────── */
+function fmtDate(iso) {
+  if (!iso) return { day: '\u2014', time: '' };
+  const d = new Date(iso);
+  if (isNaN(d)) return { day: iso.slice(0, 10), time: '' };
+  const day  = d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+  const time = d.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false });
+  return { day, time };
+}
+
+function fmtDuration(secs) {
+  if (!secs || secs < 1) return '\u2014';
+  secs = Math.round(secs);
+  if (secs < 60)   return secs + 's';
+  const m = Math.floor(secs / 60), s = secs % 60;
+  if (m < 60) return s > 0 ? m + 'm ' + s + 's' : m + 'm';
+  const h = Math.floor(m / 60), rm = m % 60;
+  return rm > 0 ? h + 'h ' + rm + 'm' : h + 'h';
+}
+
+function fmtTokens(n) {
+  if (!n) return '0';
+  if (n < 1000)    return String(n);
+  if (n < 1000000) return (n / 1000).toFixed(0) + 'k';
+  return (n / 1000000).toFixed(1) + 'm';
+}
+
+function esc(s) {
+  if (s == null) return '';
+  return String(s)
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;').replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
+/* ── Event wiring ──────────────────────────────────────────────────────── */
+document.getElementById('panel-close').addEventListener('click', closePanel);
+document.addEventListener('keydown', e => { if (e.key === 'Escape') closePanel(); });
+
+init();
+</script>
+</body>
+</html>

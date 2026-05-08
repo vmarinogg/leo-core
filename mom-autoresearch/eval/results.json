@@ -1,0 +1,7 @@
+{
+  "policy_score": 71.22,
+  "p95_latency_ms": 27433.0342,
+  "token_regression_pct": 626.5556,
+  "citation_compliance_rate": 0.75,
+  "fabricated_claims": 0
+}

@@ -41,99 +41,29 @@ func setupTestMemoryWithConfig(t *testing.T, runtime string) string {
 	return dir
 }
 
-// ── leo status tests ──────────────────────────────────────────────────────────
+// ── mom status tests ─────────────────────────────────────────────────────────
 
-func TestStatusCmd_ShowsRuntimeAndStorageType(t *testing.T) {
-	dir := setupTestMemoryWithConfig(t, "claude")
-
-	origDir, _ := os.Getwd()
-	os.Chdir(dir)
-	defer os.Chdir(origDir)
+func TestStatusCmd_ShowsCentralShape(t *testing.T) {
+	lib := openCentralTestLib(t)
+	insertCentralTestMemory(t, lib, "ops status memory", "status check")
 
 	buf := new(bytes.Buffer)
-	rootCmd.SetOut(buf)
-	rootCmd.SetErr(buf)
-	rootCmd.SetArgs([]string{"status"})
-
-	if err := rootCmd.Execute(); err != nil {
+	statusCmd.SetOut(buf)
+	statusCmd.SetErr(buf)
+	if err := runStatus(statusCmd, nil); err != nil {
 		t.Fatalf("status failed: %v", err)
 	}
 
 	out := buf.String()
-	if !strings.Contains(out, "claude") {
-		t.Errorf("expected runtime 'claude' in output, got:\n%s", out)
+	for _, want := range []string{"MOM", "cwd", "vault", "memories", "types", "landmarks", "op events", "recording", "watcher"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("expected %q in output, got:\n%s", want, out)
+		}
 	}
-	if !strings.Contains(out, "json") {
-		t.Errorf("expected storage type 'json' in output, got:\n%s", out)
-	}
-}
-
-func TestStatusCmd_ShowsDocCounts(t *testing.T) {
-	dir := setupTestMemoryWithConfig(t, "claude")
-
-	// Add two docs.
-	writeTestDoc(t, dir, sampleDoc("status-doc-1"))
-	writeTestDoc(t, dir, sampleDoc("status-doc-2"))
-
-	origDir, _ := os.Getwd()
-	os.Chdir(dir)
-	defer os.Chdir(origDir)
-
-	buf := new(bytes.Buffer)
-	rootCmd.SetOut(buf)
-	rootCmd.SetErr(buf)
-	rootCmd.SetArgs([]string{"status"})
-
-	if err := rootCmd.Execute(); err != nil {
-		t.Fatalf("status failed: %v", err)
-	}
-
-	out := buf.String()
-	if !strings.Contains(out, "2") {
-		t.Errorf("expected total doc count '2' in output, got:\n%s", out)
-	}
-}
-
-func TestStatusCmd_ShowsTagCount(t *testing.T) {
-	dir := setupTestMemoryWithConfig(t, "claude")
-
-	writeTestDoc(t, dir, sampleDoc("status-tagged"))
-
-	origDir, _ := os.Getwd()
-	os.Chdir(dir)
-	defer os.Chdir(origDir)
-
-	buf := new(bytes.Buffer)
-	rootCmd.SetOut(buf)
-	rootCmd.SetErr(buf)
-	rootCmd.SetArgs([]string{"status"})
-
-	if err := rootCmd.Execute(); err != nil {
-		t.Fatalf("status failed: %v", err)
-	}
-
-	out := buf.String()
-	// sampleDoc uses tag "test" — at least 1 unique tag.
-	if !strings.Contains(out, "Tags") || !strings.Contains(out, "1") {
-		t.Errorf("expected tag count in output, got:\n%s", out)
-	}
-}
-
-func TestStatusCmd_NoConfigYaml(t *testing.T) {
-	dir := setupTestMemory(t) // no config.yaml
-
-	origDir, _ := os.Getwd()
-	os.Chdir(dir)
-	defer os.Chdir(origDir)
-
-	buf := new(bytes.Buffer)
-	rootCmd.SetOut(buf)
-	rootCmd.SetErr(buf)
-	rootCmd.SetArgs([]string{"status"})
-
-	// Should fail because config.yaml is missing.
-	if err := rootCmd.Execute(); err == nil {
-		t.Fatal("expected error when config.yaml is missing")
+	for _, forbidden := range []string{"constraints", "skills"} {
+		if strings.Contains(out, forbidden) {
+			t.Errorf("did not expect %q in output, got:\n%s", forbidden, out)
+		}
 	}
 }
 
@@ -250,8 +180,9 @@ func TestDoctorCmd_ShowsScopesSection(t *testing.T) {
 	os.Chdir(dir)
 	defer os.Chdir(origDir)
 
-	// Set HOME to dir so scope.Walk finds the .mom/ there.
-	t.Setenv("HOME", dir)
+	// Set HOME to the parent so the project .mom/ is classified as repo,
+	// not as the special $HOME/.mom user scope.
+	t.Setenv("HOME", filepath.Dir(dir))
 
 	buf := new(bytes.Buffer)
 	rootCmd.SetOut(buf)

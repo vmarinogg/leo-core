@@ -13,18 +13,6 @@ func TestMapCmdExists(t *testing.T) {
 	}
 }
 
-func TestBootstrapAliasExists(t *testing.T) {
-	if bootstrapAliasCmd == nil {
-		t.Fatal("bootstrapAliasCmd is nil")
-	}
-	if !bootstrapAliasCmd.Hidden {
-		t.Fatal("bootstrapAliasCmd should be hidden")
-	}
-	if bootstrapAliasCmd.Use != "bootstrap" {
-		t.Fatalf("expected bootstrapAliasCmd.Use == %q, got %q", "bootstrap", bootstrapAliasCmd.Use)
-	}
-}
-
 func TestMapCmdRegisteredInRoot(t *testing.T) {
 	found := false
 	for _, sub := range rootCmd.Commands() {
@@ -38,15 +26,10 @@ func TestMapCmdRegisteredInRoot(t *testing.T) {
 	}
 }
 
-func TestBootstrapAliasRegisteredInRoot(t *testing.T) {
-	found := false
+func TestBootstrapAliasRemovedFromRoot(t *testing.T) {
 	for _, sub := range rootCmd.Commands() {
 		if sub.Use == "bootstrap" {
-			found = true
-			break
+			t.Fatal("bootstrap alias should not be registered in rootCmd")
 		}
-	}
-	if !found {
-		t.Fatal("bootstrapAliasCmd (Use=bootstrap) not registered in rootCmd")
 	}
 }

@@ -72,6 +72,10 @@ func Walk(cwd string) []Scope {
 		candidate := filepath.Join(dir, ".mom")
 		if isRealDir(candidate) {
 			label := loadScopeLabel(candidate)
+			// $HOME/.mom/ with no explicit scope config defaults to "user".
+			if label == "repo" && dir == home {
+				label = "user"
+			}
 			scopes = append(scopes, Scope{Path: candidate, Label: label})
 		}
 

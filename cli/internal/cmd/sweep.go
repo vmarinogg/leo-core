@@ -8,72 +8,7 @@ import (
 	"time"
 
 	"github.com/momhq/mom/cli/internal/config"
-	"github.com/momhq/mom/cli/internal/scope"
-	"github.com/momhq/mom/cli/internal/ux"
-	"github.com/spf13/cobra"
 )
-
-var sweepCmd = &cobra.Command{
-	Use:   "sweep",
-	Short: "Delete old raw JSONL recordings based on retention policy",
-	Long: `Scans .mom/raw/ and deletes .jsonl files whose modification time
-exceeds the configured retention period (default: 30 days).
-
-Never deletes the current day's files. Configurable via config.yaml:
-
-  raw_memories:
-    retention_days: 30
-    auto_clean: false`,
-	RunE:          runSweep,
-	SilenceUsage:  true,
-	SilenceErrors: true,
-}
-
-func runSweep(cmd *cobra.Command, _ []string) error {
-	cwd, _ := os.Getwd()
-	sc, ok := scope.NearestWritable(cwd)
-	if !ok {
-		return fmt.Errorf("no .mom/ found from %q", cwd)
-	}
-
-	cfg, err := config.Load(sc.Path)
-	if err != nil {
-		def := config.Default()
-		cfg = &def
-	}
-
-	p := ux.NewPrinter(os.Stderr)
-	p.Diamond("sweep")
-	p.Blank()
-
-	showSpinner := ux.IsTTY(os.Stderr)
-	var result SweepResult
-	doSweep := func() {
-		result = sweep(sc.Path, cfg.RawMemories)
-	}
-
-	if showSpinner {
-		sp := ux.NewSpinner(os.Stderr)
-		sp.Start("Scanning raw files")
-		doSweep()
-		sp.Stop()
-	} else {
-		doSweep()
-	}
-
-	switch {
-	case result.Errors > 0:
-		p.Warnf("deleted %d files, freed %.1f MB (%d errors)",
-			result.Deleted, float64(result.BytesFreed)/(1024*1024), result.Errors)
-	case result.Deleted > 0:
-		p.Checkf("deleted %d files, freed %.1f MB",
-			result.Deleted, float64(result.BytesFreed)/(1024*1024))
-	default:
-		p.Muted("nothing to clean")
-	}
-	p.Blank()
-	return nil
-}
 
 // SweepResult holds the outcome of a sweep operation.
 type SweepResult struct {

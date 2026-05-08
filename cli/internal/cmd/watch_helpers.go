@@ -7,9 +7,11 @@ import (
 	"strings"
 
 	"github.com/momhq/mom/cli/internal/adapters/harness"
+	"github.com/momhq/mom/cli/internal/centralvault"
 	"github.com/momhq/mom/cli/internal/config"
 	"github.com/momhq/mom/cli/internal/daemon"
-	"github.com/momhq/mom/cli/internal/ux"
+	"github.com/momhq/mom/cli/internal/pathutil"
+	"github.com/momhq/mom/cli/internal/scope"
 	"github.com/momhq/mom/cli/internal/watcher"
 )
 
@@ -28,12 +30,26 @@ func harnessTranscriptDir(name string) string {
 	return ""
 }
 
-
+func resolveMomContext(cwd string) (projectDir string, momDir string, err error) {
+	cwd = pathutil.CanonicalDir(cwd)
+	if sc, ok := scope.NearestWritable(cwd); ok {
+		return filepath.Dir(sc.Path), sc.Path, nil
+	}
+	centralDir, err := centralvault.Dir()
+	if err != nil {
+		return "", "", err
+	}
+	if _, err := os.Stat(filepath.Join(centralDir, "config.yaml")); err != nil {
+		return "", "", fmt.Errorf("no MOM configuration found from %q — run mom init first", cwd)
+	}
+	return cwd, centralDir, nil
+}
 
 // ensureGlobalDaemon registers the project in the global watch registry and
 // ensures the single global daemon is running. Also cleans up legacy per-project agents.
 // Skipped when MOM_NO_DAEMON=1 or when running inside a test binary.
 func ensureGlobalDaemon(projectRoot, momDir string, runtimes []string) error {
+	projectRoot = pathutil.CanonicalDir(projectRoot)
 	if os.Getenv("MOM_NO_DAEMON") == "1" {
 		return nil
 	}
@@ -75,6 +91,7 @@ func ensureGlobalDaemon(projectRoot, momDir string, runtimes []string) error {
 // unregisterProject removes a project from the global watch registry,
 // cleans up legacy agents, and stops the global daemon if no projects remain.
 func unregisterProject(projectRoot, momDir string) error {
+	projectRoot = pathutil.CanonicalDir(projectRoot)
 	if err := daemon.UnregisterProject(projectRoot); err != nil {
 		return fmt.Errorf("unregistering project: %w", err)
 	}
@@ -91,71 +108,23 @@ func unregisterProject(projectRoot, momDir string) error {
 	return nil
 }
 
-// runWatchInstall handles `mom watch --install`.
-func runWatchInstall(momDir string, p *ux.Printer) error {
-	projectRoot := filepath.Dir(momDir)
-	cfg, err := config.Load(momDir)
-	if err != nil {
-		return fmt.Errorf("loading config: %w", err)
-	}
-
-	sp := ux.NewSpinner(os.Stderr)
-	sp.Start("Installing global watch daemon")
-	installErr := ensureGlobalDaemon(projectRoot, momDir, cfg.EnabledHarnesses())
-	if installErr != nil {
-		sp.StopFail()
-		return fmt.Errorf("installing daemon: %w", installErr)
-	}
-	sp.Stop()
-
-	runtimes := watcherRuntimes(cfg)
-	p.Check("global watch daemon installed")
-	p.Chevron(fmt.Sprintf("runtimes: %s", strings.Join(runtimes, ", ")))
-
-	h, err := daemon.StatusGlobal()
-	if err == nil && len(h.Services) > 0 {
-		p.Chevron(fmt.Sprintf("daemon: %s", h.Services[0].DaemonLabel))
-		p.Chevron(fmt.Sprintf("timer:  %s", h.Services[0].TimerLabel))
-	}
-	return nil
-}
-
-// runWatchUninstall handles `mom watch --uninstall`.
-func runWatchUninstall(momDir string, p *ux.Printer) error {
-	projectRoot := filepath.Dir(momDir)
-
-	sp := ux.NewSpinner(os.Stderr)
-	sp.Start("Removing watch daemon")
-	uninstallErr := unregisterProject(projectRoot, momDir)
-	if uninstallErr != nil {
-		sp.StopFail()
-		return fmt.Errorf("uninstalling daemon: %w", uninstallErr)
-	}
-	sp.Stop()
-
-	p.Check("project unregistered from global watch daemon")
-	return nil
-}
-
 // sweepTranscripts runs a one-shot catch-up sweep for all watcher-capable
 // runtimes. Best-effort: errors are logged to stderr, never returned.
-func sweepTranscripts(momDir string) {
+func sweepTranscripts(projectDir, momDir string) {
 	cfg, err := config.Load(momDir)
 	if err != nil {
 		return
 	}
 
-	projectDir := filepath.Dir(momDir)
 	sources := buildWatcherSources(cfg, projectDir)
 	if len(sources) == 0 {
 		return
 	}
 
-	adapterMap := make(map[string]watcher.Adapter, len(sources))
-	for _, src := range sources {
-		adapterMap[src.Harness] = src.Adapter
-	}
-	bus := newProjectBus(momDir, adapterMap)
+	// Best-effort sweep — open the central vault on the spot. The
+	// helper is short-lived so leaving the vault uncloned is fine
+	// for this one-shot path.
+	bus := newProjectBus(openCentralWorkers())
 	w, err := watcher.New(watcher.Config{
 		ProjectDir: projectDir,
 		MomDir:     momDir,
@@ -206,18 +175,4 @@ func buildWatcherSources(cfg *config.Config, projectDir string) []watcher.Source
 		})
 	}
 	return sources
-}
-
-// watcherRuntimes returns the names of watcher-capable runtimes from config.
-func watcherRuntimes(cfg *config.Config) []string {
-	var rts []string
-	for _, rt := range cfg.EnabledHarnesses() {
-		if rt == "claude" || rt == "windsurf" {
-			rts = append(rts, rt)
-		}
-	}
-	if len(rts) == 0 {
-		return []string{"claude"}
-	}
-	return rts
 }

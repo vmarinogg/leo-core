@@ -6,6 +6,8 @@ import (
 	"os"
 	"path/filepath"
 	"syscall"
+
+	"github.com/momhq/mom/cli/internal/pathutil"
 )
 
 // RegistryEntry describes a single MOM-enabled project in the global registry.
@@ -59,7 +61,15 @@ func LoadRegistry() (Registry, error) {
 	if reg == nil {
 		reg = make(Registry)
 	}
-	return reg, nil
+	return canonicalizeRegistry(reg), nil
+}
+
+func canonicalizeRegistry(reg Registry) Registry {
+	out := make(Registry, len(reg))
+	for projectDir, entry := range reg {
+		out[pathutil.CanonicalDir(projectDir)] = entry
+	}
+	return out
 }
 
 // SaveRegistry atomically writes the registry to disk (tmp + rename).
@@ -110,12 +120,18 @@ func withRegistryLock(fn func() error) error {
 
 // RegisterProject adds or updates a project in the registry (lock → load → upsert → save).
 func RegisterProject(projectDir, momDir string, runtimes []string) error {
+	canonicalProjectDir := pathutil.CanonicalDir(projectDir)
 	return withRegistryLock(func() error {
 		reg, err := LoadRegistry()
 		if err != nil {
 			return err
 		}
-		reg[projectDir] = RegistryEntry{
+		for existingProjectDir := range reg {
+			if pathutil.CanonicalDir(existingProjectDir) == canonicalProjectDir {
+				delete(reg, existingProjectDir)
+			}
+		}
+		reg[canonicalProjectDir] = RegistryEntry{
 			MomDir:   momDir,
 			Runtimes: runtimes,
 		}
@@ -126,12 +142,17 @@ func RegisterProject(projectDir, momDir string, runtimes []string) error {
 // UnregisterProject removes a project from the registry (lock → load → delete → save).
 // If the registry becomes empty, the file is deleted.
 func UnregisterProject(projectDir string) error {
+	canonicalProjectDir := pathutil.CanonicalDir(projectDir)
 	return withRegistryLock(func() error {
 		reg, err := LoadRegistry()
 		if err != nil {
 			return err
 		}
-		delete(reg, projectDir)
+		for existingProjectDir := range reg {
+			if existingProjectDir == projectDir || pathutil.CanonicalDir(existingProjectDir) == canonicalProjectDir {
+				delete(reg, existingProjectDir)
+			}
+		}
 		if len(reg) == 0 {
 			path, err := RegistryPath()
 			if err != nil {

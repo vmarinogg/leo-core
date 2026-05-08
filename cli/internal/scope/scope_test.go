@@ -145,7 +145,26 @@ func TestNearestWritable_NotFound(t *testing.T) {
 }
 
 func TestDefaultScope_MissingField(t *testing.T) {
-	// A .leo/ with no scope field in config.yaml should default to "repo".
+	// A .mom/ with no scope field in config.yaml outside $HOME defaults to "repo".
+	root := makeTree(t, ".mom")
+	content := "version: \"1\"\nruntimes:\n  claude:\n    enabled: true\n"
+	if err := os.WriteFile(filepath.Join(root, ".mom", "config.yaml"), []byte(content), 0644); err != nil {
+		t.Fatal(err)
+	}
+	// HOME points elsewhere so the $HOME/.mom/ → "user" override does not trigger.
+	t.Setenv("HOME", t.TempDir())
+
+	scopes := scope.Walk(root)
+	if len(scopes) != 1 {
+		t.Fatalf("expected 1, got %d", len(scopes))
+	}
+	if scopes[0].Label != "repo" {
+		t.Errorf("Label = %q, want repo", scopes[0].Label)
+	}
+}
+
+func TestDefaultScope_MissingField_AtHome(t *testing.T) {
+	// $HOME/.mom/ with no scope field defaults to "user" (override added in #219).
 	root := makeTree(t, ".mom")
 	content := "version: \"1\"\nruntimes:\n  claude:\n    enabled: true\n"
 	if err := os.WriteFile(filepath.Join(root, ".mom", "config.yaml"), []byte(content), 0644); err != nil {
@@ -157,8 +176,8 @@ func TestDefaultScope_MissingField(t *testing.T) {
 	if len(scopes) != 1 {
 		t.Fatalf("expected 1, got %d", len(scopes))
 	}
-	if scopes[0].Label != "repo" {
-		t.Errorf("Label = %q, want repo", scopes[0].Label)
+	if scopes[0].Label != "user" {
+		t.Errorf("Label = %q, want user", scopes[0].Label)
 	}
 }
 

@@ -15,9 +15,10 @@ import (
 	"os"
 	"time"
 
-	"github.com/momhq/mom/cli/internal/adapters/storage"
-	"github.com/momhq/mom/cli/internal/recall"
-	"github.com/momhq/mom/cli/internal/scope"
+	"github.com/momhq/mom/cli/internal/centralvault"
+	"github.com/momhq/mom/cli/internal/finder"
+	"github.com/momhq/mom/cli/internal/herald"
+	"github.com/momhq/mom/cli/internal/librarian"
 	"github.com/momhq/mom/cli/internal/ux"
 )
 
@@ -46,9 +47,9 @@ type jsonRPCRequest struct {
 
 // jsonRPCResponse is an outbound JSON-RPC 2.0 message.
 type jsonRPCResponse struct {
-	JSONRPC string `json:"jsonrpc"`
-	ID      any    `json:"id"`
-	Result  any    `json:"result,omitempty"`
+	JSONRPC string    `json:"jsonrpc"`
+	ID      any       `json:"id"`
+	Result  any       `json:"result,omitempty"`
 	Error   *rpcError `json:"error,omitempty"`
 }
 
@@ -59,31 +60,54 @@ type rpcError struct {
 
 // Server is the MCP server instance.
 type Server struct {
-	momDir string
-	idx    *storage.IndexedAdapter
-	engine *recall.Engine
+	momDir  string
+	lib     *librarian.Librarian
+	finder  *finder.Finder
+	closeFn func() error
+	openErr error
+	bus     *herald.Bus
 }
 
 // New creates a new Server rooted at the given .mom/ directory.
-// It builds the recall Engine from the scope chain discovered at momDir.
+// Read tools use the v0.30 central vault through Librarian/Finder.
+// The server also attaches a fresh Herald bus for write tools
+// (mom_record) to publish on. Callers who want their own bus (e.g.,
+// to wire a Drafter subscriber) can replace it via SetBus before Serve.
 func New(momDir string) *Server {
-	idx := storage.NewIndexedAdapter(momDir)
-
-	scopes := scope.Walk(momDir)
-	if len(scopes) == 0 {
-		scopes = []scope.Scope{{Path: momDir, Label: "repo"}}
+	lib, closeFn, err := centralvault.OpenLibrarian()
+	s := &Server{
+		momDir:  momDir,
+		closeFn: closeFn,
+		openErr: err,
+		bus:     herald.NewBus(),
 	}
-	chain := make([]recall.Searcher, len(scopes))
-	for i, sc := range scopes {
-		chain[i] = recall.NewScopeSearcher(idx, sc.Path)
+	if err == nil {
+		s.lib = lib
+		s.finder = finder.New(lib)
 	}
-
-	return &Server{
-		momDir: momDir,
-		idx:    idx,
-		engine: recall.NewEngine(chain),
-	}
+	return s
 }
+
+// Close releases the central vault handle opened by New. Serve calls it
+// when stdio closes; tests may call it directly when they do not run Serve.
+func (s *Server) Close() error {
+	if s.closeFn == nil {
+		return nil
+	}
+	err := s.closeFn()
+	s.closeFn = nil
+	return err
+}
+
+// Bus returns the v0.30 Herald bus this Server publishes on. Callers
+// that need to attach subscribers (e.g., Drafter for memory.record
+// events, Logbook for op.* events) take this reference before Serve.
+func (s *Server) Bus() *herald.Bus { return s.bus }
+
+// SetBus replaces the Server's bus with the given one. Useful when the
+// application root constructs a single shared bus across MCP +
+// watcher + Drafter; never call after Serve has started.
+func (s *Server) SetBus(b *herald.Bus) { s.bus = b }
 
 // Serve runs the JSON-RPC 2.0 stdio loop. It reads newline-delimited requests
 // from in and writes responses to out. Blocks until in is closed or returns an
@@ -92,6 +116,7 @@ func New(momDir string) *Server {
 // stdout (out) is reserved for JSON-RPC only. Human-readable output goes to
 // stderr.
 func (s *Server) Serve(in io.Reader, out io.Writer) {
+	defer func() { _ = s.Close() }()
 	p := ux.NewPrinter(os.Stderr)
 	p.Diamond("MCP server")
 	p.Chevron(fmt.Sprintf("scope: %s", s.momDir))
@@ -184,6 +209,7 @@ func (s *Server) handleInitialize(_ json.RawMessage) (any, *rpcError) {
 			"name":    "mom-mcp-server",
 			"version": Version,
 		},
+		"instructions": "Use MOM for persistent memory. Prefer MOM skills and CLI; use MCP as fallback/startup. Call mom_recall before memory-derived claims and cite returned memory IDs. For explicit saves, prefer `mom record`; if using mom_record, never invent session_id.",
 	}, nil
 }
 

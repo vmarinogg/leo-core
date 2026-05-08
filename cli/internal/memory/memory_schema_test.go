@@ -278,55 +278,6 @@ func TestProvenanceRawExhaustRef(t *testing.T) {
 	}
 }
 
-// findRepoMemoryDir walks up from the current directory looking for .mom/memory.
-func findRepoMemoryDir() (string, bool) {
-	dir, err := os.Getwd()
-	if err != nil {
-		return "", false
-	}
-	for {
-		candidate := filepath.Join(dir, ".mom", "memory")
-		if info, err := os.Stat(candidate); err == nil && info.IsDir() {
-			return candidate, true
-		}
-		parent := filepath.Dir(dir)
-		if parent == dir {
-			return "", false
-		}
-		dir = parent
-	}
-}
-
-// TestLiveMemoryFiles verifies all memory files in the repo's own .mom/memory/
-// continue to load and validate without error after the schema evolution.
-func TestLiveMemoryFiles(t *testing.T) {
-	memoryDir, found := findRepoMemoryDir()
-	if !found {
-		t.Skip("skipping live memory test: .mom/memory not found in any ancestor directory")
-	}
-
-	entries, err := os.ReadDir(memoryDir)
-	if err != nil {
-		t.Skipf("skipping live memory test: cannot read %s: %v", memoryDir, err)
-	}
-
-	for _, e := range entries {
-		if e.IsDir() || filepath.Ext(e.Name()) != ".json" {
-			continue
-		}
-		t.Run(e.Name(), func(t *testing.T) {
-			path := filepath.Join(memoryDir, e.Name())
-			doc, err := LoadDoc(path)
-			if err != nil {
-				t.Fatalf("LoadDoc failed: %v", err)
-			}
-			if err := doc.Validate(); err != nil {
-				t.Errorf("Validate failed: %v", err)
-			}
-		})
-	}
-}
-
 // TestNewDoc_WriteEmitsFields ensures new docs emit all applicable fields.
 func TestNewDoc_WriteEmitsFields(t *testing.T) {
 	score := 0.72

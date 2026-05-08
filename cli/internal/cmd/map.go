@@ -7,32 +7,25 @@ import (
 	"sort"
 	"time"
 
-	"github.com/spf13/cobra"
 	"github.com/momhq/mom/cli/internal/adapters/storage"
 	"github.com/momhq/mom/cli/internal/cartographer"
 	"github.com/momhq/mom/cli/internal/gardener"
 	"github.com/momhq/mom/cli/internal/herald"
 	"github.com/momhq/mom/cli/internal/scope"
 	"github.com/momhq/mom/cli/internal/ux"
+	"github.com/spf13/cobra"
 )
 
 var mapCmd = &cobra.Command{
-	Use:   "map",
-	Short: "Scan existing code, docs, and commits to seed the memory",
+	Use:    "map",
+	Short:  "Scan existing code, docs, and commits to seed the memory",
+	Hidden: true, // Cartographer-driven seeding is on hold pending v0.40 rework — see #240. Command kept callable for users with existing scripts; hidden from `mom --help` to stop pointing new users at low-quality output.
 	Long: `Map scans the chosen directory for code, markdown, dependency
 manifests, and commit history to create initial memories.
 
 By default it writes to the nearest .mom/ found by walking up from the
 scan directory. Use --scope to override the target .mom/ location.`,
 	RunE: runBootstrap,
-}
-
-// bootstrapAliasCmd is a hidden backward-compat alias for the renamed "map" command.
-var bootstrapAliasCmd = &cobra.Command{
-	Use:    "bootstrap",
-	Hidden: true,
-	Short:  "Alias for 'mom map' (deprecated)",
-	RunE:   mapCmd.RunE,
 }
 
 func registerMapFlags(cmd *cobra.Command) {
@@ -47,7 +40,6 @@ func registerMapFlags(cmd *cobra.Command) {
 
 func init() {
 	registerMapFlags(mapCmd)
-	registerMapFlags(bootstrapAliasCmd)
 }
 
 func runBootstrap(cmd *cobra.Command, _ []string) error {
@@ -466,57 +458,3 @@ func countMemoryDocs(memDir string) int {
 	}
 	return n
 }
-
-// runBootstrapInline runs a bootstrap scan from within the init flow.
-// scanDir is the directory to scan; momDir is the .mom/ to write into.
-func runBootstrapInline(cmd *cobra.Command, scanDir, momDir string) error {
-	cfg := cartographer.DefaultConfig()
-	cfg.ScopeDir = momDir
-
-	bp := ux.NewPrinter(cmd.OutOrStdout())
-	isTTY := ux.IsTTY(cmd.OutOrStdout())
-
-	var sp *ux.Spinner
-	if isTTY {
-		sp = ux.NewSpinner(os.Stderr)
-		sp.Start("Scanning")
-		cfg.OnProgress = func(processed, total int) {
-			sp.Update(fmt.Sprintf("Scanning (%d / %d files)", processed, total))
-		}
-	}
-
-	cart := cartographer.New(cfg)
-
-	if !isTTY {
-		bp.Textf("Scanning %s for initial memories...", scanDir)
-	}
-
-	result, err := cart.Scan(cmd.Context(), scanDir)
-
-	if sp != nil {
-		sp.Stop()
-	}
-
-	if isTTY {
-		bp.Textf("Scanning %s for initial memories...", scanDir)
-	}
-
-	if err != nil {
-		return fmt.Errorf("scan failed: %w", err)
-	}
-
-	printBootstrapProgress(bp, result)
-
-	written := 0
-	if len(result.Drafts) > 0 {
-		w, writeErr := writeDrafts(result.Drafts, momDir)
-		if writeErr != nil {
-			bp.Warnf("write error: %v", writeErr)
-		}
-		written = w
-	}
-
-	bp.Textf("  %d memories seeded in %.1fs.", written, result.Duration().Seconds())
-	return nil
-}
-

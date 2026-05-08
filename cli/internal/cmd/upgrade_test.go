@@ -3,6 +3,7 @@ package cmd
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -11,21 +12,29 @@ import (
 	"github.com/momhq/mom/cli/internal/config"
 )
 
-// setupV060Project creates a .mom/ with v0.6.0-style config and minimal structure.
+// setupLegacyProject creates a .mom/ with legacy config and minimal structure.
 // resetUpgradeFlags resets cobra flag state between tests.
 func resetUpgradeFlags(t *testing.T) {
 	t.Helper()
+	t.Setenv("MOM_UPGRADE_SCAN_ROOT", t.TempDir())
+	t.Setenv("MOM_UPGRADE_ASSUME_YES", "1")
+	oldRunner := runExternalCommand
+	runExternalCommand = func(string, ...string) ([]byte, error) { return []byte("ok"), nil }
 	t.Cleanup(func() {
 		upgradeCmd.Flags().Set("dry-run", "false")
+		runExternalCommand = oldRunner
 	})
 }
 
-func setupV060Project(t *testing.T) string {
+func setupLegacyProject(t *testing.T) string {
 	t.Helper()
 	dir := t.TempDir()
+	t.Setenv("HOME", dir)
+	t.Setenv("MOM_UPGRADE_SCAN_ROOT", dir)
+	t.Setenv("MOM_UPGRADE_ASSUME_YES", "1")
 	leoDir := filepath.Join(dir, ".mom")
 
-	// Create directories using the legacy kb/ layout to simulate a pre-v0.8 install.
+	// Create directories using the legacy kb/ layout.
 	for _, d := range []string{
 		leoDir,
 		filepath.Join(leoDir, "profiles"),
@@ -37,7 +46,7 @@ func setupV060Project(t *testing.T) string {
 		os.MkdirAll(d, 0755)
 	}
 
-	// Write v0.6.0-style config (legacy format with "owner:" key).
+	// Write legacy config with the retired "owner:" key.
 	legacyConfig := `version: "1"
 runtime: claude
 owner:
@@ -66,15 +75,35 @@ kb:
 		0644,
 	)
 
-	// Write retired constraint and skill files (simulating a pre-v0.8 install).
+	// Write retired and formerly generated central docs from the legacy layout.
 	os.WriteFile(
 		filepath.Join(leoDir, "kb", "constraints", "delegation-mandatory.json"),
 		[]byte(`{"id":"delegation-mandatory","type":"constraint"}`),
 		0644,
 	)
 	os.WriteFile(
+		filepath.Join(leoDir, "kb", "constraints", "escalation-triggers.json"),
+		[]byte(`{"id":"escalation-triggers","type":"constraint"}`),
+		0644,
+	)
+	os.WriteFile(
+		filepath.Join(leoDir, "kb", "constraints", "team-local.json"),
+		[]byte(`{"id":"team-local","type":"constraint"}`),
+		0644,
+	)
+	os.WriteFile(
 		filepath.Join(leoDir, "kb", "skills", "task-intake.json"),
 		[]byte(`{"id":"task-intake","type":"skill"}`),
+		0644,
+	)
+	os.WriteFile(
+		filepath.Join(leoDir, "kb", "skills", "session-wrap-up.json"),
+		[]byte(`{"id":"session-wrap-up","type":"skill"}`),
+		0644,
+	)
+	os.WriteFile(
+		filepath.Join(leoDir, "kb", "skills", "team-review.json"),
+		[]byte(`{"id":"team-review","type":"skill"}`),
 		0644,
 	)
 
@@ -113,7 +142,7 @@ kb:
 
 func TestUpgradeCmd_MigratesConfig(t *testing.T) {
 	resetUpgradeFlags(t)
-	dir := setupV060Project(t)
+	dir := setupLegacyProject(t)
 
 	origDir, _ := os.Getwd()
 	os.Chdir(dir)
@@ -128,13 +157,13 @@ func TestUpgradeCmd_MigratesConfig(t *testing.T) {
 		t.Fatalf("upgrade failed: %v\noutput:\n%s", err, buf.String())
 	}
 
-	// Config should be loadable and have runtimes map.
+	// Config should be loadable and have harnesses map.
 	cfg, err := config.Load(filepath.Join(dir, ".mom"))
 	if err != nil {
 		t.Fatalf("loading config after upgrade: %v", err)
 	}
-	if len(cfg.EnabledRuntimes()) == 0 {
-		t.Error("expected at least one enabled runtime after migration")
+	if len(cfg.EnabledHarnesses()) == 0 {
+		t.Error("expected at least one enabled harness after migration")
 	}
 
 	// User settings should be preserved.
@@ -150,7 +179,7 @@ func TestUpgradeCmd_MigratesConfig(t *testing.T) {
 
 func TestUpgradeCmd_RemovesProfilesDir(t *testing.T) {
 	resetUpgradeFlags(t)
-	dir := setupV060Project(t)
+	dir := setupLegacyProject(t)
 
 	origDir, _ := os.Getwd()
 	os.Chdir(dir)
@@ -172,9 +201,9 @@ func TestUpgradeCmd_RemovesProfilesDir(t *testing.T) {
 	}
 }
 
-func TestUpgradeCmd_RemovesRetiredConstraints(t *testing.T) {
+func TestUpgradeCmd_RemovesRetiredAndGeneratedCentralDocs(t *testing.T) {
 	resetUpgradeFlags(t)
-	dir := setupV060Project(t)
+	dir := setupLegacyProject(t)
 
 	origDir, _ := os.Getwd()
 	os.Chdir(dir)
@@ -205,17 +234,30 @@ func TestUpgradeCmd_RemovesRetiredConstraints(t *testing.T) {
 		t.Error("retired skill task-intake.json should have been removed")
 	}
 
-	// Active constraint must still exist (migrated from kb/constraints/ to constraints/).
-	antiHalPath := filepath.Join(leoDir, "constraints", "anti-hallucination.json")
-	if _, err := os.Stat(antiHalPath); err != nil {
-		t.Error("active constraint anti-hallucination.json must survive upgrade")
+	// Formerly generated central docs must be removed, while unknown team docs survive.
+	for _, path := range []string{
+		filepath.Join(leoDir, "constraints", "anti-hallucination.json"),
+		filepath.Join(leoDir, "constraints", "escalation-triggers.json"),
+		filepath.Join(leoDir, "skills", "session-wrap-up.json"),
+	} {
+		if _, err := os.Stat(path); err == nil {
+			t.Errorf("generated central doc should have been removed: %s", path)
+		}
+	}
+	for _, path := range []string{
+		filepath.Join(leoDir, "constraints", "team-local.json"),
+		filepath.Join(leoDir, "skills", "team-review.json"),
+	} {
+		if _, err := os.Stat(path); err != nil {
+			t.Errorf("unknown central doc should survive upgrade: %s", path)
+		}
 	}
 }
 
 // TestUpgradeCmd_Idempotent verifies running upgrade twice is a no-op on the second run.
 func TestUpgradeCmd_Idempotent(t *testing.T) {
 	resetUpgradeFlags(t)
-	dir := setupV060Project(t)
+	dir := setupLegacyProject(t)
 
 	origDir, _ := os.Getwd()
 	os.Chdir(dir)
@@ -246,7 +288,7 @@ func TestUpgradeCmd_Idempotent(t *testing.T) {
 
 func TestUpgradeCmd_UpdatesSchema(t *testing.T) {
 	resetUpgradeFlags(t)
-	dir := setupV060Project(t)
+	dir := setupLegacyProject(t)
 
 	origDir, _ := os.Getwd()
 	os.Chdir(dir)
@@ -276,7 +318,7 @@ func TestUpgradeCmd_UpdatesSchema(t *testing.T) {
 
 func TestUpgradeCmd_PreservesUserDocs(t *testing.T) {
 	resetUpgradeFlags(t)
-	dir := setupV060Project(t)
+	dir := setupLegacyProject(t)
 
 	origDir, _ := os.Getwd()
 	os.Chdir(dir)
@@ -304,7 +346,7 @@ func TestUpgradeCmd_PreservesUserDocs(t *testing.T) {
 
 func TestUpgradeCmd_CreatesLogsDir(t *testing.T) {
 	resetUpgradeFlags(t)
-	dir := setupV060Project(t)
+	dir := setupLegacyProject(t)
 
 	origDir, _ := os.Getwd()
 	os.Chdir(dir)
@@ -332,13 +374,13 @@ func TestUpgradeCmd_CreatesLogsDir(t *testing.T) {
 
 func TestUpgradeCmd_DryRun(t *testing.T) {
 	resetUpgradeFlags(t)
-	dir := setupV060Project(t)
+	dir := setupLegacyProject(t)
 
 	origDir, _ := os.Getwd()
 	os.Chdir(dir)
 	defer os.Chdir(origDir)
 
-	// Read schema before (still in legacy location since dry-run, but the file is there from setupV060Project).
+	// Read schema before (still in legacy location since dry-run, but the file is there from setupLegacyProject).
 	schemaBefore, _ := os.ReadFile(filepath.Join(dir, ".mom", "kb", "schema.json"))
 
 	buf := new(bytes.Buffer)
@@ -369,7 +411,7 @@ func TestUpgradeCmd_DryRun(t *testing.T) {
 
 func TestUpgradeCmd_MigratesMetricDocs(t *testing.T) {
 	resetUpgradeFlags(t)
-	dir := setupV060Project(t)
+	dir := setupLegacyProject(t)
 	leoDir := filepath.Join(dir, ".mom")
 
 	// Write a doc with type "metric".
@@ -409,9 +451,9 @@ func TestUpgradeCmd_MigratesMetricDocs(t *testing.T) {
 	}
 }
 
-func TestUpgradeCmd_GeneratesRuntimeFiles(t *testing.T) {
+func TestUpgradeCmd_GeneratesHarnessFiles(t *testing.T) {
 	resetUpgradeFlags(t)
-	dir := setupV060Project(t)
+	dir := setupLegacyProject(t)
 
 	origDir, _ := os.Getwd()
 	os.Chdir(dir)
@@ -426,7 +468,7 @@ func TestUpgradeCmd_GeneratesRuntimeFiles(t *testing.T) {
 		t.Fatalf("upgrade failed: %v", err)
 	}
 
-	// CLAUDE.md should exist (claude is the migrated runtime).
+	// CLAUDE.md should exist (claude is the migrated harness).
 	claudeMD := filepath.Join(dir, ".claude", "CLAUDE.md")
 	if _, err := os.Stat(claudeMD); err != nil {
 		t.Error("CLAUDE.md not generated during upgrade")
@@ -437,7 +479,7 @@ func TestUpgradeCmd_GeneratesRuntimeFiles(t *testing.T) {
 // CLAUDE.md does not contain any orchestration/profile references.
 func TestUpgradeCmd_GeneratedCLAUDEmd_NoRetiredContent(t *testing.T) {
 	resetUpgradeFlags(t)
-	dir := setupV060Project(t)
+	dir := setupLegacyProject(t)
 
 	origDir, _ := os.Getwd()
 	os.Chdir(dir)
@@ -476,7 +518,7 @@ func TestUpgradeCmd_GeneratedCLAUDEmd_NoRetiredContent(t *testing.T) {
 
 func TestUpgradeCmd_OutputShowsActions(t *testing.T) {
 	resetUpgradeFlags(t)
-	dir := setupV060Project(t)
+	dir := setupLegacyProject(t)
 
 	origDir, _ := os.Getwd()
 	os.Chdir(dir)
@@ -504,7 +546,7 @@ func TestUpgradeCmd_OutputShowsActions(t *testing.T) {
 
 func TestUpgradeCmd_MigratesKBLayout(t *testing.T) {
 	resetUpgradeFlags(t)
-	dir := setupV060Project(t)
+	dir := setupLegacyProject(t)
 
 	origDir, _ := os.Getwd()
 	os.Chdir(dir)
@@ -559,7 +601,7 @@ func TestUpgradeCmd_MigratesKBLayout(t *testing.T) {
 
 func TestUpgradeCmd_MigrationIdempotent(t *testing.T) {
 	resetUpgradeFlags(t)
-	dir := setupV060Project(t)
+	dir := setupLegacyProject(t)
 
 	origDir, _ := os.Getwd()
 	os.Chdir(dir)
@@ -637,6 +679,7 @@ func TestUpgradeCmd_PartialMigrationSkipsExisting(t *testing.T) {
 
 func TestInitCmd_NewLayout_NoKBDir(t *testing.T) {
 	dir := t.TempDir()
+	centralDir := initTestCentralVault(t)
 	origDir, _ := os.Getwd()
 	os.Chdir(dir)
 	defer os.Chdir(origDir)
@@ -644,13 +687,16 @@ func TestInitCmd_NewLayout_NoKBDir(t *testing.T) {
 	buf := new(bytes.Buffer)
 	rootCmd.SetOut(buf)
 	rootCmd.SetErr(buf)
-	rootCmd.SetArgs([]string{"init", "--runtimes", "claude"})
+	rootCmd.SetArgs([]string{"init", "--harnesses", "claude"})
 
 	if err := rootCmd.Execute(); err != nil {
 		t.Fatalf("init failed: %v", err)
 	}
 
-	leoDir := filepath.Join(dir, ".mom")
+	leoDir := centralDir
+	if _, err := os.Stat(filepath.Join(dir, ".mom")); err == nil {
+		t.Error("init must not create project-local .mom/ directory")
+	}
 
 	// kb/ must NEVER be created by init.
 	if _, err := os.Stat(filepath.Join(leoDir, "kb")); err == nil {
@@ -685,7 +731,7 @@ func TestUpgradeCmd_ScrubsDeadConfigFields(t *testing.T) {
 
 	// Write a config that still has the retired fields.
 	staleConfig := `version: "1"
-runtimes:
+harnesses:
   claude:
     enabled: true
     tiers:
@@ -805,16 +851,16 @@ func TestUpgradeCmd_MigratesFactASTToPattern(t *testing.T) {
 
 	// Write a plain fact doc (should NOT be converted).
 	plainFactDoc := map[string]interface{}{
-		"id":              "plain-fact",
-		"type":            "fact",
-		"lifecycle":       "state",
-		"scope":           "project",
-		"tags":            []string{"architecture"},
-		"created":         "2026-04-10T00:00:00Z",
-		"created_by":      "owner",
-		"updated":         "2026-04-10T00:00:00Z",
-		"updated_by":      "owner",
-		"content":         map[string]interface{}{"fact": "plain fact", "why": "testing", "source": "owner"},
+		"id":         "plain-fact",
+		"type":       "fact",
+		"lifecycle":  "state",
+		"scope":      "project",
+		"tags":       []string{"architecture"},
+		"created":    "2026-04-10T00:00:00Z",
+		"created_by": "owner",
+		"updated":    "2026-04-10T00:00:00Z",
+		"updated_by": "owner",
+		"content":    map[string]interface{}{"fact": "plain fact", "why": "testing", "source": "owner"},
 	}
 	docData3, _ := json.MarshalIndent(plainFactDoc, "", "  ")
 	os.WriteFile(filepath.Join(memDir, "plain-fact.json"), docData3, 0644)
@@ -871,6 +917,152 @@ func TestUpgradeCmd_MigratesFactASTToPattern(t *testing.T) {
 	}
 }
 
+func TestUpgradeCmd_InstallsSkillsForConfiguredHarnesses(t *testing.T) {
+	resetUpgradeFlags(t)
+	dir := setupLegacyProject(t)
+	origDir, _ := os.Getwd()
+	os.Chdir(dir)
+	defer os.Chdir(origDir)
+
+	var calls []string
+	oldRunner := runExternalCommand
+	runExternalCommand = func(name string, args ...string) ([]byte, error) {
+		calls = append(calls, name+" "+strings.Join(args, " "))
+		return []byte("ok"), nil
+	}
+	t.Cleanup(func() { runExternalCommand = oldRunner })
+
+	buf := new(bytes.Buffer)
+	rootCmd.SetOut(buf)
+	rootCmd.SetErr(buf)
+	rootCmd.SetArgs([]string{"upgrade"})
+
+	if err := rootCmd.Execute(); err != nil {
+		t.Fatalf("upgrade failed: %v\noutput:\n%s", err, buf.String())
+	}
+	joined := strings.Join(calls, "\n")
+	if !strings.Contains(joined, "npx skills add momhq/mom -g -s * -a claude-code -y") {
+		t.Fatalf("skills install command missing, got: %v", calls)
+	}
+}
+
+func TestUpgradeCmd_RemovesDeadHookCommands(t *testing.T) {
+	resetUpgradeFlags(t)
+	dir := setupLegacyProject(t)
+
+	claudeSettings := filepath.Join(dir, ".claude", "settings.json")
+	codexHooks := filepath.Join(dir, ".codex", "hooks.json")
+	windsurfHooks := filepath.Join(dir, ".windsurf", "hooks.json")
+	for _, p := range []string{claudeSettings, codexHooks, windsurfHooks} {
+		if err := os.MkdirAll(filepath.Dir(p), 0755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.WriteFile(claudeSettings, []byte(`{"hooks":{"Stop":[{"hooks":[{"type":"command","command":"mom draft"},{"type":"command","command":"mom watch --sweep"}]}],"SessionEnd":[{"hooks":[{"type":"command","command":"mom record"}]}]}}`), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(codexHooks, []byte(`{"hooks":{"Stop":[{"hooks":[{"type":"command","command":"mom record --session old"},{"type":"command","command":"mom watch --sweep"}]}]}}`), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(windsurfHooks, []byte(`{"hooks":{"post_cascade_response":[{"command":"mom draft"},{"command":"mom watch --sweep"}]}}`), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	origDir, _ := os.Getwd()
+	os.Chdir(dir)
+	defer os.Chdir(origDir)
+
+	buf := new(bytes.Buffer)
+	rootCmd.SetOut(buf)
+	rootCmd.SetErr(buf)
+	rootCmd.SetArgs([]string{"upgrade"})
+
+	if err := rootCmd.Execute(); err != nil {
+		t.Fatalf("upgrade failed: %v\noutput:\n%s", err, buf.String())
+	}
+	for _, path := range []string{claudeSettings, codexHooks, windsurfHooks} {
+		data, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatalf("reading %s: %v", path, err)
+		}
+		text := string(data)
+		if strings.Contains(text, "mom draft") || strings.Contains(text, "mom record") {
+			t.Fatalf("dead hook command survived in %s:\n%s", path, text)
+		}
+		if !strings.Contains(text, "mom watch --sweep") {
+			t.Fatalf("active watch hook was removed from %s:\n%s", path, text)
+		}
+	}
+	if !strings.Contains(buf.String(), "dead hook entries removed") {
+		t.Fatalf("upgrade output should mention dead hook cleanup:\n%s", buf.String())
+	}
+}
+
+func TestUpgradeCmd_SkillsInstallFailureHidesToolOutput(t *testing.T) {
+	resetUpgradeFlags(t)
+	dir := setupLegacyProject(t)
+	origDir, _ := os.Getwd()
+	os.Chdir(dir)
+	defer os.Chdir(origDir)
+
+	oldRunner := runExternalCommand
+	runExternalCommand = func(name string, args ...string) ([]byte, error) {
+		return []byte("npm warn exec installing skills\nSKILLS ASCII BANNER\nSource: https://github.com/momhq/mom.git"), fmt.Errorf("npx failed")
+	}
+	t.Cleanup(func() { runExternalCommand = oldRunner })
+
+	buf := new(bytes.Buffer)
+	rootCmd.SetOut(buf)
+	rootCmd.SetErr(buf)
+	rootCmd.SetArgs([]string{"upgrade"})
+
+	if err := rootCmd.Execute(); err != nil {
+		t.Fatalf("upgrade should soft-fail skills install, got: %v\noutput:\n%s", err, buf.String())
+	}
+	out := buf.String()
+	for _, want := range []string{"skills install", "mom upgrade", "mom init --force", "npx skills add momhq/mom -g -s '*' -a claude-code -y"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("output missing %q:\n%s", want, out)
+		}
+	}
+	for _, leak := range []string{"npm warn exec", "SKILLS ASCII BANNER", "Source: https://github.com/momhq/mom.git"} {
+		if strings.Contains(out, leak) {
+			t.Fatalf("upgrade output should hide noisy skills CLI output %q:\n%s", leak, out)
+		}
+	}
+}
+
+func TestUpgradeCmd_DryRunPrintsPlannedSkillsInstallCommands(t *testing.T) {
+	resetUpgradeFlags(t)
+	dir := setupLegacyProject(t)
+	origDir, _ := os.Getwd()
+	os.Chdir(dir)
+	defer os.Chdir(origDir)
+
+	var calls []string
+	oldRunner := runExternalCommand
+	runExternalCommand = func(name string, args ...string) ([]byte, error) {
+		calls = append(calls, name+" "+strings.Join(args, " "))
+		return []byte("ok"), nil
+	}
+	t.Cleanup(func() { runExternalCommand = oldRunner })
+
+	buf := new(bytes.Buffer)
+	rootCmd.SetOut(buf)
+	rootCmd.SetErr(buf)
+	rootCmd.SetArgs([]string{"upgrade", "--dry-run"})
+
+	if err := rootCmd.Execute(); err != nil {
+		t.Fatalf("upgrade --dry-run failed: %v\noutput:\n%s", err, buf.String())
+	}
+	if len(calls) != 0 {
+		t.Fatalf("dry run should not install skills, got: %v", calls)
+	}
+	if !strings.Contains(buf.String(), "npx skills add momhq/mom -g -s '*' -a claude-code -y") {
+		t.Fatalf("dry run output missing planned skills command:\n%s", buf.String())
+	}
+}
+
 // TestUpgradeCmd_ScrubIdempotent verifies a second upgrade on an already-scrubbed
 // config does not fail or re-report the scrub action.
 func TestUpgradeCmd_ScrubIdempotent(t *testing.T) {
@@ -884,7 +1076,7 @@ func TestUpgradeCmd_ScrubIdempotent(t *testing.T) {
 
 	// Write a clean (already-scrubbed) config.
 	cleanConfig := `version: "1"
-runtimes:
+harnesses:
   claude:
     enabled: true
 user:

@@ -2,18 +2,12 @@ package mcp
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
-	"os"
-	"path/filepath"
 	"strings"
-	"time"
 
-	"github.com/momhq/mom/cli/internal/adapters/storage"
-	"github.com/momhq/mom/cli/internal/herald"
-	"github.com/momhq/mom/cli/internal/memory"
-	"github.com/momhq/mom/cli/internal/recall"
-	"github.com/momhq/mom/cli/internal/recorder"
-	"github.com/momhq/mom/cli/internal/scope"
+	"github.com/momhq/mom/cli/internal/finder"
+	"github.com/momhq/mom/cli/internal/librarian"
 )
 
 // toolDef describes one MCP tool for the tools/list response.
@@ -35,81 +29,58 @@ type toolCallResult struct {
 	IsError bool          `json:"isError,omitempty"`
 }
 
-// allTools returns the static tool catalogue.
+// allTools returns the static v0.30 tool catalogue.
 func allTools() []toolDef {
 	return []toolDef{
 		{
-			Name:        "get_memory",
-			Description: "Retrieve a single memory document by its ID.",
+			Name:        "mom_status",
+			Description: "Returns MOM's operating protocol and central v0.30 vault status. Call this at the start of every session.",
+			InputSchema: map[string]any{"type": "object", "properties": map[string]any{}},
+		},
+		{
+			Name:        "mom_recall",
+			Description: "Search persistent memory with a natural-language query.",
+			InputSchema: map[string]any{
+				"type":     "object",
+				"required": []string{"query"},
+				"properties": map[string]any{
+					"query": map[string]any{"type": "string", "description": "Search query"},
+				},
+			},
+		},
+		{
+			Name:        "mom_get",
+			Description: "Retrieve a single memory by ID from the central vault.",
 			InputSchema: map[string]any{
 				"type":     "object",
 				"required": []string{"id"},
 				"properties": map[string]any{
-					"id": map[string]any{"type": "string", "description": "Memory document ID"},
+					"id": map[string]any{"type": "string", "description": "Memory ID"},
 				},
 			},
 		},
 		{
-			Name:        "list_scopes",
-			Description: "List all discovered .mom/ scopes from the current working directory walk-up.",
-			InputSchema: map[string]any{
-				"type":       "object",
-				"properties": map[string]any{},
-			},
-		},
-		{
-			Name:        "create_memory_draft",
-			Description: "Create a draft memory document in the nearest .mom/memory/ directory.",
-			InputSchema: map[string]any{
-				"type":     "object",
-				"required": []string{"summary", "tags", "content"},
-				"properties": map[string]any{
-					"summary": map[string]any{"type": "string", "description": "One-line summary"},
-					"tags":    map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": "Kebab-case tags"},
-					"content": map[string]any{"type": "object", "description": "Freeform content map"},
-				},
-			},
-		},
-		{
-			Name:        "list_landmarks",
-			Description: "List landmark memories sorted by centrality_score descending.",
+			Name:        "mom_landmarks",
+			Description: "List landmark memories from the central vault sorted by centrality_score descending.",
 			InputSchema: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
-					"scope": map[string]any{"type": "string", "description": "Restrict to scope label"},
 					"limit": map[string]any{"type": "integer", "description": "Maximum results (default 20)"},
 				},
 			},
 		},
 		{
-			Name:        "mom_status",
-			Description: "Returns MOM's full operating protocol — identity, boundaries, constraints, modes, and memory overview. Call this at the start of every session.",
-			InputSchema: map[string]any{"type": "object", "properties": map[string]any{}},
-		},
-		{
-			Name:        "mom_record_turn",
-			Description: "Fallback recording for runtimes without hooks. Appends a turn to .mom/raw/.",
+			Name:        "mom_record",
+			Description: "Fallback explicit-write path: intentionally save a memory mid-session when CLI is unavailable. Bypasses Drafter's content filters and stamps trigger_event='record', source_type='manual-draft'. Required: content. Optional: session_id only when it is a real runtime session ID; never invent one. Optional: summary, tags, actor.",
 			InputSchema: map[string]any{
 				"type":     "object",
-				"required": []string{"text"},
+				"required": []string{"content"},
 				"properties": map[string]any{
-					"text":       map[string]any{"type": "string", "description": "The conversation turn text to record"},
-					"session_id": map[string]any{"type": "string", "description": "Optional session ID"},
-				},
-			},
-		},
-		{
-			Name:        "mom_recall",
-			Description: "Search your memory for relevant context. Uses progressive scope escalation (repo→org→user) with AND→OR query relaxation and curated-first, draft-fallback quality tiers.",
-			InputSchema: map[string]any{
-				"type":     "object",
-				"required": []string{"query"},
-				"properties": map[string]any{
-					"query":       map[string]any{"type": "string", "description": "Search query (keywords or natural language)"},
-					"max_results": map[string]any{"type": "integer", "description": "Maximum results (default 5)"},
-					"tags":        map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": "Filter by tags (AND logic)"},
-					"session_id":  map[string]any{"type": "string", "description": "Filter by source session"},
-					"scope":       map[string]any{"type": "string", "description": "Pin search to a single scope label (repo/org/user); omit to use full escalation chain"},
+					"session_id": map[string]any{"type": "string", "description": "Real runtime session ID only. Omit when unavailable; MOM resolves known harness env vars or rejects."},
+					"summary":    map[string]any{"type": "string", "description": "One-line summary"},
+					"tags":       map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": "Tag names (will be normalised; empty after normalisation rejects the request)"},
+					"content":    map[string]any{"type": "object", "description": "Memory content (must include $.text for FTS)"},
+					"actor":      map[string]any{"type": "string", "description": "Calling agent (claude-code, codex, …); defaults to 'mcp'"},
 				},
 			},
 		},
@@ -119,7 +90,6 @@ func allTools() []toolDef {
 // handleToolsList returns the static tool catalogue.
 func (s *Server) handleToolsList() (any, *rpcError) {
 	tools := allTools()
-	// Convert to []any for JSON serialisation.
 	out := make([]any, len(tools))
 	for i, t := range tools {
 		out[i] = t
@@ -143,20 +113,16 @@ func (s *Server) handleToolsCall(params json.RawMessage) (any, *rpcError) {
 	)
 
 	switch req.Name {
-	case "get_memory":
-		result, err = s.toolGetMemory(req.Arguments)
-	case "list_scopes":
-		result, err = s.toolListScopes()
-	case "create_memory_draft":
-		result, err = s.toolCreateMemoryDraft(req.Arguments)
-	case "list_landmarks":
-		result, err = s.toolListLandmarks(req.Arguments)
 	case "mom_status":
 		result, err = s.toolMomStatus()
-	case "mom_record_turn":
-		result, err = s.toolRecordTurn(req.Arguments)
 	case "mom_recall":
 		result, err = s.toolMomRecall(req.Arguments)
+	case "mom_get":
+		result, err = s.toolMomGet(req.Arguments)
+	case "mom_landmarks":
+		result, err = s.toolMomLandmarks(req.Arguments)
+	case "mom_record":
+		result, err = s.toolMomRecord(req.Arguments)
 	default:
 		return nil, &rpcError{Code: errCodeMethodNotFound, Message: "unknown tool: " + req.Name}
 	}
@@ -172,268 +138,116 @@ func (s *Server) handleToolsCall(params json.RawMessage) (any, *rpcError) {
 
 // --- Tool implementations ---
 
-// toolGetMemory retrieves a single memory doc by ID.
-func (s *Server) toolGetMemory(args map[string]any) (toolCallResult, error) {
+func (s *Server) requireLibrarian() (*librarian.Librarian, error) {
+	if s.lib == nil {
+		if s.openErr != nil {
+			return nil, s.openErr
+		}
+		return nil, errors.New("central vault is not open")
+	}
+	return s.lib, nil
+}
+
+func (s *Server) toolMomGet(args map[string]any) (toolCallResult, error) {
 	id := stringArg(args, "id")
-	if id == "" {
+	if strings.TrimSpace(id) == "" {
 		return toolCallResult{}, fmt.Errorf("id is required")
 	}
-
-	scopes := scope.Walk(s.momDir)
-	if len(scopes) == 0 {
-		scopes = []scope.Scope{{Path: s.momDir, Label: "repo"}}
-	}
-
-	for _, sc := range scopes {
-		path := filepath.Join(sc.Path, "memory", id+".json")
-		doc, err := memory.LoadDoc(path)
-		if err != nil {
-			continue
-		}
-		// Emit telemetry.
-		em := herald.New(s.momDir, true)
-		em.EmitConsumptionEvent(herald.ConsumptionEvent{
-			MemoryID: doc.ID,
-			TS:       time.Now().UTC().Format(time.RFC3339),
-			ByAgent:  "mcp",
-			Context:  "get_memory",
-		})
-
-		text, _ := json.MarshalIndent(doc, "", "  ")
-		return toolCallResult{Content: []toolContent{{Type: "text", Text: string(text)}}}, nil
-	}
-
-	return toolCallResult{}, fmt.Errorf("memory %q not found in any scope", id)
-}
-
-// toolListScopes lists discovered .mom/ scopes.
-func (s *Server) toolListScopes() (toolCallResult, error) {
-	scopes := scope.Walk(s.momDir)
-	if len(scopes) == 0 {
-		scopes = []scope.Scope{{Path: s.momDir, Label: "repo"}}
-	}
-
-	type scopeItem struct {
-		Label       string `json:"label"`
-		Path        string `json:"path"`
-		MemoryCount int    `json:"memory_count"`
-	}
-	items := make([]scopeItem, len(scopes))
-	for i, sc := range scopes {
-		items[i] = scopeItem{
-			Label:       sc.Label,
-			Path:        sc.Path,
-			MemoryCount: sc.MemoryCount(),
-		}
-	}
-	text, _ := json.MarshalIndent(items, "", "  ")
-	return toolCallResult{Content: []toolContent{{Type: "text", Text: string(text)}}}, nil
-}
-
-// toolCreateMemoryDraft creates a new draft memory document.
-func (s *Server) toolCreateMemoryDraft(args map[string]any) (toolCallResult, error) {
-	summary := stringArg(args, "summary")
-	tags := stringSliceArg(args, "tags")
-	content, _ := args["content"].(map[string]any)
-
-	if summary == "" || len(tags) == 0 {
-		return toolCallResult{}, fmt.Errorf("summary and tags are required")
-	}
-	if content == nil {
-		content = map[string]any{}
-	}
-
-	// Sanitize tags: convert underscores to hyphens for kebab-case compliance.
-	for i, t := range tags {
-		tags[i] = strings.ReplaceAll(strings.ToLower(strings.TrimSpace(t)), "_", "-")
-	}
-
-	// Use nearest writable scope or fall back to leoDir.
-	targetDir := s.momDir
-	if sc, ok := scope.NearestWritable(s.momDir); ok {
-		targetDir = sc.Path
-	}
-
-	// Generate a slug ID from summary.
-	id := slugify(summary)
-	now := time.Now().UTC()
-
-	memDir := filepath.Join(targetDir, "memory")
-	if err := os.MkdirAll(memDir, 0755); err != nil {
-		return toolCallResult{}, fmt.Errorf("creating memory dir: %w", err)
-	}
-
-	// Write through IndexedAdapter for SQLite index sync.
-	storageDoc := &storage.Doc{
-		ID:             id,
-		Scope:          "project",
-		Tags:           tags,
-		Created:        now,
-		CreatedBy:      "mcp",
-		PromotionState: "curated",
-		Classification: "INTERNAL",
-		Compartments:   map[string][]string{},
-		Provenance: &memory.Provenance{
-			Runtime:      "mcp",
-			TriggerEvent: "create_memory_draft",
-		},
-		Content: content,
-	}
-	if err := s.idx.Write(storageDoc); err != nil {
-		return toolCallResult{}, fmt.Errorf("saving draft: %w", err)
-	}
-
-	path := filepath.Join(memDir, id+".json")
-	result := map[string]any{
-		"id":              id,
-		"promotion_state": "curated",
-		"path":            path,
-		"message":         fmt.Sprintf("Memory created at %s", path),
-	}
-	text, _ := json.MarshalIndent(result, "", "  ")
-	return toolCallResult{Content: []toolContent{{Type: "text", Text: string(text)}}}, nil
-}
-
-// toolListLandmarks lists landmark memories sorted by centrality_score.
-func (s *Server) toolListLandmarks(args map[string]any) (toolCallResult, error) {
-	scopeLabel := stringArg(args, "scope")
-	limit := intArg(args, "limit", 20)
-
-	scopes := scope.Walk(s.momDir)
-	if len(scopes) == 0 {
-		scopes = []scope.Scope{{Path: s.momDir, Label: "repo"}}
-	}
-
-	var scopePaths []string
-	for _, sc := range scopes {
-		if scopeLabel == "" || sc.Label == scopeLabel {
-			scopePaths = append(scopePaths, sc.Path)
-		}
-	}
-
-	results, err := s.idx.ListLandmarks(scopePaths, limit)
+	lib, err := s.requireLibrarian()
 	if err != nil {
-		return toolCallResult{}, fmt.Errorf("list_landmarks failed: %w", err)
+		return toolCallResult{}, err
 	}
+	mem, err := lib.Get(id)
+	if err != nil {
+		return toolCallResult{}, fmt.Errorf("mom_get: %w", err)
+	}
+	text, _ := json.Marshal(mem)
+	return toolCallResult{Content: []toolContent{{Type: "text", Text: string(text)}}}, nil
+}
 
-	if len(results) == 0 {
+func (s *Server) toolMomLandmarks(args map[string]any) (toolCallResult, error) {
+	limit := intArg(args, "limit", 20)
+	lib, err := s.requireLibrarian()
+	if err != nil {
+		return toolCallResult{}, err
+	}
+	items, err := lib.Landmarks(limit)
+	if err != nil {
+		return toolCallResult{}, fmt.Errorf("mom_landmarks: %w", err)
+	}
+	if len(items) == 0 {
 		return toolCallResult{Content: []toolContent{{Type: "text", Text: "No landmarks found."}}}, nil
 	}
-
-	type landmarkItem struct {
-		ID              string   `json:"id"`
-		Summary         string   `json:"summary"`
-		Tags            []string `json:"tags"`
-		CentralityScore float64  `json:"centrality_score"`
-	}
-	items := make([]landmarkItem, len(results))
-	for i, r := range results {
-		cs := 0.0
-		if r.CentralityScore != nil {
-			cs = *r.CentralityScore
-		}
-		items[i] = landmarkItem{
-			ID:              r.ID,
-			Summary:         r.Summary,
-			Tags:            r.Tags,
-			CentralityScore: cs,
-		}
-	}
-
-	text, _ := json.MarshalIndent(items, "", "  ")
+	text, _ := json.Marshal(items)
 	return toolCallResult{Content: []toolContent{{Type: "text", Text: string(text)}}}, nil
 }
 
-// toolRecordTurn is the MCP fallback for runtimes that don't support hooks.
-// It appends a turn to .mom/raw/<YYYY-MM-DD>.jsonl.
-func (s *Server) toolRecordTurn(args map[string]any) (toolCallResult, error) {
-	text := stringArg(args, "text")
-	if text == "" {
-		return toolCallResult{}, fmt.Errorf("text is required")
-	}
-	sessionID := stringArg(args, "session_id")
-
-	targetDir := s.momDir
-	if sc, ok := scope.NearestWritable(s.momDir); ok {
-		targetDir = sc.Path
-	}
-
-	// Write directly without a transcript path using RecordText (handles locking).
-	rawDir := filepath.Join(targetDir, "raw")
-	now := time.Now().UTC()
-	dailyFile := filepath.Join(rawDir, now.Format("2006-01-02")+".jsonl")
-
-	if err := recorder.RecordText(targetDir, text, sessionID); err != nil {
-		return toolCallResult{}, fmt.Errorf("recording text: %w", err)
-	}
-
-	result := map[string]any{
-		"status":   "recorded",
-		"raw_file": dailyFile,
-	}
-	text2, _ := json.MarshalIndent(result, "", "  ")
-	return toolCallResult{Content: []toolContent{{Type: "text", Text: string(text2)}}}, nil
-}
-
-// toolMomRecall searches memories using the progressive escalation engine.
-// When scope is provided, the engine chain is pinned to that single scope.
 func (s *Server) toolMomRecall(args map[string]any) (toolCallResult, error) {
 	query := stringArg(args, "query")
-	maxResults := intArg(args, "max_results", 5)
-	tags := stringSliceArg(args, "tags")
-	sessionID := stringArg(args, "session_id")
-	scopeLabel := stringArg(args, "scope")
-
-	engine := s.engine
-	// Pin to a single scope when the caller requests it.
-	if scopeLabel != "" {
-		scopes := scope.Walk(s.momDir)
-		if len(scopes) == 0 {
-			scopes = []scope.Scope{{Path: s.momDir, Label: "repo"}}
-		}
-		var chain []recall.Searcher
-		for _, sc := range scopes {
-			if sc.Label == scopeLabel {
-				chain = append(chain, recall.NewScopeSearcher(s.idx, sc.Path))
-			}
-		}
-		if len(chain) > 0 {
-			engine = recall.NewEngine(chain)
-		}
+	if strings.TrimSpace(query) == "" {
+		return toolCallResult{}, fmt.Errorf("query is required")
 	}
-
-	results, err := engine.Search(recall.Options{
-		Query:      query,
-		MaxResults: maxResults,
-		Tags:       tags,
-		SessionID:  sessionID,
-	})
+	if s.finder == nil {
+		if s.openErr != nil {
+			return toolCallResult{}, s.openErr
+		}
+		return toolCallResult{}, errors.New("finder is not available")
+	}
+	results, err := s.finder.Recall(finder.Options{Query: query, Limit: 5})
 	if err != nil {
-		return toolCallResult{}, fmt.Errorf("mom_recall search failed: %w", err)
-	}
-
-	// Emit telemetry for consumed memories.
-	if s.momDir != "" {
-		em := herald.New(s.momDir, true)
-		for _, r := range results {
-			em.EmitConsumptionEvent(herald.ConsumptionEvent{
-				MemoryID: r.ID,
-				TS:       time.Now().UTC().Format(time.RFC3339),
-				ByAgent:  "mcp",
-				Context:  "mom_recall",
-			})
+		if errors.Is(err, finder.ErrEmptyQuery) {
+			return toolCallResult{}, fmt.Errorf("query is required")
 		}
+		return toolCallResult{}, fmt.Errorf("mom_recall: %w", err)
 	}
-
 	if len(results) == 0 {
 		return toolCallResult{Content: []toolContent{{Type: "text", Text: "No memories matched."}}}, nil
 	}
-
-	text, _ := json.MarshalIndent(results, "", "  ")
+	text, _ := json.Marshal(compactRecallResults(results))
 	return toolCallResult{Content: []toolContent{{Type: "text", Text: string(text)}}}, nil
 }
 
+type recallIndexItem struct {
+	ID             string  `json:"id"`
+	Type           string  `json:"type"`
+	Summary        string  `json:"summary,omitempty"`
+	Snippet        string  `json:"snippet,omitempty"`
+	SessionID      string  `json:"session_id,omitempty"`
+	PromotionState string  `json:"promotion_state"`
+	Score          float64 `json:"score"`
+	Tier           string  `json:"tier"`
+}
 
+func compactRecallResults(results []finder.Result) []recallIndexItem {
+	items := make([]recallIndexItem, 0, len(results))
+	for _, r := range results {
+		items = append(items, recallIndexItem{
+			ID:             r.ID,
+			Type:           r.Type,
+			Summary:        r.Summary,
+			Snippet:        contentSnippet(r.Content, 160),
+			SessionID:      r.SessionID,
+			PromotionState: r.PromotionState,
+			Score:          r.Score,
+			Tier:           r.Tier,
+		})
+	}
+	return items
+}
+
+func contentSnippet(content string, limit int) string {
+	var raw map[string]any
+	if err := json.Unmarshal([]byte(content), &raw); err != nil {
+		return ""
+	}
+	text, _ := raw["text"].(string)
+	text = strings.Join(strings.Fields(text), " ")
+	runes := []rune(text)
+	if len(runes) <= limit {
+		return text
+	}
+	return string(runes[:limit]) + "…"
+}
 
 // --- Argument helpers ---
 
@@ -444,26 +258,6 @@ func stringArg(args map[string]any, key string) string {
 		}
 	}
 	return ""
-}
-
-func stringSliceArg(args map[string]any, key string) []string {
-	v, ok := args[key]
-	if !ok {
-		return nil
-	}
-	switch t := v.(type) {
-	case []string:
-		return t
-	case []any:
-		out := make([]string, 0, len(t))
-		for _, item := range t {
-			if s, ok := item.(string); ok {
-				out = append(out, s)
-			}
-		}
-		return out
-	}
-	return nil
 }
 
 func intArg(args map[string]any, key string, defaultVal int) int {
@@ -478,28 +272,4 @@ func intArg(args map[string]any, key string, defaultVal int) int {
 		return t
 	}
 	return defaultVal
-}
-
-// slugify converts a string to a kebab-case ID suitable for file names.
-func slugify(s string) string {
-	s = strings.ToLower(s)
-	var b strings.Builder
-	prev := '-'
-	for _, r := range s {
-		switch {
-		case r >= 'a' && r <= 'z', r >= '0' && r <= '9':
-			b.WriteRune(r)
-			prev = r
-		default:
-			if prev != '-' {
-				b.WriteRune('-')
-			}
-			prev = '-'
-		}
-	}
-	result := strings.Trim(b.String(), "-")
-	if result == "" {
-		result = fmt.Sprintf("draft-%d", time.Now().UnixMilli())
-	}
-	return result
 }

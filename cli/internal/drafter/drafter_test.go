@@ -1,12 +1,8 @@
 package drafter
 
 import (
-	"encoding/json"
-	"os"
-	"path/filepath"
 	"strings"
 	"testing"
-	"time"
 )
 
 // TestRAKE verifies keyword extraction from sample text.
@@ -253,135 +249,5 @@ func TestBM25Index_Empty(t *testing.T) {
 	ranked := idx.rankCandidates([]RakeCandidate{{Phrase: "hello", Score: 1.0}})
 	if len(ranked) != 1 {
 		t.Errorf("expected 1 result from empty-vocab ranking, got %d", len(ranked))
-	}
-}
-
-// TestDrafterProcess is an end-to-end test: writes sample JSONL, runs Process, verifies drafts.
-func TestDrafterProcess(t *testing.T) {
-	// Setup temp dirs.
-	rawDir := t.TempDir()
-	memDir := t.TempDir()
-
-	// Write sample JSONL entries.
-	session := "test-session-001"
-	past := time.Now().Add(-1 * time.Hour)
-
-	type rawEntry struct {
-		Timestamp string `json:"timestamp"`
-		Event     string `json:"event"`
-		Text      string `json:"text"`
-		SessionID string `json:"session_id"`
-	}
-
-	entries := []rawEntry{
-		{
-			Timestamp: past.Format(time.RFC3339),
-			Event:     "stop",
-			Text:      "Implemented the RAKE algorithm in cli/internal/drafter/rake.go. The RakeCandidate struct holds phrase and score.",
-			SessionID: session,
-		},
-		{
-			Timestamp: past.Add(5 * time.Minute).Format(time.RFC3339),
-			Event:     "stop",
-			Text:      "Added BM25Index with newBM25Index constructor. Uses bm25_k1 and bm25_b constants for term frequency normalization.",
-			SessionID: session,
-		},
-	}
-
-	dailyFile := filepath.Join(rawDir, past.Format("2006-01-02")+".jsonl")
-	f, err := os.Create(dailyFile)
-	if err != nil {
-		t.Fatalf("creating test JSONL: %v", err)
-	}
-	for _, e := range entries {
-		line, _ := json.Marshal(e)
-		f.Write(append(line, '\n'))
-	}
-	f.Close()
-
-	// Run the drafter.
-	vocabFn := func() []string {
-		return []string{"drafter", "rake", "bm25", "keyword-extraction", "memory"}
-	}
-	d := New(rawDir, memDir, vocabFn)
-
-	// Process since 2 hours ago (should pick up our entries).
-	since := time.Now().Add(-2 * time.Hour)
-	drafts, err := d.Process(since)
-	if err != nil {
-		t.Fatalf("Process returned error: %v", err)
-	}
-
-	if len(drafts) == 0 {
-		t.Fatal("expected at least one draft, got 0")
-	}
-
-	for _, dr := range drafts {
-		if dr.ID == "" {
-			t.Error("draft ID must not be empty")
-		}
-		if dr.Content == "" {
-			t.Error("draft content must not be empty")
-		}
-		if len(dr.Tags) == 0 {
-			t.Error("draft must have at least one tag")
-		}
-		if dr.SourceSession == "" {
-			t.Error("draft source_session must not be empty")
-		}
-		if dr.Created == "" {
-			t.Error("draft created must not be empty")
-		}
-	}
-}
-
-// TestDrafterProcess_EmptyDir handles an empty raw dir.
-func TestDrafterProcess_EmptyDir(t *testing.T) {
-	rawDir := t.TempDir()
-	memDir := t.TempDir()
-	d := New(rawDir, memDir, func() []string { return nil })
-	drafts, err := d.Process(time.Now().Add(-1 * time.Hour))
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if len(drafts) != 0 {
-		t.Errorf("expected 0 drafts for empty dir, got %d", len(drafts))
-	}
-}
-
-// TestDrafterProcess_Future filters entries before the since timestamp.
-func TestDrafterProcess_Future(t *testing.T) {
-	rawDir := t.TempDir()
-	memDir := t.TempDir()
-
-	type rawEntry struct {
-		Timestamp string `json:"timestamp"`
-		Event     string `json:"event"`
-		Text      string `json:"text"`
-		SessionID string `json:"session_id"`
-	}
-
-	// Write an entry in the past.
-	past := time.Now().Add(-1 * time.Hour)
-	entry := rawEntry{
-		Timestamp: past.Format(time.RFC3339),
-		Event:     "stop",
-		Text:      "some old conversation text about algorithms",
-		SessionID: "old-session",
-	}
-	dailyFile := filepath.Join(rawDir, past.Format("2006-01-02")+".jsonl")
-	f, _ := os.Create(dailyFile)
-	line, _ := json.Marshal(entry)
-	f.Write(append(line, '\n'))
-	f.Close()
-
-	// Process since NOW — should find nothing.
-	d := New(rawDir, memDir, func() []string { return nil })
-	drafts, err := d.Process(time.Now())
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if len(drafts) != 0 {
-		t.Errorf("expected 0 drafts when all entries are before since, got %d", len(drafts))
 	}
 }

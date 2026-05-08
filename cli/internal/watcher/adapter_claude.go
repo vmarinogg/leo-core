@@ -4,9 +4,6 @@ import (
 	"encoding/json"
 	"strings"
 	"time"
-
-	"github.com/momhq/mom/cli/internal/logbook"
-	"github.com/momhq/mom/cli/internal/recorder"
 )
 
 // ClaudeAdapter parses Claude Code JSONL transcript lines.
@@ -25,25 +22,22 @@ func NewClaudeAdapter() *ClaudeAdapter {
 
 func (a *ClaudeAdapter) Name() string { return "claude" }
 
-// ParseSession implements SessionParser by delegating to logbook.ParseTranscript.
-func (a *ClaudeAdapter) ParseSession(transcriptPath, sessionID string) (*logbook.SessionLog, error) {
-	return logbook.ParseTranscript(transcriptPath, sessionID)
-}
-
 // claudeTranscriptLine is the minimal subset of a Claude Code JSONL line
 // that the adapter needs to inspect.
 type claudeTranscriptLine struct {
-	Type      string         `json:"type"`
-	Message   claudeMessage  `json:"message"`
-	Timestamp string         `json:"timestamp"`
-	SessionID string         `json:"sessionId"`
-	IsSidechain bool         `json:"isSidechain"`
+	Type        string        `json:"type"`
+	Message     claudeMessage `json:"message"`
+	Timestamp   string        `json:"timestamp"`
+	SessionID   string        `json:"sessionId"`
+	IsSidechain bool          `json:"isSidechain"`
 }
 
 type claudeMessage struct {
-	Role    string `json:"role"`
-	Content any    `json:"content"` // string or []claudeContentItem
-	Usage   *claudeUsage `json:"usage,omitempty"`
+	Role       string       `json:"role"`
+	Model      string       `json:"model,omitempty"`
+	Content    any          `json:"content"` // string or []claudeContentItem
+	Usage      *claudeUsage `json:"usage,omitempty"`
+	StopReason string       `json:"stop_reason,omitempty"`
 }
 
 type claudeUsage struct {
@@ -53,90 +47,124 @@ type claudeUsage struct {
 	CacheReadInputTokens     int `json:"cache_read_input_tokens"`
 }
 
-// ParseLine implements Adapter. It parses one JSONL line and returns a
-// RawEntry if the line contains user or assistant conversational content.
-func (a *ClaudeAdapter) ParseLine(line []byte, sessionID string) (recorder.RawEntry, bool) {
+// ExtractTurn implements Adapter. Returns the rich per-turn
+// shape Drafter and Logbook consume from `turn.observed` events. The
+// raw text and tool inputs ride on the bus only — Drafter applies
+// the redaction pipeline before persisting; Logbook strips them
+// before the metadata projection lands in op_events.
+func (a *ClaudeAdapter) ExtractTurn(line []byte, sessionID string) (Turn, bool) {
 	line = trimLine(line)
 	if len(line) == 0 {
-		return recorder.RawEntry{}, false
+		return Turn{}, false
 	}
-
 	var tl claudeTranscriptLine
 	if err := json.Unmarshal(line, &tl); err != nil {
-		return recorder.RawEntry{}, false
+		return Turn{}, false
 	}
-
-	// Only keep user and assistant turns; drop everything else.
 	if tl.Type != "user" && tl.Type != "assistant" {
-		return recorder.RawEntry{}, false
+		return Turn{}, false
 	}
-
-	// Skip subagent turns (isSidechain == true) — too noisy for Phase 1.
 	if tl.IsSidechain {
-		return recorder.RawEntry{}, false
+		return Turn{}, false
 	}
 
-	// Extract text from message.content.
-	text := extractClaudeContent(tl.Message.Content)
-	if text == "" {
-		return recorder.RawEntry{}, false
+	turn := Turn{
+		SessionID: tl.SessionID,
+		Role:      tl.Type,
+		Model:     tl.Message.Model,
+		Provider:  "anthropic",
+		Harness:   "claude-code",
+	}
+	if turn.SessionID == "" {
+		turn.SessionID = sessionID
 	}
 
-	// Resolve session ID: prefer the line's sessionId field, fall back to
-	// the filename-derived sessionID passed by the watcher.
-	sid := tl.SessionID
-	if sid == "" {
-		sid = sessionID
+	// Timestamp: prefer line's, fall back to now.
+	if tl.Timestamp != "" {
+		if t, err := time.Parse(time.RFC3339Nano, tl.Timestamp); err == nil {
+			turn.Timestamp = t
+		} else if t, err := time.Parse(time.RFC3339, tl.Timestamp); err == nil {
+			turn.Timestamp = t
+		}
+	}
+	if turn.Timestamp.IsZero() {
+		turn.Timestamp = time.Now().UTC()
 	}
 
-	// Resolve timestamp: prefer the line's timestamp, fall back to now.
-	ts := tl.Timestamp
-	if ts == "" {
-		ts = time.Now().UTC().Format(time.RFC3339)
+	// Text + tool calls: walk the structured content blocks.
+	turn.Text, turn.ToolCalls = walkClaudeContent(tl.Message.Content)
+
+	// Usage: lift from message.usage if present.
+	if tl.Message.Usage != nil {
+		u := &Usage{
+			InputTokens:      tl.Message.Usage.InputTokens,
+			OutputTokens:     tl.Message.Usage.OutputTokens,
+			CacheReadTokens:  tl.Message.Usage.CacheReadInputTokens,
+			CacheWriteTokens: tl.Message.Usage.CacheCreationInputTokens,
+			StopReason:       tl.Message.StopReason,
+		}
+		u.TotalTokens = u.InputTokens + u.OutputTokens
+		turn.Usage = u
 	}
 
-	return recorder.RawEntry{
-		Timestamp: ts,
-		Event:     "watch-" + tl.Type,
-		Text:      text,
-		SessionID: sid,
-	}, true
+	// Drop turns with no text and no tool calls (e.g. tool_result-only
+	// blocks). They carry no signal for either Drafter or Logbook.
+	if turn.Text == "" && len(turn.ToolCalls) == 0 {
+		return Turn{}, false
+	}
+
+	return turn, true
 }
 
-// extractClaudeContent converts message.content (string or []contentItem) to plain text.
-func extractClaudeContent(content any) string {
+// walkClaudeContent traverses message.content (string or array of
+// blocks) and returns:
+//   - the concatenated text from text-typed blocks
+//   - the tool calls extracted from tool_use-typed blocks (with
+//     pre-computed Category)
+//
+// Other block types (tool_result, image, etc.) are ignored.
+func walkClaudeContent(content any) (string, []ToolCall) {
 	if content == nil {
-		return ""
+		return "", nil
 	}
-
-	// Fast path: plain string content.
 	if s, ok := content.(string); ok {
-		return strings.TrimSpace(s)
+		return strings.TrimSpace(s), nil
 	}
-
-	// Structured content: []{"type":"text","text":"..."}
-	// JSON unmarshal gives []interface{} for arrays.
 	items, ok := content.([]any)
 	if !ok {
-		return ""
+		return "", nil
 	}
-
-	var parts []string
+	var (
+		textParts []string
+		tcs       []ToolCall
+	)
 	for _, item := range items {
 		m, ok := item.(map[string]any)
 		if !ok {
 			continue
 		}
 		t, _ := m["type"].(string)
-		if t != "text" {
-			continue // skip tool_use, tool_result, image, etc.
-		}
-		if text, _ := m["text"].(string); text != "" {
-			parts = append(parts, text)
+		switch t {
+		case "text":
+			if text, _ := m["text"].(string); text != "" {
+				textParts = append(textParts, text)
+			}
+		case "tool_use":
+			name, _ := m["name"].(string)
+			if name == "" {
+				continue
+			}
+			input, _ := m["input"].(map[string]any)
+			category, safeName := CategorizeObservedToolCall(name, input)
+			tcs = append(tcs, ToolCall{
+				Name:     name,
+				SafeName: safeName,
+				Input:    input,
+				Category: category,
+			})
 		}
 	}
-
-	return strings.Join(parts, "\n")
+	return strings.Join(textParts, "\n"), tcs
 }
 
 // trimLine removes leading/trailing whitespace from a byte slice.

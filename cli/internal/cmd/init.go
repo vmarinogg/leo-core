@@ -5,31 +5,35 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
-	"sort"
 	"strings"
 	"time"
 
-	"github.com/spf13/cobra"
 	"github.com/momhq/mom/cli/internal/adapters/harness"
+	"github.com/momhq/mom/cli/internal/centralvault"
 	"github.com/momhq/mom/cli/internal/config"
 	"github.com/momhq/mom/cli/internal/herald"
-	"github.com/momhq/mom/cli/internal/scope"
 	"github.com/momhq/mom/cli/internal/ux"
+	"github.com/spf13/cobra"
 )
 
 //go:embed schema.json
 var embeddedSchema embed.FS
 
+var runExternalCommand = func(name string, args ...string) ([]byte, error) {
+	return exec.Command(name, args...).CombinedOutput()
+}
+
 var initCmd = &cobra.Command{
 	Use:   "init",
-	Short: "Initialize a .mom/ directory in the current project",
+	Short: "Install MOM's global vault and agent integrations",
 	RunE:  runInit,
 }
 
 func init() {
-	initCmd.Flags().StringSlice("runtimes", nil, "AI runtimes to configure (claude, codex, windsurf, pi)")
-	initCmd.Flags().Bool("force", false, "Overwrite existing .mom/ directory")
+	initCmd.Flags().String("harnesses", "", "AI harnesses to configure as a comma list (claude,codex,windsurf,pi,all)")
+	initCmd.Flags().Bool("force", false, "Overwrite existing global MOM configuration")
 	initCmd.Flags().BoolP("no-interactive", "y", false, "Skip the interactive wizard and use defaults/flags")
 }
 
@@ -44,8 +48,8 @@ func runInit(cmd *cobra.Command, args []string) error {
 
 	// Run the interactive onboarding wizard unless:
 	//   - --no-interactive / -y was passed, OR
-	//   - --runtimes was explicitly provided by the user (direct/scripted mode).
-	if !noInteractive && !cmd.Flags().Changed("runtimes") {
+	//   - --harnesses was explicitly provided by the user (direct/scripted mode).
+	if !noInteractive && !cmd.Flags().Changed("harnesses") {
 		result, err := runOnboarding(cmd.InOrStdin(), cmd.OutOrStdout(), cwd)
 		if err != nil {
 			return err
@@ -58,50 +62,26 @@ func runInit(cmd *cobra.Command, args []string) error {
 			return err
 		}
 
-		// Propagate: when scope is user/org, initialize child scopes automatically.
-		if result.ScopeLabel == "user" || result.ScopeLabel == "org" {
-			propagateInit(cmd, installDir, result)
-		}
-
-		// Run bootstrap inline if the user opted in (non-interactive -y always skips).
-		if result.BootstrapChoice != "" && result.BootstrapChoice != "skip" {
-			p := ux.NewPrinter(cmd.OutOrStdout())
-			p.Blank()
-			if result.ScopeLabel == "user" || result.ScopeLabel == "org" {
-				// Multi-repo: bootstrap each child repo that has .mom/.
-				if err := bootstrapAllChildRepos(cmd, installDir); err != nil {
-					p.Warnf("multi-repo bootstrap error: %v", err)
-				}
-			} else {
-				scanDir := installDir
-				if result.BootstrapChoice == "repo" {
-					scanDir = cwd
-				}
-				if err := runBootstrapInline(cmd, scanDir, filepath.Join(installDir, ".mom")); err != nil {
-					p.Warnf("bootstrap scan error: %v", err)
-				}
-			}
-		}
+		// Cartographer-driven seeding was retired from `mom init` once
+		// MOM became global — the central vault aggregates memories
+		// from sessions across every project, so per-project bootstrap
+		// scanning no longer fits the model. The `mom map` command
+		// stays callable (hidden) for users with existing scripts;
+		// quality work belongs in the future redesign.
 		return nil
 	}
 
-	// Non-interactive path: use flags/defaults.
-	// When --force, look for an existing .mom/ up the directory tree so we
-	// regenerate context files in the right place instead of the cwd.
+	// Non-interactive path: use flags/defaults. MOM's writable vault/config and
+	// harness integrations are installed globally; cwd is only registered as the
+	// active project for watcher metadata.
 	installDir := cwd
-	if force {
-		if sc, ok := scope.NearestWritable(cwd); ok {
-			installDir = filepath.Dir(sc.Path)
-		}
-	}
 
-	harnesses, _ := cmd.Flags().GetStringSlice("harnesses")
-	if len(harnesses) == 0 {
-		harnesses, _ = cmd.Flags().GetStringSlice("runtimes")
-	}
+	harnessesFlag, _ := cmd.Flags().GetString("harnesses")
+	harnesses := parseHarnessList(harnessesFlag)
 	if len(harnesses) == 0 {
 		harnesses = []string{"claude"}
 	}
+	harnesses = resolveInitHarnesses(cwd, harnesses)
 
 	defaults := config.Default()
 	return runInitWithConfig(cmd, installDir, force, OnboardingResult{
@@ -113,12 +93,41 @@ func runInit(cmd *cobra.Command, args []string) error {
 	})
 }
 
-// runInitWithConfig performs the actual directory and file creation using the
-// resolved configuration from either the wizard or flag defaults.
-// cwd is the directory where .mom/ will be created (may differ from os.Getwd()
-// when the user chose a parent install location during onboarding).
+func parseHarnessList(raw string) []string {
+	parts := strings.Split(raw, ",")
+	out := make([]string, 0, len(parts))
+	for _, part := range parts {
+		part = strings.TrimSpace(part)
+		if part != "" {
+			out = append(out, part)
+		}
+	}
+	return out
+}
+
+func resolveInitHarnesses(cwd string, requested []string) []string {
+	if len(requested) != 1 || strings.TrimSpace(requested[0]) != "all" {
+		return requested
+	}
+	registry := harness.NewRegistry(cwd)
+	detected := registry.DetectAll()
+	out := make([]string, 0, len(detected))
+	for _, adapter := range detected {
+		out = append(out, adapter.Name())
+	}
+	return out
+}
+
+// runInitWithConfig performs central vault setup and global harness integration
+// using the resolved configuration from either the wizard or flag defaults. cwd
+// is only used as the active project for watcher metadata; the .mom directory is
+// always the central vault dir ($HOME/.mom or MOM_VAULT's parent for tests/local
+// runs).
 func runInitWithConfig(cmd *cobra.Command, cwd string, force bool, result OnboardingResult) error {
-	leoDir := filepath.Join(cwd, ".mom")
+	leoDir, err := centralvault.Dir()
+	if err != nil {
+		return err
+	}
 
 	// Check if already initialized.
 	alreadyExists := false
@@ -130,8 +139,9 @@ func runInitWithConfig(cmd *cobra.Command, cwd string, force bool, result Onboar
 
 	p := ux.NewPrinter(cmd.OutOrStdout())
 
-	// When .mom/ already exists: update config with new runtimes, regenerate
-	// runtime files, and reinstall daemon — but skip scaffold.
+	// When the central .mom/ already exists: update config with selected
+	// harnesses, refresh global integrations, and reinstall daemon — but skip
+	// scaffold.
 	if alreadyExists {
 		return runReinit(cmd, cwd, leoDir, result, p)
 	}
@@ -148,7 +158,6 @@ func runInitWithConfig(cmd *cobra.Command, cwd string, force bool, result Onboar
 			filepath.Join(leoDir, "constraints"),
 			filepath.Join(leoDir, "logs"),
 			filepath.Join(leoDir, "cache"),
-			filepath.Join(leoDir, "raw"),
 		}
 		for _, d := range dirs {
 			if err := os.MkdirAll(d, 0755); err != nil {
@@ -156,19 +165,18 @@ func runInitWithConfig(cmd *cobra.Command, cwd string, force bool, result Onboar
 				return
 			}
 		}
-		if showSpinner {
-			time.Sleep(600 * time.Millisecond)
+		v, err := centralvault.Open()
+		if err != nil {
+			scaffoldErr = err
+			return
+		}
+		if err := v.Close(); err != nil {
+			scaffoldErr = err
+			return
 		}
 	}
 
-	if showSpinner {
-		sp := ux.NewSpinner(os.Stderr)
-		sp.Start("Scanning project structure")
-		doScaffold()
-		sp.Stop()
-	} else {
-		doScaffold()
-	}
+	doScaffold()
 	if scaffoldErr != nil {
 		return scaffoldErr
 	}
@@ -194,7 +202,8 @@ func runInitWithConfig(cmd *cobra.Command, cwd string, force bool, result Onboar
 			commMode = "concise"
 		}
 
-		// Determine scope label — default to "repo" for backward compat.
+		// Keep the legacy config field stable for existing readers. Storage and
+		// integrations are central/global regardless of this value.
 		scopeLabel := result.ScopeLabel
 		if scopeLabel == "" {
 			scopeLabel = "repo"
@@ -239,30 +248,6 @@ func runInitWithConfig(cmd *cobra.Command, cwd string, force bool, result Onboar
 			return
 		}
 
-		// Write core constraints — skip if a parent scope already provides them.
-		if !parentScopeHasDir(cwd, "constraints") {
-			constraintsDir := filepath.Join(leoDir, "constraints")
-			for name, content := range coreConstraints() {
-				path := filepath.Join(constraintsDir, name+".json")
-				if err := os.WriteFile(path, []byte(content), 0644); err != nil {
-					kbErr = fmt.Errorf("writing constraint %s: %w", name, err)
-					return
-				}
-			}
-		}
-
-		// Write core skills — skip if a parent scope already provides them.
-		if !parentScopeHasDir(cwd, "skills") {
-			skillsDir := filepath.Join(leoDir, "skills")
-			for name, content := range coreSkills() {
-				path := filepath.Join(skillsDir, name+".json")
-				if err := os.WriteFile(path, []byte(content), 0644); err != nil {
-					kbErr = fmt.Errorf("writing skill %s: %w", name, err)
-					return
-				}
-			}
-		}
-
 		if showSpinner {
 			time.Sleep(800 * time.Millisecond)
 		}
@@ -270,7 +255,7 @@ func runInitWithConfig(cmd *cobra.Command, cwd string, force bool, result Onboar
 
 	if showSpinner {
 		sp := ux.NewSpinner(os.Stderr)
-		sp.Start("Writing memory structure")
+		sp.Start("Building memory vault")
 		doWriteKB()
 		sp.Stop()
 	} else {
@@ -280,57 +265,30 @@ func runInitWithConfig(cmd *cobra.Command, cwd string, force bool, result Onboar
 		return kbErr
 	}
 
-	// Re-load config for runtime generation.
+	// Re-load config for harness generation.
 	cfg, err := config.Load(leoDir)
 	if err != nil {
 		return fmt.Errorf("loading config after write: %w", err)
 	}
 
-	// ── Phase 3: Generate runtime context files ────────────────────────────
+	// ── Phase 3: Generate harness context files ────────────────────────────
 	var genErr error
 	doGenerate := func() {
 		runtimeCfg := buildRuntimeConfig(cfg)
 
-		// Build constraints list from core constraints.
 		runtimeConstraints := buildRuntimeConstraints()
 		runtimeSkills := buildRuntimeSkills()
 		runtimeIdentity := buildRuntimeIdentity()
 
-		// Generate context files for all selected runtimes.
+		// Install global context/tool integration for all selected harnesses.
 		for _, rt := range result.Harnesses {
 			adapter, ok := registry.Get(rt)
 			if !ok {
 				continue
 			}
-
-			// Backup existing files if needed.
-			for _, relPath := range adapter.GeneratedFiles() {
-				absPath := filepath.Join(cwd, relPath)
-				harness.BackupIfNeeded(absPath) //nolint:errcheck
-			}
-
-			if err := adapter.GenerateContextFile(runtimeCfg, runtimeConstraints, runtimeSkills, runtimeIdentity); err != nil {
+			if err := installGlobalHarness(adapter, rt, runtimeCfg, runtimeConstraints, runtimeSkills, runtimeIdentity); err != nil {
 				genErr = err
 				return
-			}
-
-			// Register MCP, then any optional integration mechanisms the
-			// Harness exposes (hooks, extensions).
-			if err := adapter.RegisterMCP(); err != nil {
-				genErr = err
-				return
-			}
-			if h, ok := adapter.(harness.HookInstaller); ok {
-				if err := h.RegisterHooks(); err != nil {
-					genErr = err
-					return
-				}
-			}
-			if e, ok := adapter.(harness.ExtensionInstaller); ok {
-				if err := e.RegisterExtension(); err != nil {
-					genErr = err
-					return
-				}
 			}
 		}
 
@@ -341,7 +299,7 @@ func runInitWithConfig(cmd *cobra.Command, cwd string, force bool, result Onboar
 
 	if showSpinner {
 		sp := ux.NewSpinner(os.Stderr)
-		sp.Start("Generating runtime context files")
+		sp.Start("Generating agent context files")
 		doGenerate()
 		sp.Stop()
 	} else {
@@ -351,18 +309,14 @@ func runInitWithConfig(cmd *cobra.Command, cwd string, force bool, result Onboar
 		return genErr
 	}
 
-	// ── Phase 3.5: Register with global watch daemon ────────────────────────
+	// ── Phase 3.5: Install global skills ────────────────────────────────────
+	installGlobalSkills(p, result.Harnesses)
+
+	// ── Phase 4: Register with global watch daemon ──────────────────────────
 	if err := ensureGlobalDaemon(cwd, leoDir, result.Harnesses); err != nil {
 		p.Warnf("watch daemon: %v", err)
 	} else {
-		p.Check("watch daemon installed")
-	}
-
-	// ── Phase 4: Update .gitignore ──────────────────────────────────────────
-	if added, gitErr := ensureGitIgnore(cwd, registry, result.Harnesses); gitErr != nil {
-		p.Warnf(".gitignore: %v", gitErr)
-	} else if len(added) > 0 {
-		p.Checkf(".gitignore updated (%d entries added)", len(added))
+		p.Check("Watch daemon installed")
 	}
 
 	// ── Telemetry: emit smoke events ────────────────────────────────────────
@@ -384,32 +338,27 @@ func runInitWithConfig(cmd *cobra.Command, cwd string, force bool, result Onboar
 
 	// ── Done ────────────────────────────────────────────────────────────────
 	p.Blank()
-	p.Check(".mom/ structure created")
+	p.Check("Memory vault ready")
 	for _, rt := range result.Harnesses {
-		adapter, ok := registry.Get(rt)
-		if !ok {
-			continue
-		}
-		for _, f := range adapter.GeneratedFiles() {
-			absPath := filepath.Join(cwd, f)
-			if _, statErr := os.Stat(absPath); statErr == nil {
-				p.Check(f)
-			}
-		}
+		p.Checkf("%s global integration installed", harnessLabel(rt))
 	}
 	p.Blank()
-	p.Textf("MOM is ready. Run %s to check health.", p.HighlightCmd("mom status"))
+	p.Textf("MOM is ready. Try /mom-status or run %s.", p.HighlightCmd("mom status"))
 	return nil
 }
 
-// runReinit handles `mom init` on an already-initialized project.
-// Updates runtimes in config, regenerates context files, and reinstalls daemon.
+// runReinit handles `mom init` when the central vault already exists. It
+// reconciles selected harnesses, refreshes global integrations even when config
+// is unchanged, and registers the current cwd with the global watch daemon.
 func runReinit(cmd *cobra.Command, cwd, leoDir string, result OnboardingResult, p *ux.Printer) error {
 	cfg, err := config.Load(leoDir)
 	if err != nil {
 		// Corrupt or missing config — fall back to informational message.
-		p.Muted(".mom/ already exists — run with --force to reinitialize from scratch.")
+		p.Muted("MOM already exists — run with --force to reinitialize from scratch.")
 		return nil
+	}
+	if cfg.Harnesses == nil {
+		cfg.Harnesses = make(map[string]config.HarnessConfig)
 	}
 
 	// Reconcile harnesses: enable selected, disable unselected.
@@ -432,179 +381,57 @@ func runReinit(cmd *cobra.Command, cwd, leoDir string, result OnboardingResult, 
 		}
 	}
 
-	if !changed {
-		// Still register with global daemon even if config unchanged.
-		if err := ensureGlobalDaemon(cwd, leoDir, cfg.EnabledRuntimes()); err != nil {
-			p.Warnf("watch daemon: %v", err)
+	if changed {
+		if err := config.Save(leoDir, cfg); err != nil {
+			return fmt.Errorf("saving config: %w", err)
 		}
-		p.Muted(".mom/ already up to date — nothing to update.")
-		return nil
 	}
 
-	// Save updated config.
-	if err := config.Save(leoDir, cfg); err != nil {
-		return fmt.Errorf("saving config: %w", err)
-	}
-
-	// Regenerate runtime context files for all enabled runtimes.
+	// Refresh global context/tool integration for all enabled harnesses. This
+	// doubles as a repair path when a user deletes one global file and reruns init.
 	registry := harness.NewRegistry(cwd)
 	runtimeCfg := buildRuntimeConfig(cfg)
 	runtimeConstraints := buildRuntimeConstraints()
 	runtimeSkills := buildRuntimeSkills()
 	runtimeIdentity := buildRuntimeIdentity()
+	installed := make([]string, 0, len(cfg.EnabledHarnesses()))
 
-	for _, rt := range cfg.EnabledRuntimes() {
+	for _, rt := range cfg.EnabledHarnesses() {
 		adapter, ok := registry.Get(rt)
 		if !ok {
 			continue
 		}
-
-		for _, relPath := range adapter.GeneratedFiles() {
-			absPath := filepath.Join(cwd, relPath)
-			harness.BackupIfNeeded(absPath) //nolint:errcheck
-		}
-
-		if err := adapter.GenerateContextFile(runtimeCfg, runtimeConstraints, runtimeSkills, runtimeIdentity); err != nil {
-			p.Warnf("generating %s context: %v", rt, err)
+		if err := installGlobalHarness(adapter, rt, runtimeCfg, runtimeConstraints, runtimeSkills, runtimeIdentity); err != nil {
+			p.Warnf("%s global integration: %v", rt, err)
 			continue
 		}
-
-		_ = adapter.RegisterMCP()
-		if h, ok := adapter.(harness.HookInstaller); ok {
-			_ = h.RegisterHooks()
-		}
-		if e, ok := adapter.(harness.ExtensionInstaller); ok {
-			_ = e.RegisterExtension()
-		}
+		installed = append(installed, rt)
 	}
 
-	// Register with global watch daemon (updated runtimes).
-	if err := ensureGlobalDaemon(cwd, leoDir, cfg.EnabledRuntimes()); err != nil {
+	installGlobalSkills(p, cfg.EnabledHarnesses())
+
+	// Register with global watch daemon (updated harnesses).
+	if err := ensureGlobalDaemon(cwd, leoDir, cfg.EnabledHarnesses()); err != nil {
 		p.Warnf("watch daemon: %v", err)
 	} else {
 		p.Check("watch daemon updated")
 	}
 
-	// Update .gitignore.
-	if added, gitErr := ensureGitIgnore(cwd, registry, cfg.EnabledRuntimes()); gitErr != nil {
-		p.Warnf(".gitignore: %v", gitErr)
-	} else if len(added) > 0 {
-		p.Checkf(".gitignore updated (%d entries added)", len(added))
-	}
-
 	p.Blank()
-	p.Check("configuration updated")
-	for _, rt := range result.Harnesses {
-		if adapter, ok := registry.Get(rt); ok {
-			for _, f := range adapter.GeneratedFiles() {
-				absPath := filepath.Join(cwd, f)
-				if _, statErr := os.Stat(absPath); statErr == nil {
-					p.Check(f)
-				}
-			}
-		}
+	if changed {
+		p.Check("configuration updated")
+	} else {
+		p.Check("configuration up to date")
+	}
+	for _, rt := range installed {
+		p.Checkf("%s global integration installed", harnessLabel(rt))
 	}
 	return nil
 }
-
-// bootstrapAllChildRepos walks rootDir recursively, finds every directory that
-// has .mom/, and runs bootstrapInline for each one. Org folders (scope: org)
-// are skipped because they don't contain source code directly.
-func bootstrapAllChildRepos(cmd *cobra.Command, rootDir string) error {
-	entries, err := os.ReadDir(rootDir)
-	if err != nil {
-		return err
-	}
-	for _, e := range entries {
-		if !e.IsDir() || strings.HasPrefix(e.Name(), ".") {
-			continue
-		}
-		childPath := filepath.Join(rootDir, e.Name())
-		childLeo := filepath.Join(childPath, ".mom")
-
-		// If this child has .mom/ and .git/, it's a repo — bootstrap it.
-		gitPath := filepath.Join(childPath, ".git")
-		if _, err := os.Stat(childLeo); err == nil {
-			bp := ux.NewPrinter(cmd.OutOrStdout())
-			if _, err := os.Stat(gitPath); err == nil {
-				bp.Blank()
-				bp.Textf("Bootstrapping %s...", e.Name())
-				if err := runBootstrapInline(cmd, childPath, childLeo); err != nil {
-					bp.Warnf("%s: %v", e.Name(), err)
-				}
-			} else {
-				// Org folder — recurse into its children.
-				if err := bootstrapAllChildRepos(cmd, childPath); err != nil {
-					bp.Warnf("%s: %v", e.Name(), err)
-				}
-			}
-		}
-	}
-	return nil
-}
-
-// propagateInit initializes .mom/ in child directories when the parent scope
-// is user or org. Org folders (dirs containing repos) get scope "org", and
-// repos (dirs with .git/) get scope "repo". Already-initialized dirs are skipped.
-func propagateInit(cmd *cobra.Command, rootDir string, parentResult OnboardingResult) {
-	entries, err := os.ReadDir(rootDir)
-	if err != nil {
-		return
-	}
-
-	for _, e := range entries {
-		if !e.IsDir() || strings.HasPrefix(e.Name(), ".") {
-			continue
-		}
-		childPath := filepath.Join(rootDir, e.Name())
-		childLeo := filepath.Join(childPath, ".mom")
-
-		// Skip if already initialized.
-		if _, statErr := os.Stat(childLeo); statErr == nil {
-			continue
-		}
-
-		childHasGit := false
-		if info, statErr := os.Stat(filepath.Join(childPath, ".git")); statErr == nil && info.IsDir() {
-			childHasGit = true
-		}
-		childHasRepos := containsGitRepos(childPath)
-
-		pp := ux.NewPrinter(cmd.OutOrStdout())
-		if childHasRepos {
-			// Org folder: init with scope "org" and recurse into repos.
-			childResult := parentResult
-			childResult.InstallDir = childPath
-			childResult.ScopeLabel = "org"
-			childResult.BootstrapChoice = "" // bootstrap handled separately
-			if err := runInitWithConfig(cmd, childPath, false, childResult); err != nil {
-				pp.Warnf("failed to init %s: %v", childPath, err)
-				continue
-			}
-			pp.Checkf("initialized %s (scope: org)", e.Name())
-
-			// Recurse: init repos inside this org folder.
-			propagateInit(cmd, childPath, parentResult)
-		} else if childHasGit {
-			// Repo: init with scope "repo".
-			childResult := parentResult
-			childResult.InstallDir = childPath
-			childResult.ScopeLabel = "repo"
-			childResult.BootstrapChoice = "" // bootstrap handled separately
-			if err := runInitWithConfig(cmd, childPath, false, childResult); err != nil {
-				pp.Warnf("failed to init %s: %v", childPath, err)
-				continue
-			}
-			pp.Checkf("initialized %s (scope: repo)", e.Name())
-		}
-	}
-}
-
 
 // buildRuntimeConfig converts a config.Config to a harness.Config.
-// Autonomy was retired from the persisted config in v0.9.0 (#74);
-// the generated context files still include the autonomy section using
-// the "balanced" default so the runtime retains the behavioral directive.
+// Autonomy was retired from the persisted config; generated context files still
+// include the balanced default so the runtime retains the behavioral directive.
 func buildRuntimeConfig(cfg *config.Config) harness.Config {
 	commMode := cfg.Communication.Mode
 	if commMode == "" {
@@ -625,42 +452,16 @@ func buildRuntimeConfig(cfg *config.Config) harness.Config {
 	}
 }
 
-// buildRuntimeConstraints extracts constraint summaries from coreConstraints().
+// buildRuntimeConstraints returns no generated central constraints. Agent behavior
+// is delivered through installed skills and compact context files.
 func buildRuntimeConstraints() []harness.Constraint {
-	var runtimeConstraints []harness.Constraint
-	for id := range coreConstraints() {
-		var doc struct {
-			Summary string `json:"summary"`
-		}
-		json.Unmarshal([]byte(coreConstraints()[id]), &doc) //nolint:errcheck
-		runtimeConstraints = append(runtimeConstraints, harness.Constraint{
-			ID:      id,
-			Summary: doc.Summary,
-		})
-	}
-	sort.Slice(runtimeConstraints, func(i, j int) bool {
-		return runtimeConstraints[i].ID < runtimeConstraints[j].ID
-	})
-	return runtimeConstraints
+	return nil
 }
 
-// buildRuntimeSkills extracts skill summaries from coreSkills().
+// buildRuntimeSkills returns no generated central skills. Slash skills are
+// installed through the skills package manager instead.
 func buildRuntimeSkills() []harness.Skill {
-	var runtimeSkills []harness.Skill
-	for id := range coreSkills() {
-		var doc struct {
-			Summary string `json:"summary"`
-		}
-		json.Unmarshal([]byte(coreSkills()[id]), &doc) //nolint:errcheck
-		runtimeSkills = append(runtimeSkills, harness.Skill{
-			ID:      id,
-			Summary: doc.Summary,
-		})
-	}
-	sort.Slice(runtimeSkills, func(i, j int) bool {
-		return runtimeSkills[i].ID < runtimeSkills[j].ID
-	})
-	return runtimeSkills
+	return nil
 }
 
 // buildRuntimeIdentity parses the identity JSON into a harness.Identity.
@@ -678,49 +479,63 @@ func buildRuntimeIdentity() *harness.Identity {
 	}
 }
 
-// parentScopeHasDir walks up from dir looking for a parent .mom/ directory that
-// contains the given subdirectory (e.g. "constraints" or "skills") with at least
-// one .json file. This allows child scopes to inherit from a parent scope
-// instead of duplicating files. Only real parent directories are checked — dir
-// itself is skipped.
-func parentScopeHasDir(dir, subdir string) bool {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		home = string(filepath.Separator)
+func installGlobalSkills(p *ux.Printer, harnesses []string) {
+	for _, h := range harnesses {
+		agent, ok := skillsAgentForHarness(h)
+		if !ok {
+			p.Warnf("skills: unsupported harness %s", h)
+			continue
+		}
+		args, command := skillsInstallCommand(agent)
+		if _, err := runExternalCommand("npx", args...); err != nil {
+			p.Warnf("skills install %s → %s failed: %v", h, agent, err)
+			p.Muted(fmt.Sprintf("Retry: mom init --force, or run: %s", command))
+			continue
+		}
+		p.Checkf("skills installed for %s → %s", h, agent)
 	}
-
-	current := dir
-	for {
-		parent := filepath.Dir(current)
-		if parent == current {
-			// Reached filesystem root.
-			break
-		}
-		current = parent
-
-		candidate := filepath.Join(current, ".mom", subdir)
-		if hasJSONFiles(candidate) {
-			return true
-		}
-
-		// Stop after processing $HOME (same boundary as scope.Walk).
-		if current == home {
-			break
-		}
-	}
-	return false
 }
 
-// hasJSONFiles returns true if dir exists and contains at least one .json file.
-func hasJSONFiles(dir string) bool {
-	entries, err := os.ReadDir(dir)
-	if err != nil {
-		return false
+func skillsInstallCommand(agent string) ([]string, string) {
+	args := []string{"skills", "add", "momhq/mom", "-g", "-s", "*", "-a", agent, "-y"}
+	return args, fmt.Sprintf("npx skills add momhq/mom -g -s '*' -a %s -y", agent)
+}
+
+func skillsAgentForHarness(h string) (string, bool) {
+	switch h {
+	case "claude":
+		return "claude-code", true
+	case "codex":
+		return "codex", true
+	case "windsurf":
+		return "windsurf", true
+	case "pi":
+		return "pi", true
+	default:
+		return "", false
 	}
-	for _, e := range entries {
-		if !e.IsDir() && filepath.Ext(e.Name()) == ".json" {
-			return true
+}
+
+func installGlobalHarness(adapter harness.Adapter, rt string, runtimeCfg harness.Config, constraints []harness.Constraint, skills []harness.Skill, identity *harness.Identity) error {
+	global, ok := adapter.(harness.GlobalAdapter)
+	if !ok {
+		return fmt.Errorf("%s does not support global install", rt)
+	}
+	if err := global.GenerateGlobalContextFile(runtimeCfg, constraints, skills, identity); err != nil {
+		return fmt.Errorf("generating context: %w", err)
+	}
+	if err := global.RegisterGlobalMCP(); err != nil {
+		return fmt.Errorf("registering tools: %w", err)
+	}
+	if h, ok := adapter.(harness.GlobalHookInstaller); ok {
+		if err := h.RegisterGlobalHooks(); err != nil {
+			return fmt.Errorf("registering hooks: %w", err)
 		}
 	}
-	return false
+	if e, ok := adapter.(harness.GlobalExtensionInstaller); ok {
+		if err := e.RegisterGlobalExtension(); err != nil {
+			return fmt.Errorf("registering extension: %w", err)
+		}
+	}
+	return nil
 }

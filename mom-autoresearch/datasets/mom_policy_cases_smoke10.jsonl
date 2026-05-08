@@ -1,0 +1,10 @@
+{"id": "mc-001", "type": "memory-critical", "memory_required": true, "citation_expected": true, "prompt": "Recall prior decision and cite source memories."}
+{"id": "mc-002", "type": "memory-critical", "memory_required": true, "citation_expected": true, "prompt": "Summarize remembered constraints with citations."}
+{"id": "mc-003", "type": "memory-critical", "memory_required": true, "citation_expected": true, "prompt": "Did we reject any approach before? cite memories."}
+{"id": "mc-004", "type": "memory-critical", "memory_required": true, "citation_expected": true, "prompt": "What was previous session decision on token gate?"}
+{"id": "mo-001", "type": "memory-optional", "memory_required": false, "citation_expected": false, "prompt": "Suggest one eval robustness improvement."}
+{"id": "mo-002", "type": "memory-optional", "memory_required": false, "citation_expected": false, "prompt": "Propose one metric sanity check."}
+{"id": "mo-003", "type": "memory-optional", "memory_required": false, "citation_expected": false, "prompt": "How to reduce benchmark noise?"}
+{"id": "mi-001", "type": "memory-irrelevant", "memory_required": false, "citation_expected": false, "prompt": "Convert 12ms to microseconds."}
+{"id": "mi-002", "type": "memory-irrelevant", "memory_required": false, "citation_expected": false, "prompt": "What is p95 latency?"}
+{"id": "mi-003", "type": "memory-irrelevant", "memory_required": false, "citation_expected": false, "prompt": "Show command to list files recursively."}

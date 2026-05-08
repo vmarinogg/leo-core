@@ -28,3 +28,7 @@ cli/bin/
 
 # Export output
 mom-export/
+
+# MOM (generated at runtime)
+.codex/
+.pi/

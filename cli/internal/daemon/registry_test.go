@@ -4,6 +4,8 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/momhq/mom/cli/internal/pathutil"
 )
 
 func TestRegistryRoundTrip(t *testing.T) {
@@ -108,6 +110,70 @@ func TestRegisterUnregister(t *testing.T) {
 	}
 	if _, ok := reg["/proj/b"]; !ok {
 		t.Error("expected /proj/b to remain")
+	}
+}
+
+func TestLoadRegistryCanonicalizesSymlinkedProjectDir(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	realProjectDir := filepath.Join(t.TempDir(), "real", "project")
+	if err := os.MkdirAll(realProjectDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	linkProjectDir := filepath.Join(t.TempDir(), "link-project")
+	if err := os.Symlink(realProjectDir, linkProjectDir); err != nil {
+		t.Skipf("symlink unavailable: %v", err)
+	}
+
+	// Simulate an older registry entry written before canonicalization.
+	if err := SaveRegistry(Registry{
+		linkProjectDir: {MomDir: filepath.Join(linkProjectDir, ".mom"), Runtimes: []string{"claude"}},
+	}); err != nil {
+		t.Fatalf("SaveRegistry: %v", err)
+	}
+
+	reg, err := LoadRegistry()
+	if err != nil {
+		t.Fatalf("LoadRegistry: %v", err)
+	}
+	canonicalProjectDir := pathutil.CanonicalDir(realProjectDir)
+	if _, ok := reg[canonicalProjectDir]; !ok {
+		t.Fatalf("registry missing canonical key %q: %#v", canonicalProjectDir, reg)
+	}
+	if _, ok := reg[linkProjectDir]; ok {
+		t.Fatalf("registry retained symlink key %q: %#v", linkProjectDir, reg)
+	}
+}
+
+func TestRegisterUnregisterCanonicalizesSymlinkedProjectDir(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	realProjectDir := filepath.Join(t.TempDir(), "real", "project")
+	if err := os.MkdirAll(realProjectDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	linkProjectDir := filepath.Join(t.TempDir(), "link-project")
+	if err := os.Symlink(realProjectDir, linkProjectDir); err != nil {
+		t.Skipf("symlink unavailable: %v", err)
+	}
+
+	if err := RegisterProject(linkProjectDir, filepath.Join(linkProjectDir, ".mom"), []string{"claude"}); err != nil {
+		t.Fatalf("RegisterProject: %v", err)
+	}
+	reg, err := LoadRegistry()
+	if err != nil {
+		t.Fatalf("LoadRegistry: %v", err)
+	}
+	canonicalProjectDir := pathutil.CanonicalDir(realProjectDir)
+	if _, ok := reg[canonicalProjectDir]; !ok {
+		t.Fatalf("registry missing canonical key %q: %#v", canonicalProjectDir, reg)
+	}
+
+	if err := UnregisterProject(linkProjectDir); err != nil {
+		t.Fatalf("UnregisterProject: %v", err)
+	}
+	if empty, err := IsRegistryEmpty(); err != nil || !empty {
+		t.Fatalf("registry empty = %v, err = %v", empty, err)
 	}
 }
 
