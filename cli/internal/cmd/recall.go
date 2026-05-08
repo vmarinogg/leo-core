@@ -164,7 +164,7 @@ func validateReadOnlySQL(query string) error {
 		return fmt.Errorf("SQL recall accepts one read-only statement")
 	}
 	upper := strings.ToUpper(strings.TrimLeftFunc(q, unicode.IsSpace))
-	if !(strings.HasPrefix(upper, "SELECT") || strings.HasPrefix(upper, "WITH")) {
+	if !strings.HasPrefix(upper, "SELECT") && !strings.HasPrefix(upper, "WITH") {
 		return fmt.Errorf("SQL recall only accepts SELECT/WITH queries")
 	}
 	if sqlForbidden.MatchString(q) {

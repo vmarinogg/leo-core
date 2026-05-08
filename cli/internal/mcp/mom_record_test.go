@@ -283,7 +283,8 @@ func TestServer_BusIsAccessibleAndDistinctPerInstance(t *testing.T) {
 	// across calls. A future refactor that allocates a fresh bus per
 	// call silently breaks every subscribe/publish test that uses
 	// srv.Bus() then publishes via toolMomRecord.
-	if a.Bus() != a.Bus() {
+	bus := a.Bus()
+	if bus != a.Bus() {
 		t.Fatal("Server.Bus() not idempotent on same instance")
 	}
 }

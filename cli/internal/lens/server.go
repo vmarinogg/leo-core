@@ -434,7 +434,7 @@ func (s *Server) handleSession(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "session not found", http.StatusNotFound)
 		return
 	}
-	jsonResponse(w, SessionDetail{SessionSummary: d.SessionSummary, ToolCalls: d.ToolCalls, Memories: d.Memories})
+	jsonResponse(w, SessionDetail(d))
 }
 
 func jsonResponse(w http.ResponseWriter, v any) {

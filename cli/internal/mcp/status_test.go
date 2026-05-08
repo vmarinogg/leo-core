@@ -74,16 +74,6 @@ func callMomStatusText(t *testing.T, leoDir string) string {
 	return text
 }
 
-func callMomStatus(t *testing.T, leoDir string) map[string]any {
-	t.Helper()
-	text := callMomStatusText(t, leoDir)
-	var payload map[string]any
-	if err := json.Unmarshal([]byte(text), &payload); err != nil {
-		t.Fatalf("parsing mom_status text as JSON: %v\ntext: %s", err, text)
-	}
-	return payload
-}
-
 func TestMomStatusCompactShape(t *testing.T) {
 	leoDir := newStatusTestDir(t)
 	text := callMomStatusText(t, leoDir)
