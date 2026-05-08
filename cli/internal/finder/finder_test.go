@@ -88,6 +88,34 @@ func TestRecall_FindsByContent(t *testing.T) {
 	}
 }
 
+func TestRecall_TreatsHyphenatedQueryAsNaturalLanguage(t *testing.T) {
+	f, lib := openFinder(t)
+	id := insertMemory(t, lib, "s", "wrap up skill validation")
+	promote(t, lib, id)
+
+	got, err := f.Recall(finder.Options{Query: "wrap-up"})
+	if err != nil {
+		t.Fatalf("Recall: %v", err)
+	}
+	if len(got) != 1 || got[0].ID != id {
+		t.Fatalf("got %v, want [%q]", got, id)
+	}
+}
+
+func TestRecall_TreatsFTSOperatorsAsNaturalLanguage(t *testing.T) {
+	f, lib := openFinder(t)
+	id := insertMemory(t, lib, "s", "literal OR operator note")
+	promote(t, lib, id)
+
+	got, err := f.Recall(finder.Options{Query: "literal OR operator"})
+	if err != nil {
+		t.Fatalf("Recall: %v", err)
+	}
+	if len(got) != 1 || got[0].ID != id {
+		t.Fatalf("got %v, want [%q]", got, id)
+	}
+}
+
 func TestRecall_FindsBySummary(t *testing.T) {
 	f, lib := openFinder(t)
 	id, err := lib.Insert(librarian.InsertMemory{
