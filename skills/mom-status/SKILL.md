@@ -8,9 +8,13 @@ allowed-tools: Bash(mom status*)
 Run:
 
 ```bash
-mom status
+mom status --json
 ```
 
-Print the raw output verbatim. Do not summarize, reinterpret, or call MCP.
+Return a concise status summary from parsed JSON (health, routing, vault path/state, memory counts, watcher, available skills). Do **not** print full raw command output.
+
+If output includes sensitive fields (keys, tokens, cookies, passwords, secrets, auth headers), redact and report `[REDACTED]`.
 
 If `mom` is missing from PATH, say MOM is not installed or not on PATH and stop.
+
+If JSON mode is unavailable, run `mom status` and provide a sanitized summary only (never verbatim dump).
