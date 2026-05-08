@@ -38,9 +38,8 @@ human-driven path for recording a memory from a shell pipeline:
 Hook-friendly behaviour: legacy hook configs that pipe JSON to this
 command silently exit 0 — the JSON shape is detected and discarded
 rather than persisted as memory text.`,
-	RunE:          runRecord,
-	SilenceUsage:  true,
-	SilenceErrors: true,
+	RunE:         runRecord,
+	SilenceUsage: true,
 }
 
 func init() {

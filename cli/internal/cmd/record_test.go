@@ -151,6 +151,12 @@ func TestRunRecord_UsesHarnessEnvSession(t *testing.T) {
 	}
 }
 
+func TestRecordCmd_DoesNotSilenceHumanPathErrors(t *testing.T) {
+	if recordCmd.SilenceErrors {
+		t.Fatal("mom record must print explicit-record rejections to stderr")
+	}
+}
+
 func TestRunRecord_MissingSessionRejectsRealText(t *testing.T) {
 	resetRecordFlags()
 	lib := openCentralVaultForTest(t)
@@ -170,6 +176,24 @@ func TestRunRecord_MissingSessionRejectsRealText(t *testing.T) {
 
 // TestRunRecord_EmptyStdin_SilentBail covers the third hook-friendly
 // shape — empty stdin must not write anything regardless of flags.
+func TestRunRecord_FakeSessionRejectsRealText(t *testing.T) {
+	resetRecordFlags()
+	lib := openCentralVaultForTest(t)
+
+	recordSession = "hidden-record-fake"
+	out, err := runRecordWithStdin(t, "some text with fake session")
+	if err == nil {
+		t.Fatalf("expected fake session error; output: %q", out)
+	}
+	if !strings.Contains(err.Error(), "do not invent") {
+		t.Fatalf("error = %v, want do not invent", err)
+	}
+	rows, _ := lib.SearchMemories(librarian.SearchFilter{Limit: 10})
+	if len(rows) != 0 {
+		t.Errorf("got %d memories, want 0 (fake session must not persist)", len(rows))
+	}
+}
+
 func TestRunRecord_EmptyStdin_SilentBail(t *testing.T) {
 	resetRecordFlags()
 	lib := openCentralVaultForTest(t)
