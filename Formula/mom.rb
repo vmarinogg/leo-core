@@ -15,7 +15,6 @@ class Mom < Formula
         "-ldflags", "-s -w -X github.com/momhq/mom/cli/internal/cmd.Version=#{version}",
         "./cmd/mom"
     end
-    bin.install_symlink "mom" => "leo"
   end
 
   test do

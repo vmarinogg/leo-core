@@ -19,7 +19,6 @@ make test
 ```
 cli/
 ├── cmd/mom/main.go              # entrypoint
-├── cmd/leo/main.go              # deprecated alias (prints warning)
 ├── internal/
 │   ├── cmd/                     # cobra commands (init, upgrade, CRUD, ops, export)
 │   ├── adapters/runtime/        # RuntimeAdapter interface + impls (claude, codex, windsurf)

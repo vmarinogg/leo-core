@@ -1,8 +1,0 @@
-# MOM (generated at runtime)
-.mom/
-.mcp.json
-.claude/
-CLAUDE.md
-
-# Build artifacts
-/mom

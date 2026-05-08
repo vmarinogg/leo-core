@@ -6,14 +6,11 @@ LDFLAGS  = -ldflags "-X github.com/momhq/mom/cli/internal/cmd.Version=$(VERSION)
 
 build:
 	go build $(LDFLAGS) -o bin/mom ./cmd/mom
-	go build $(LDFLAGS) -o bin/leo ./cmd/leo
 
 install:
 	@go install $(LDFLAGS) ./cmd/mom
-	@go install $(LDFLAGS) ./cmd/leo
 	@GOBIN=$$(go env GOPATH)/bin; \
 	echo "mom installed to $$GOBIN/mom"; \
-	echo "leo alias installed to $$GOBIN/leo"; \
 	if ! echo "$$PATH" | tr ':' '\n' | grep -q "$$GOBIN"; then \
 		echo ""; \
 		echo "  WARNING: $$GOBIN is not in your PATH."; \
