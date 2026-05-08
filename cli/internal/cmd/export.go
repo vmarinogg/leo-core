@@ -1,369 +1,366 @@
 package cmd
 
 import (
+	"crypto/sha256"
+	"database/sql"
+	"encoding/json"
 	"fmt"
-	"io"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
-	"github.com/spf13/cobra"
-	"github.com/momhq/mom/cli/internal/memory"
+	"github.com/momhq/mom/cli/internal/centralvault"
 	"github.com/momhq/mom/cli/internal/ux"
+	"github.com/momhq/mom/cli/internal/vault"
+	"github.com/spf13/cobra"
 )
 
+const centralExportFormat = "mom-central-vault-json-v1"
+
+var centralExportTables = []string{
+	"schema_migrations",
+	"memories",
+	"tags",
+	"entities",
+	"filter_audit",
+	"op_events",
+	"legacy_imports",
+	"legacy_log_imports",
+	"memory_tags",
+	"memory_entities",
+	"legacy_import_items",
+	"legacy_log_import_items",
+}
+
+type centralExportManifest struct {
+	Format    string         `json:"format"`
+	CreatedAt string         `json:"created_at"`
+	Tables    map[string]int `json:"tables"`
+}
+
 var exportCmd = &cobra.Command{
-	Use:   "export [path]",
-	Short: "Export memory to a portable format",
-	Args:  cobra.MaximumNArgs(1),
+	Use:   "export",
+	Short: "Export the central MOM vault to JSON table files",
+	Args:  cobra.NoArgs,
 	RunE:  runExport,
 }
 
 var importCmd = &cobra.Command{
-	Use:   "import [path]",
-	Short: "Import memory from a portable format",
+	Use:   "import <path>",
+	Short: "Import MOM memory from a central export or legacy JSON files",
 	Args:  cobra.ExactArgs(1),
 	RunE:  runImport,
 }
 
-func init() {
-	exportCmd.Flags().String("output", "", "Output directory path (default: ./mom-export)")
-	importCmd.Flags().Bool("merge", false, "Merge: keep existing docs, add new, skip conflicts (default)")
-	importCmd.Flags().Bool("replace", false, "Replace: back up current memory, then replace entirely")
-}
-
-// runExport implements the mom export command.
-func runExport(cmd *cobra.Command, args []string) error {
-	leoDir, err := findMomDir()
+// runExport implements `mom export`. It writes a table-per-file JSON dump of
+// the central SQLite vault under $HOME/.mom/exports/<timestamp>/.
+func runExport(cmd *cobra.Command, _ []string) error {
+	centralDir, err := centralvault.Dir()
 	if err != nil {
 		return err
 	}
+	v, err := centralvault.Open()
+	if err != nil {
+		return fmt.Errorf("open central vault: %w", err)
+	}
+	defer func() { _ = v.Close() }()
 
-	// Determine output directory.
-	outputFlag, _ := cmd.Flags().GetString("output")
-	var outputDir string
-	switch {
-	case outputFlag != "":
-		outputDir = outputFlag
-	case len(args) > 0:
-		outputDir = filepath.Join(args[0], "mom-export")
-	default:
-		cwd, err := os.Getwd()
+	stamp := time.Now().UTC().Format("20060102-150405Z")
+	outDir := filepath.Join(centralDir, "exports", stamp)
+	if err := os.MkdirAll(outDir, 0o700); err != nil {
+		return fmt.Errorf("creating export dir: %w", err)
+	}
+
+	manifest := centralExportManifest{
+		Format:    centralExportFormat,
+		CreatedAt: time.Now().UTC().Format(time.RFC3339Nano),
+		Tables:    map[string]int{},
+	}
+
+	for _, table := range centralExportTables {
+		count, err := exportTable(v, table, filepath.Join(outDir, table+".json"))
 		if err != nil {
-			return fmt.Errorf("getting cwd: %w", err)
+			return fmt.Errorf("export %s: %w", table, err)
 		}
-		outputDir = filepath.Join(cwd, "mom-export")
+		manifest.Tables[table] = count
+	}
+	manifestPath := filepath.Join(outDir, "manifest.json")
+	if err := writeJSONFile(manifestPath, manifest); err != nil {
+		return fmt.Errorf("writing manifest: %w", err)
 	}
 
 	p := ux.NewPrinter(cmd.OutOrStdout())
 	p.Diamond("export")
 	p.Blank()
-
-	// Memory docs — written directly to output dir (no /docs/ subfolder).
-	memoryOutputDir := filepath.Join(outputDir, "memory")
-	if err := os.MkdirAll(memoryOutputDir, 0755); err != nil {
-		return fmt.Errorf("creating output memory dir: %w", err)
+	for _, table := range centralExportTables {
+		p.Chevron(fmt.Sprintf("%s: %d rows", table, manifest.Tables[table]))
 	}
-
-	srcDocsDir := filepath.Join(leoDir, "memory")
-	docCount, err := copyJSONDir(srcDocsDir, memoryOutputDir)
-	if err != nil {
-		return fmt.Errorf("copying memory docs: %w", err)
-	}
-	p.Chevron(fmt.Sprintf("memory: %d docs", docCount))
-
-	// Copy constraints.
-	constraintsCount := 0
-	srcConstraints := filepath.Join(leoDir, "constraints")
-	if dirExists(srcConstraints) {
-		dstConstraints := filepath.Join(outputDir, "constraints")
-		if err := os.MkdirAll(dstConstraints, 0755); err != nil {
-			return fmt.Errorf("creating constraints dir: %w", err)
-		}
-		constraintsCount, err = copyJSONDir(srcConstraints, dstConstraints)
-		if err != nil {
-			return fmt.Errorf("copying constraints: %w", err)
-		}
-		if constraintsCount > 0 {
-			p.Chevron(fmt.Sprintf("constraints: %d", constraintsCount))
-		}
-	}
-
-	// Copy skills.
-	skillsCount := 0
-	srcSkills := filepath.Join(leoDir, "skills")
-	if dirExists(srcSkills) {
-		dstSkills := filepath.Join(outputDir, "skills")
-		if err := os.MkdirAll(dstSkills, 0755); err != nil {
-			return fmt.Errorf("creating skills dir: %w", err)
-		}
-		skillsCount, err = copyJSONDir(srcSkills, dstSkills)
-		if err != nil {
-			return fmt.Errorf("copying skills: %w", err)
-		}
-		if skillsCount > 0 {
-			p.Chevron(fmt.Sprintf("skills: %d", skillsCount))
-		}
-	}
-
-	// Copy schema.json if it exists.
-	srcSchema := filepath.Join(leoDir, "schema.json")
-	if _, err := os.Stat(srcSchema); err == nil {
-		dstSchema := filepath.Join(outputDir, "schema.json")
-		if err := copyFileContents(srcSchema, dstSchema); err != nil {
-			return fmt.Errorf("copying schema.json: %w", err)
-		}
-	}
-
-	// Copy identity.json if it exists.
-	srcIdentity := filepath.Join(leoDir, "identity.json")
-	if _, err := os.Stat(srcIdentity); err == nil {
-		dstIdentity := filepath.Join(outputDir, "identity.json")
-		if err := copyFileContents(srcIdentity, dstIdentity); err != nil {
-			return fmt.Errorf("copying identity.json: %w", err)
-		}
-	}
-
-	// Copy config.yaml if it exists.
-	srcConfig := filepath.Join(leoDir, "config.yaml")
-	if _, err := os.Stat(srcConfig); err == nil {
-		dstConfig := filepath.Join(outputDir, "config.yaml")
-		if err := copyFileContents(srcConfig, dstConfig); err != nil {
-			return fmt.Errorf("copying config.yaml: %w", err)
-		}
-	}
-
 	p.Blank()
-	p.Checkf("exported to %s", p.HighlightValue(outputDir))
+	p.Checkf("exported to %s", p.HighlightValue(outDir))
 	return nil
 }
 
-// runImport implements the mom import command.
-func runImport(cmd *cobra.Command, args []string) error {
-	importPath := args[0]
+func exportTable(v *vault.Vault, table, path string) (int, error) {
+	var rowsOut []map[string]any
+	err := v.Query("SELECT * FROM "+table, nil, func(rows *sql.Rows) error {
+		cols, err := rows.Columns()
+		if err != nil {
+			return err
+		}
+		for rows.Next() {
+			vals := make([]any, len(cols))
+			ptrs := make([]any, len(cols))
+			for i := range vals {
+				ptrs[i] = &vals[i]
+			}
+			if err := rows.Scan(ptrs...); err != nil {
+				return err
+			}
+			row := make(map[string]any, len(cols))
+			for i, col := range cols {
+				row[col] = jsonValue(vals[i])
+			}
+			rowsOut = append(rowsOut, row)
+		}
+		return nil
+	})
+	if err != nil {
+		return 0, err
+	}
+	if rowsOut == nil {
+		rowsOut = []map[string]any{}
+	}
+	return len(rowsOut), writeJSONFile(path, rowsOut)
+}
 
-	replaceMode, _ := cmd.Flags().GetBool("replace")
+func jsonValue(v any) any {
+	switch x := v.(type) {
+	case []byte:
+		return string(x)
+	default:
+		return x
+	}
+}
 
-	leoDir, err := findMomDir()
+func writeJSONFile(path string, v any) error {
+	data, err := json.MarshalIndent(v, "", "  ")
 	if err != nil {
 		return err
 	}
+	data = append(data, '\n')
+	return os.WriteFile(path, data, 0o600)
+}
 
-	// Accept both memory/ (new) and docs/ (legacy) subdirectories.
-	srcDocsDir := filepath.Join(importPath, "memory")
-	if _, err := os.Stat(srcDocsDir); err != nil {
-		srcDocsDir = filepath.Join(importPath, "docs")
-		if _, err := os.Stat(srcDocsDir); err != nil {
-			return fmt.Errorf("import path must contain a memory/ directory")
-		}
-	}
-
-	destDocsDir := filepath.Join(leoDir, "memory")
-
-	if replaceMode {
-		// Back up current memory to .mom/backup-{timestamp}/.
-		timestamp := time.Now().UTC().Format("20060102-150405")
-		backupDir := filepath.Join(leoDir, "backup-"+timestamp)
-		backupDocsDir := filepath.Join(backupDir, "docs")
-		if err := os.MkdirAll(backupDocsDir, 0755); err != nil {
-			return fmt.Errorf("creating backup dir: %w", err)
-		}
-
-		// Copy all existing docs to backup.
-		existingEntries, err := os.ReadDir(destDocsDir)
-		if err != nil && !os.IsNotExist(err) {
-			return fmt.Errorf("reading existing docs: %w", err)
-		}
-		for _, e := range existingEntries {
-			if e.IsDir() || !strings.HasSuffix(e.Name(), ".json") {
-				continue
-			}
-			src := filepath.Join(destDocsDir, e.Name())
-			dst := filepath.Join(backupDocsDir, e.Name())
-			if err := copyFileContents(src, dst); err != nil {
-				return fmt.Errorf("backing up %s: %w", e.Name(), err)
-			}
-		}
-
-		// Remove all existing docs.
-		for _, e := range existingEntries {
-			if e.IsDir() || !strings.HasSuffix(e.Name(), ".json") {
-				continue
-			}
-			os.Remove(filepath.Join(destDocsDir, e.Name()))
-		}
-	}
-
-	// Read import source docs.
-	srcEntries, err := os.ReadDir(srcDocsDir)
+// runImport implements `mom import <path>`. It is merge-only: existing rows are
+// skipped, never overwritten. It accepts both modern table exports and legacy
+// JSON memory directories.
+func runImport(cmd *cobra.Command, args []string) error {
+	importPath, err := filepath.Abs(args[0])
 	if err != nil {
-		return fmt.Errorf("reading import docs dir: %w", err)
-	}
-
-	if err := os.MkdirAll(destDocsDir, 0755); err != nil {
-		return fmt.Errorf("creating dest docs dir: %w", err)
-	}
-
-	var imported, skipped, errCount int
-
-	for _, e := range srcEntries {
-		if e.IsDir() || !strings.HasSuffix(e.Name(), ".json") {
-			continue
-		}
-
-		srcPath := filepath.Join(srcDocsDir, e.Name())
-
-		// Validate the doc.
-		kbDoc, err := memory.LoadDoc(srcPath)
-		if err != nil {
-			errCount++
-			errCount++
-			continue
-		}
-		if err := kbDoc.Validate(); err != nil {
-			errCount++
-			continue
-		}
-
-		dstPath := filepath.Join(destDocsDir, e.Name())
-
-		if !replaceMode {
-			// Merge mode: skip if already exists.
-			if _, err := os.Stat(dstPath); err == nil {
-				skipped++
-				continue
-			}
-		}
-
-		if err := copyFileContents(srcPath, dstPath); err != nil {
-			errCount++
-			continue
-		}
-		imported++
-	}
-
-	// Import constraints if present.
-	srcConstraints := filepath.Join(importPath, "constraints")
-	if dirExists(srcConstraints) {
-		destConstraints := filepath.Join(leoDir, "constraints")
-		if err := os.MkdirAll(destConstraints, 0755); err != nil {
-			return fmt.Errorf("create constraints dir: %w", err)
-		}
-		importDirFiles(srcConstraints, destConstraints, ".json", replaceMode)
-	}
-
-	// Import skills if present.
-	srcSkills := filepath.Join(importPath, "skills")
-	if dirExists(srcSkills) {
-		destSkills := filepath.Join(leoDir, "skills")
-		if err := os.MkdirAll(destSkills, 0755); err != nil {
-			return fmt.Errorf("create skills dir: %w", err)
-		}
-		importDirFiles(srcSkills, destSkills, ".json", replaceMode)
-	}
-
-	// Import identity.json if present.
-	srcIdentity := filepath.Join(importPath, "identity.json")
-	if _, err := os.Stat(srcIdentity); err == nil {
-		dstIdentity := filepath.Join(leoDir, "identity.json")
-		copyFileContents(srcIdentity, dstIdentity) //nolint:errcheck
-	}
-
-	// Import config.yaml if present.
-	srcConfig := filepath.Join(importPath, "config.yaml")
-	if _, err := os.Stat(srcConfig); err == nil {
-		dstConfig := filepath.Join(leoDir, "config.yaml")
-		copyFileContents(srcConfig, dstConfig) //nolint:errcheck
+		return fmt.Errorf("resolving import path: %w", err)
 	}
 
 	p := ux.NewPrinter(cmd.OutOrStdout())
 	p.Diamond("import")
 	p.Blank()
-	if imported > 0 {
-		p.Checkf("%d memories imported", imported)
+
+	if ok, err := isCentralExport(importPath); err != nil {
+		return err
+	} else if ok {
+		result, err := importCentralExport(importPath)
+		if err != nil {
+			return err
+		}
+		p.Checkf("%d rows imported", result.Imported)
+		if result.Skipped > 0 {
+			p.Muted(fmt.Sprintf("  %d skipped (already exist)", result.Skipped))
+		}
+		return nil
 	}
-	if skipped > 0 {
-		p.Muted(fmt.Sprintf("  %d skipped (already exist)", skipped))
+
+	summary, err := importLegacyMemoryPath(importPath)
+	if err != nil {
+		return err
 	}
-	if errCount > 0 {
-		p.Failf("%d failed validation", errCount)
+	if summary.Skipped > 0 {
+		p.Muted(fmt.Sprintf("  %d source skipped (already imported)", summary.Skipped))
 	}
-	p.Blank()
+	p.Checkf("%d memories imported", len(summary.Mappings))
+	if summary.Audit != "" {
+		p.Chevron(fmt.Sprintf("audit: %s", summary.Audit))
+	}
 	return nil
 }
 
-// copyFileContents copies a file byte-for-byte from src to dst.
-func copyFileContents(src, dst string) error {
-	in, err := os.Open(src)
+func isCentralExport(path string) (bool, error) {
+	data, err := os.ReadFile(filepath.Join(path, "manifest.json"))
+	if os.IsNotExist(err) {
+		return false, nil
+	}
 	if err != nil {
-		return err
+		return false, fmt.Errorf("reading manifest: %w", err)
 	}
-	defer func() { _ = in.Close() }()
-
-	out, err := os.Create(dst)
-	if err != nil {
-		return err
+	var manifest centralExportManifest
+	if err := json.Unmarshal(data, &manifest); err != nil {
+		return false, fmt.Errorf("parsing manifest: %w", err)
 	}
-	defer func() { _ = out.Close() }()
-
-	if _, err := io.Copy(out, in); err != nil {
-		return err
-	}
-	return out.Close()
+	return manifest.Format == centralExportFormat, nil
 }
 
-// dirExists returns true if the path exists and is a directory.
-func dirExists(path string) bool {
-	info, err := os.Stat(path)
-	return err == nil && info.IsDir()
+type tableImportResult struct {
+	Imported int
+	Skipped  int
 }
 
-// copyJSONDir copies all .json files from src to dst. Returns count.
-func copyJSONDir(src, dst string) (int, error) {
-	return copyDirByExt(src, dst, ".json")
-}
-
-// copyDirByExt copies all files with the given extension from src to dst.
-func copyDirByExt(src, dst, ext string) (int, error) {
-	entries, err := os.ReadDir(src)
+func importCentralExport(path string) (tableImportResult, error) {
+	v, err := centralvault.Open()
 	if err != nil {
-		return 0, fmt.Errorf("reading dir: %w", err)
+		return tableImportResult{}, fmt.Errorf("open central vault: %w", err)
 	}
+	defer func() { _ = v.Close() }()
 
-	var count int
-	for _, e := range entries {
-		if e.IsDir() || !strings.HasSuffix(e.Name(), ext) {
+	var total tableImportResult
+	for _, table := range centralExportTables {
+		file := filepath.Join(path, table+".json")
+		if _, err := os.Stat(file); os.IsNotExist(err) {
 			continue
 		}
-		srcPath := filepath.Join(src, e.Name())
-		dstPath := filepath.Join(dst, e.Name())
-		if err := copyFileContents(srcPath, dstPath); err != nil {
-			return count, fmt.Errorf("copying %s: %w", e.Name(), err)
+		res, err := importTable(v, table, file)
+		if err != nil {
+			return tableImportResult{}, fmt.Errorf("import %s: %w", table, err)
 		}
-		count++
+		total.Imported += res.Imported
+		total.Skipped += res.Skipped
 	}
-	return count, nil
+	return total, nil
 }
 
-// importDirFiles copies files with the given extension from src to dst.
-// In merge mode (replaceMode=false), existing files are skipped.
-func importDirFiles(src, dst, ext string, replaceMode bool) {
-	entries, err := os.ReadDir(src)
+func importTable(v *vault.Vault, table, path string) (tableImportResult, error) {
+	data, err := os.ReadFile(path)
 	if err != nil {
-		return
+		return tableImportResult{}, err
 	}
-	for _, e := range entries {
-		if e.IsDir() || !strings.HasSuffix(e.Name(), ext) {
-			continue
-		}
-		dstPath := filepath.Join(dst, e.Name())
-		if !replaceMode {
-			if _, err := os.Stat(dstPath); err == nil {
-				continue // skip existing
+	var rows []map[string]any
+	if err := json.Unmarshal(data, &rows); err != nil {
+		return tableImportResult{}, err
+	}
+	cols, err := tableColumns(v, table)
+	if err != nil {
+		return tableImportResult{}, err
+	}
+	var result tableImportResult
+	err = v.Tx(func(tx *sql.Tx) error {
+		for _, row := range rows {
+			usedCols := make([]string, 0, len(cols))
+			vals := make([]any, 0, len(cols))
+			for _, col := range cols {
+				if val, ok := row[col]; ok {
+					usedCols = append(usedCols, col)
+					vals = append(vals, val)
+				}
+			}
+			if len(usedCols) == 0 {
+				continue
+			}
+			placeholders := strings.TrimRight(strings.Repeat("?,", len(usedCols)), ",")
+			stmt := fmt.Sprintf("INSERT OR IGNORE INTO %s (%s) VALUES (%s)", table, strings.Join(usedCols, ","), placeholders)
+			exec, err := tx.Exec(stmt, vals...)
+			if err != nil {
+				return err
+			}
+			affected, _ := exec.RowsAffected()
+			if affected == 0 {
+				result.Skipped++
+			} else {
+				result.Imported++
 			}
 		}
-		srcPath := filepath.Join(src, e.Name())
-		copyFileContents(srcPath, dstPath) //nolint:errcheck
+		return nil
+	})
+	return result, err
+}
+
+func tableColumns(v *vault.Vault, table string) ([]string, error) {
+	var cols []string
+	err := v.Query("PRAGMA table_info("+table+")", nil, func(rows *sql.Rows) error {
+		for rows.Next() {
+			var cid int
+			var name, typ string
+			var notNull int
+			var defaultValue any
+			var pk int
+			if err := rows.Scan(&cid, &name, &typ, &notNull, &defaultValue, &pk); err != nil {
+				return err
+			}
+			cols = append(cols, name)
+		}
+		return nil
+	})
+	return cols, err
+}
+
+func importLegacyMemoryPath(path string) (importSummary, error) {
+	memDir, ok := legacyImportMemoryDir(path)
+	if !ok {
+		return importSummary{}, fmt.Errorf("import path must be a MOM export or contain legacy memory JSON files")
 	}
+	docs, fingerprint, err := readLegacyMemoryDocsFromDir(memDir)
+	if err != nil {
+		return importSummary{}, err
+	}
+	if len(docs) == 0 {
+		return importSummary{}, fmt.Errorf("no legacy memory JSON files found in %s", memDir)
+	}
+	return executeCentralMemoryImport([]legacyVaultPlan{{Path: path, Fingerprint: fingerprint, Docs: docs}})
+}
+
+func legacyImportMemoryDir(path string) (string, bool) {
+	for _, candidate := range []string{
+		filepath.Join(path, "memory"),
+		filepath.Join(path, "docs"),
+		path,
+	} {
+		entries, err := os.ReadDir(candidate)
+		if err != nil {
+			continue
+		}
+		for _, e := range entries {
+			if _, ok := legacyMemoryJSONPath(candidate, e); ok {
+				return candidate, true
+			}
+		}
+	}
+	return "", false
+}
+
+func readLegacyMemoryDocsFromDir(memDir string) ([]legacyMemoryDoc, string, error) {
+	entries, err := os.ReadDir(memDir)
+	if err != nil {
+		return nil, "", err
+	}
+	var docs []legacyMemoryDoc
+	var parts []string
+	for _, e := range entries {
+		path, ok := legacyMemoryJSONPath(memDir, e)
+		if !ok {
+			continue
+		}
+		raw, err := os.ReadFile(path)
+		if err != nil {
+			continue
+		}
+		var doc map[string]any
+		if err := json.Unmarshal(raw, &doc); err != nil {
+			continue
+		}
+		sum := sha256.Sum256(raw)
+		hash := fmt.Sprintf("%x", sum[:])
+		docs = append(docs, legacyMemoryDoc{Path: path, Raw: raw, Doc: doc, Hash: hash})
+		parts = append(parts, e.Name()+":"+hash)
+	}
+	sort.Strings(parts)
+	sum := sha256.Sum256([]byte(strings.Join(parts, "\n")))
+	return docs, fmt.Sprintf("%x", sum[:]), nil
 }

@@ -1,10 +1,8 @@
 package cmd
 
 import (
-	"bytes"
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 	"time"
 
@@ -37,25 +35,16 @@ func sampleDoc(id string) *storage.Doc {
 	}
 }
 
-func TestValidateCmd_AllValid(t *testing.T) {
+func TestMemorySampleDocWrites(t *testing.T) {
 	dir := setupTestMemory(t)
 	writeTestDoc(t, dir, sampleDoc("valid-doc"))
 
-	origDir, _ := os.Getwd()
-	os.Chdir(dir)
-	defer os.Chdir(origDir)
-
-	buf := new(bytes.Buffer)
-	rootCmd.SetOut(buf)
-	rootCmd.SetErr(buf)
-	rootCmd.SetArgs([]string{"validate", "--all"})
-
-	if err := rootCmd.Execute(); err != nil {
-		t.Fatalf("validate --all failed: %v", err)
+	adapter := storage.NewJSONAdapter(filepath.Join(dir, ".mom"))
+	got, err := adapter.Read("valid-doc")
+	if err != nil {
+		t.Fatalf("reading sample doc: %v", err)
 	}
-
-	if !strings.Contains(buf.String(), "valid") {
-		t.Errorf("expected success message, got: %s", buf.String())
+	if got.ID != "valid-doc" {
+		t.Fatalf("ID = %q, want valid-doc", got.ID)
 	}
 }
-

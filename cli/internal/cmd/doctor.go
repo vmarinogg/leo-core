@@ -11,13 +11,13 @@ import (
 	"strings"
 	"time"
 
-	"github.com/spf13/cobra"
 	"github.com/momhq/mom/cli/internal/adapters/harness"
 	"github.com/momhq/mom/cli/internal/adapters/storage"
 	"github.com/momhq/mom/cli/internal/config"
 	"github.com/momhq/mom/cli/internal/memory"
 	"github.com/momhq/mom/cli/internal/scope"
 	"github.com/momhq/mom/cli/internal/ux"
+	"github.com/spf13/cobra"
 )
 
 func init() {
@@ -27,7 +27,7 @@ func init() {
 	doctorCmd.Flags().Bool("bundle", false, "Print a redacted diagnostic bundle to stdout")
 
 	// Update doctor command metadata.
-	doctorCmd.Long = `Check .mom/ health and diagnose issues.
+	doctorCmd.Long = `Check .mom/ health and local setup issues.
 
 No network calls; this command reads only local files.
 
@@ -223,7 +223,7 @@ func checkSQLiteConsistency(p *ux.Printer, leoDir string, diskDocIDs map[string]
 	// Check if the cache/index.db file exists.
 	dbPath := filepath.Join(leoDir, "cache", "index.db")
 	if _, err := os.Stat(dbPath); os.IsNotExist(err) {
-		p.Warnf("SQLite index: not found — run 'mom reindex' to create")
+		p.Warnf("SQLite index: not found — it will be rebuilt automatically on next indexed access")
 		return
 	}
 
@@ -243,7 +243,7 @@ func checkSQLiteConsistency(p *ux.Printer, leoDir string, diskDocIDs map[string]
 	if dbCount == diskCount {
 		p.Checkf("SQLite index: %d docs indexed (consistent)", dbCount)
 	} else {
-		p.Warnf("SQLite index: %d indexed vs %d on disk — run 'mom reindex'", dbCount, diskCount)
+		p.Warnf("SQLite index: %d indexed vs %d on disk — it will be rebuilt automatically on next indexed access", dbCount, diskCount)
 	}
 }
 
@@ -508,7 +508,7 @@ func runDoctorLandmarks(cmd *cobra.Command) error {
 
 	if len(jsonFiles) < landmarkComputationThreshold {
 		p.Warn("no landmarks computed yet")
-		p.Textf("Run %s to compute.", p.HighlightCmd("mom bootstrap --path ."))
+		p.Textf("Run %s to compute.", p.HighlightCmd("mom map --path ."))
 		p.Muted(fmt.Sprintf("graph below threshold: %d/%d memories", len(jsonFiles), landmarkComputationThreshold))
 		return nil
 	}
@@ -531,7 +531,7 @@ func runDoctorLandmarks(cmd *cobra.Command) error {
 
 	if len(landmarks) == 0 {
 		p.Warn("no landmarks found")
-		p.Textf("Run %s to compute.", p.HighlightCmd("mom bootstrap --path ."))
+		p.Textf("Run %s to compute.", p.HighlightCmd("mom map --path ."))
 		return nil
 	}
 

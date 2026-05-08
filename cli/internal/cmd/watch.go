@@ -24,14 +24,9 @@ import (
 )
 
 var (
-	watchTranscriptDir string
-	watchDebounceMs    int
-	watchStatus        bool
-	watchHarness       string
-	watchSweep         bool
-	watchInstall       bool
-	watchUninstall     bool
-	watchGlobal        bool
+	watchStatus bool
+	watchSweep  bool
+	watchGlobal bool
 )
 
 var watchCmd = &cobra.Command{
@@ -58,25 +53,13 @@ The watcher runs in the foreground. Use Ctrl-C to stop.`,
 }
 
 func init() {
-	watchCmd.Flags().StringVar(&watchHarness, "harness", "claude",
-		`Harness to watch: "claude" (default), "windsurf", or "pi"`)
-	watchCmd.Flags().StringVar(&watchHarness, "runtime", "claude",
-		`deprecated: use --harness`)
-	_ = watchCmd.Flags().MarkDeprecated("runtime", "use --harness instead")
-	watchCmd.Flags().StringVar(&watchTranscriptDir, "dir", "",
-		"Transcript directory to watch (overrides the runtime default)")
-	watchCmd.Flags().IntVar(&watchDebounceMs, "debounce", 300,
-		"Milliseconds to wait after a write event before reading (debounce)")
 	watchCmd.Flags().BoolVar(&watchStatus, "status", false,
 		"Show watch cursors and ingested sessions, then exit")
 	watchCmd.Flags().BoolVar(&watchSweep, "sweep", false,
 		"One-shot mode: catch up on unprocessed transcripts and exit")
-	watchCmd.Flags().BoolVar(&watchInstall, "install", false,
-		"Install system daemon and periodic sweep timer for background recording")
-	watchCmd.Flags().BoolVar(&watchUninstall, "uninstall", false,
-		"Remove system daemon and periodic sweep timer")
 	watchCmd.Flags().BoolVar(&watchGlobal, "global", false,
 		"Run as a single global daemon watching all registered projects")
+	_ = watchCmd.Flags().MarkHidden("global")
 }
 
 func runWatch(cmd *cobra.Command, _ []string) error {
@@ -100,56 +83,19 @@ func runWatch(cmd *cobra.Command, _ []string) error {
 
 	p := ux.NewPrinter(os.Stderr)
 
-	if watchInstall {
-		return runWatchInstall(projectDir, momDir, p)
-	}
-	if watchUninstall {
-		return runWatchUninstall(projectDir, momDir, p)
-	}
-
 	// Open the central vault once for this watch process. Worker is
 	// shared across the per-project buses below.
 	workers := openCentralWorkers()
 
-	// Build watcher sources: if --harness is explicitly set, use single source;
-	// otherwise read config and watch all enabled harnesses.
-	var sources []watcher.Source
-	harnessExplicit := cmd.Flags().Changed("harness") || cmd.Flags().Changed("runtime")
-
-	if harnessExplicit {
-		// Manual single-Harness mode.
-		transcriptDir := watchTranscriptDir
-		var adapter watcher.Adapter
-
-		switch watchHarness {
-		case "windsurf":
-			adapter = &watcher.WindsurfAdapter{ProjectDir: projectDir}
-		case "pi":
-			adapter = watcher.NewPiAdapter()
-		case "claude", "":
-			adapter = watcher.NewClaudeAdapter()
-		default:
-			return fmt.Errorf("unknown harness %q — supported: claude, windsurf, pi", watchHarness)
-		}
-		if transcriptDir == "" {
-			transcriptDir = harnessTranscriptDir(watchHarness)
-		}
-
-		sources = []watcher.Source{{
-			Harness:       watchHarness,
-			TranscriptDir: transcriptDir,
-			Adapter:       adapter,
-		}}
-	} else {
-		// Config-driven multi-Harness mode (daemon default).
-		momCfg, err := config.Load(momDir)
-		if err != nil {
-			return fmt.Errorf("loading config: %w", err)
-		}
-		sources = buildWatcherSources(momCfg, projectDir)
-		if len(sources) == 0 {
-			return fmt.Errorf("no watcher-capable runtimes enabled in config")
-		}
+	// Config-driven multi-harness mode. Manual per-harness overrides were kept
+	// out of the v1 public CLI; init/upgrade own harness configuration.
+	momCfg, err := config.Load(momDir)
+	if err != nil {
+		return fmt.Errorf("loading config: %w", err)
+	}
+	sources := buildWatcherSources(momCfg, projectDir)
+	if len(sources) == 0 {
+		return fmt.Errorf("no watcher-capable runtimes enabled in config")
 	}
 
 	// Sweep mode: one-shot catch-up and exit.
@@ -185,7 +131,7 @@ func runWatch(cmd *cobra.Command, _ []string) error {
 		ProjectDir: projectDir,
 		MomDir:     momDir,
 		Sources:    sources,
-		DebounceMs: watchDebounceMs,
+		DebounceMs: 300,
 		Bus:        bus,
 	})
 	if err != nil {

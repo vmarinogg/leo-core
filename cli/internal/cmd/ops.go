@@ -25,7 +25,7 @@ var statusCmd = &cobra.Command{
 
 var doctorCmd = &cobra.Command{
 	Use:   "doctor",
-	Short: "Check .mom/ health and diagnose issues",
+	Short: "Check .mom/ health and local setup issues",
 	RunE:  runDoctor,
 }
 
