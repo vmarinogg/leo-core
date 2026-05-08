@@ -99,7 +99,7 @@ func (f *Finder) WithThresholdLow(n int) *Finder {
 // Pipeline (each pass stops if it yields >= thresholdLow OR Limit):
 //  1. curated + AND  — most precise.
 //  2. curated + OR   — multi-token queries only; widen recall while
-//                      keeping the curated tier.
+//     keeping the curated tier.
 //  3. drafts + AND   — drop the curated gate.
 //  4. drafts + OR    — multi-token queries only; widest pass.
 //
@@ -203,11 +203,17 @@ func tokenCount(query string) int {
 	return len(tokens(query))
 }
 
-// normaliseFTSQuery returns the verbatim query for FTS5 MATCH. FTS5
-// defaults to AND between bare terms, so a trimmed query is already
-// the precise pass.
+// normaliseFTSQuery builds a safe FTS5 AND query from natural-language input.
+// Quoting every whitespace-delimited token preserves FTS5's default AND
+// semantics while preventing punctuation such as hyphens from being parsed as
+// operators or column selectors.
 func normaliseFTSQuery(query string) string {
-	return strings.TrimSpace(query)
+	tt := tokens(query)
+	parts := make([]string, len(tt))
+	for i, t := range tt {
+		parts[i] = quoteFTS(t)
+	}
+	return strings.Join(parts, " ")
 }
 
 // buildORQuery rewrites the query as an OR of its tokens. Each token
@@ -218,14 +224,15 @@ func buildORQuery(query string) string {
 	if len(tt) == 0 {
 		return ""
 	}
-	if len(tt) == 1 {
-		return tt[0]
-	}
 	parts := make([]string, len(tt))
 	for i, t := range tt {
-		parts[i] = `"` + escapeFTS(t) + `"`
+		parts[i] = quoteFTS(t)
 	}
 	return strings.Join(parts, " OR ")
+}
+
+func quoteFTS(s string) string {
+	return `"` + escapeFTS(s) + `"`
 }
 
 // escapeFTS doubles any embedded double-quote so the returned string
