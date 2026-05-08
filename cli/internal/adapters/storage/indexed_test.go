@@ -134,6 +134,38 @@ func TestIndexedAdapter_Reindex(t *testing.T) {
 	}
 }
 
+func TestIndexedAdapter_ReindexRemovesStaleRowsForSameIDUnderOldScopePath(t *testing.T) {
+	a, momDir := setupIndexedAdapter(t)
+	doc := indexedTestDoc("stale-scope-id")
+	oldScopePath := momDir + "-before-canonicalization"
+
+	if err := a.idx.Upsert(doc, oldScopePath); err != nil {
+		t.Fatalf("seed stale index row: %v", err)
+	}
+	if err := a.json.Write(doc); err != nil {
+		t.Fatalf("write JSON source doc: %v", err)
+	}
+
+	if err := a.Reindex(); err != nil {
+		t.Fatalf("Reindex failed: %v", err)
+	}
+
+	oldCount, err := a.idx.CountByScope(oldScopePath)
+	if err != nil {
+		t.Fatalf("CountByScope old: %v", err)
+	}
+	if oldCount != 0 {
+		t.Fatalf("old scope count = %d, want 0", oldCount)
+	}
+	newCount, err := a.idx.CountByScope(momDir)
+	if err != nil {
+		t.Fatalf("CountByScope new: %v", err)
+	}
+	if newCount != 1 {
+		t.Fatalf("new scope count = %d, want 1", newCount)
+	}
+}
+
 func TestIndexedAdapter_ExcludeDrafts(t *testing.T) {
 	a, _ := setupIndexedAdapter(t)
 
