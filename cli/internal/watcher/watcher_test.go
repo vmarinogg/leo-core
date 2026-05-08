@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/momhq/mom/cli/internal/pathutil"
 )
 
 // mockAdapter records every call to ExtractTurn for inspection.
@@ -184,9 +185,9 @@ func TestIngestFile_NewSession(t *testing.T) {
 			Adapter:       &mockAdapter{},
 			DebounceMs:    300,
 		},
-		timers:  make(map[string]*time.Timer),
+		timers:    make(map[string]*time.Timer),
 		cursorDir: filepath.Join(momDir, "cache"),
-		logFile: filepath.Join(momDir, "watch.log"),
+		logFile:   filepath.Join(momDir, "watch.log"),
 	}
 	_ = os.MkdirAll(w.cursorDir, 0755)
 
@@ -235,9 +236,9 @@ func TestIngestFile_IncrementalRead(t *testing.T) {
 			Adapter:       adapter,
 			DebounceMs:    300,
 		},
-		timers:  make(map[string]*time.Timer),
+		timers:    make(map[string]*time.Timer),
 		cursorDir: filepath.Join(momDir, "cache"),
-		logFile: filepath.Join(momDir, "watch.log"),
+		logFile:   filepath.Join(momDir, "watch.log"),
 	}
 	_ = os.MkdirAll(w.cursorDir, 0755)
 
@@ -300,9 +301,9 @@ func TestIngestFile_TruncatedLine(t *testing.T) {
 			Adapter:       adapter,
 			DebounceMs:    300,
 		},
-		timers:  make(map[string]*time.Timer),
+		timers:    make(map[string]*time.Timer),
 		cursorDir: filepath.Join(momDir, "cache"),
-		logFile: filepath.Join(momDir, "watch.log"),
+		logFile:   filepath.Join(momDir, "watch.log"),
 	}
 	_ = os.MkdirAll(w.cursorDir, 0755)
 
@@ -361,9 +362,9 @@ func TestIngestFile_FileShrink(t *testing.T) {
 			Adapter:       adapter,
 			DebounceMs:    300,
 		},
-		timers:  make(map[string]*time.Timer),
+		timers:    make(map[string]*time.Timer),
 		cursorDir: filepath.Join(momDir, "cache"),
-		logFile: filepath.Join(momDir, "watch.log"),
+		logFile:   filepath.Join(momDir, "watch.log"),
 	}
 	_ = os.MkdirAll(w.cursorDir, 0755)
 
@@ -426,7 +427,7 @@ func mustMarshal(t *testing.T, v any) string {
 // "<path>" slug. This guards the privacy-bleed regression where a missing
 // scoper override caused pi sessions from OTHER projects to be ingested.
 func TestNew_ProjectScoping_PiUsesCustomSlug(t *testing.T) {
-	base := t.TempDir()                                 // simulated ~/.pi/agent/sessions
+	base := t.TempDir() // simulated ~/.pi/agent/sessions
 	momDir := filepath.Join(t.TempDir(), ".mom")
 	projectDir := "/Users/foo/proj"
 
@@ -459,6 +460,45 @@ func TestNew_ProjectScoping_PiUsesCustomSlug(t *testing.T) {
 	got := w.TranscriptDir()
 	if got != piSlugDir {
 		t.Errorf("expected scoped dir to be pi slug %q, got %q", piSlugDir, got)
+	}
+}
+
+// TestNew_ProjectScoping_ResolvesSymlinkedProjectDirBeforeSlugging guards the
+// macOS /tmp -> /private/tmp mismatch seen in live release validation.
+func TestNew_ProjectScoping_ResolvesSymlinkedProjectDirBeforeSlugging(t *testing.T) {
+	base := t.TempDir()
+	momDir := filepath.Join(t.TempDir(), ".mom")
+	realProjectDir := filepath.Join(t.TempDir(), "real", "project")
+	if err := os.MkdirAll(realProjectDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	linkProjectDir := filepath.Join(t.TempDir(), "link-project")
+	if err := os.Symlink(realProjectDir, linkProjectDir); err != nil {
+		t.Skipf("symlink unavailable: %v", err)
+	}
+
+	canonicalProjectDir := pathutil.CanonicalDir(realProjectDir)
+	realSlugDir := filepath.Join(base, projectSlug(canonicalProjectDir))
+	if err := os.MkdirAll(realSlugDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	w, err := New(Config{
+		ProjectDir: linkProjectDir,
+		MomDir:     momDir,
+		Sources: []Source{{
+			Harness:       "claude",
+			TranscriptDir: base,
+			Adapter:       NewClaudeAdapter(),
+		}},
+		SweepOnly: true,
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	if got := w.TranscriptDir(); got != realSlugDir {
+		t.Errorf("expected scoped dir to use canonical project slug %q, got %q", realSlugDir, got)
 	}
 }
 

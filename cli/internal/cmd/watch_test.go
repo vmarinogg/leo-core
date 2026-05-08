@@ -9,6 +9,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/momhq/mom/cli/internal/centralvault"
+	"github.com/momhq/mom/cli/internal/pathutil"
 )
 
 func resetWatchFlagsForTest(t *testing.T) {
@@ -78,6 +79,36 @@ func TestWatchStatusUsesCentralVaultWithoutProjectMom(t *testing.T) {
 	}
 }
 
+func TestResolveMomContextCanonicalizesSymlinkedCWD(t *testing.T) {
+	realProjectDir := filepath.Join(t.TempDir(), "real", "project")
+	if err := os.MkdirAll(realProjectDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	linkProjectDir := filepath.Join(t.TempDir(), "link-project")
+	if err := os.Symlink(realProjectDir, linkProjectDir); err != nil {
+		t.Skipf("symlink unavailable: %v", err)
+	}
+	centralDir := initTestCentralVault(t)
+	if err := os.MkdirAll(centralDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(centralDir, "config.yaml"), []byte("version: \"1\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	projectRoot, momDir, err := resolveMomContext(linkProjectDir)
+	if err != nil {
+		t.Fatalf("resolveMomContext: %v", err)
+	}
+	canonicalProjectDir := pathutil.CanonicalDir(realProjectDir)
+	if projectRoot != canonicalProjectDir {
+		t.Fatalf("projectRoot = %q, want canonical %q", projectRoot, canonicalProjectDir)
+	}
+	if momDir != centralDir {
+		t.Fatalf("momDir = %q, want %q", momDir, centralDir)
+	}
+}
+
 func TestResolveMomContextFallsBackToCentralVault(t *testing.T) {
 	projectDir := t.TempDir()
 	centralDir := initTestCentralVault(t)
@@ -92,8 +123,9 @@ func TestResolveMomContextFallsBackToCentralVault(t *testing.T) {
 	if err != nil {
 		t.Fatalf("resolveMomContext: %v", err)
 	}
-	if projectRoot != projectDir {
-		t.Fatalf("projectRoot = %q, want %q", projectRoot, projectDir)
+	canonicalProjectDir := pathutil.CanonicalDir(projectDir)
+	if projectRoot != canonicalProjectDir {
+		t.Fatalf("projectRoot = %q, want %q", projectRoot, canonicalProjectDir)
 	}
 	if momDir != centralDir {
 		t.Fatalf("momDir = %q, want %q", momDir, centralDir)

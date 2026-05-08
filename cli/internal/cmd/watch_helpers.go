@@ -10,6 +10,7 @@ import (
 	"github.com/momhq/mom/cli/internal/centralvault"
 	"github.com/momhq/mom/cli/internal/config"
 	"github.com/momhq/mom/cli/internal/daemon"
+	"github.com/momhq/mom/cli/internal/pathutil"
 	"github.com/momhq/mom/cli/internal/scope"
 	"github.com/momhq/mom/cli/internal/ux"
 	"github.com/momhq/mom/cli/internal/watcher"
@@ -31,6 +32,7 @@ func harnessTranscriptDir(name string) string {
 }
 
 func resolveMomContext(cwd string) (projectDir string, momDir string, err error) {
+	cwd = pathutil.CanonicalDir(cwd)
 	if sc, ok := scope.NearestWritable(cwd); ok {
 		return filepath.Dir(sc.Path), sc.Path, nil
 	}
@@ -48,6 +50,7 @@ func resolveMomContext(cwd string) (projectDir string, momDir string, err error)
 // ensures the single global daemon is running. Also cleans up legacy per-project agents.
 // Skipped when MOM_NO_DAEMON=1 or when running inside a test binary.
 func ensureGlobalDaemon(projectRoot, momDir string, runtimes []string) error {
+	projectRoot = pathutil.CanonicalDir(projectRoot)
 	if os.Getenv("MOM_NO_DAEMON") == "1" {
 		return nil
 	}
@@ -89,6 +92,7 @@ func ensureGlobalDaemon(projectRoot, momDir string, runtimes []string) error {
 // unregisterProject removes a project from the global watch registry,
 // cleans up legacy agents, and stops the global daemon if no projects remain.
 func unregisterProject(projectRoot, momDir string) error {
+	projectRoot = pathutil.CanonicalDir(projectRoot)
 	if err := daemon.UnregisterProject(projectRoot); err != nil {
 		return fmt.Errorf("unregistering project: %w", err)
 	}
