@@ -7,13 +7,13 @@ import (
 	"sort"
 	"time"
 
-	"github.com/spf13/cobra"
 	"github.com/momhq/mom/cli/internal/adapters/storage"
 	"github.com/momhq/mom/cli/internal/cartographer"
 	"github.com/momhq/mom/cli/internal/gardener"
 	"github.com/momhq/mom/cli/internal/herald"
 	"github.com/momhq/mom/cli/internal/scope"
 	"github.com/momhq/mom/cli/internal/ux"
+	"github.com/spf13/cobra"
 )
 
 var mapCmd = &cobra.Command{
@@ -28,14 +28,6 @@ scan directory. Use --scope to override the target .mom/ location.`,
 	RunE: runBootstrap,
 }
 
-// bootstrapAliasCmd is a hidden backward-compat alias for the renamed "map" command.
-var bootstrapAliasCmd = &cobra.Command{
-	Use:    "bootstrap",
-	Hidden: true,
-	Short:  "Alias for 'mom map' (deprecated)",
-	RunE:   mapCmd.RunE,
-}
-
 func registerMapFlags(cmd *cobra.Command) {
 	cmd.Flags().String("path", "", "Directory to scan (default: current directory)")
 	cmd.Flags().Bool("refresh", false, "Re-scan all files, ignoring the SHA256 cache")
@@ -48,7 +40,6 @@ func registerMapFlags(cmd *cobra.Command) {
 
 func init() {
 	registerMapFlags(mapCmd)
-	registerMapFlags(bootstrapAliasCmd)
 }
 
 func runBootstrap(cmd *cobra.Command, _ []string) error {
@@ -467,4 +458,3 @@ func countMemoryDocs(memDir string) int {
 	}
 	return n
 }
-

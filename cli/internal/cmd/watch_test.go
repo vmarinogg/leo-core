@@ -14,31 +14,16 @@ import (
 
 func resetWatchFlagsForTest(t *testing.T) {
 	t.Helper()
-	oldTranscriptDir := watchTranscriptDir
-	oldDebounceMs := watchDebounceMs
 	oldStatus := watchStatus
-	oldHarness := watchHarness
 	oldSweep := watchSweep
-	oldInstall := watchInstall
-	oldUninstall := watchUninstall
 	oldGlobal := watchGlobal
 	t.Cleanup(func() {
-		watchTranscriptDir = oldTranscriptDir
-		watchDebounceMs = oldDebounceMs
 		watchStatus = oldStatus
-		watchHarness = oldHarness
 		watchSweep = oldSweep
-		watchInstall = oldInstall
-		watchUninstall = oldUninstall
 		watchGlobal = oldGlobal
 	})
-	watchTranscriptDir = ""
-	watchDebounceMs = 300
 	watchStatus = false
-	watchHarness = "claude"
 	watchSweep = false
-	watchInstall = false
-	watchUninstall = false
 	watchGlobal = false
 }
 

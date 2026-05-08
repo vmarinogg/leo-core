@@ -83,14 +83,9 @@ You work with your agent. MOM validates, indexes, and delivers memory to the har
 | `mom status` | Memory summary — document count, tags, health |
 | `mom doctor` | Diagnostic checks on `.mom/` health |
 | `mom recall <query>` | Search across memory (SQLite FTS5) |
-| `mom tour` | Show top landmark memories at current scope |
-| `mom validate` | Validate documents against schema |
 | `mom export` | Export memory to portable directory |
 | `mom import` | Import memory (merge or replace) |
-| `mom reindex` | Rebuild the SQLite search index from JSON memory files |
 | `mom watch` | Watch harness transcripts and ingest turns automatically |
-| `mom sweep` | Delete old raw JSONL recordings based on retention policy |
-| `mom diagnose` | Compute derived metrics from session logs |
 | `mom serve mcp` | Start MCP stdio server |
 | `mom serve status` | Show MCP server activity |
 | `mom upgrade` | Upgrade `.mom/` to the latest version (preserves memory) |
