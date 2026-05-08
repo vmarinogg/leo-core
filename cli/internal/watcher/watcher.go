@@ -12,6 +12,7 @@ import (
 
 	"github.com/fsnotify/fsnotify"
 	"github.com/momhq/mom/cli/internal/herald"
+	"github.com/momhq/mom/cli/internal/pathutil"
 	"github.com/momhq/mom/cli/internal/ux"
 )
 
@@ -88,6 +89,11 @@ func New(cfg Config) (*Watcher, error) {
 	if cfg.DebounceMs == 0 {
 		cfg.DebounceMs = 300
 	}
+
+	// Normalize the project path before deriving harness transcript slugs. macOS
+	// commonly exposes /tmp as /private/tmp to child runtimes; resolving symlinks
+	// keeps watcher scoping aligned with where Pi/Claude write transcripts.
+	cfg.ProjectDir = pathutil.CanonicalDir(cfg.ProjectDir)
 
 	// Normalize sources: if Sources is empty, build from legacy single fields.
 	sources := cfg.Sources
