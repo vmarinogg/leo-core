@@ -1,8 +1,0 @@
-
-
-[mcp_servers.mom]
-command = "/opt/homebrew/bin/mom"
-args = ["serve", "mcp"]
-
-[features]
-codex_hooks = true
