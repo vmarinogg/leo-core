@@ -180,8 +180,9 @@ func TestDoctorCmd_ShowsScopesSection(t *testing.T) {
 	os.Chdir(dir)
 	defer os.Chdir(origDir)
 
-	// Set HOME to dir so scope.Walk finds the .mom/ there.
-	t.Setenv("HOME", dir)
+	// Set HOME to the parent so the project .mom/ is classified as repo,
+	// not as the special $HOME/.mom user scope.
+	t.Setenv("HOME", filepath.Dir(dir))
 
 	buf := new(bytes.Buffer)
 	rootCmd.SetOut(buf)
