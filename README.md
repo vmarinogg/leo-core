@@ -12,6 +12,7 @@ _Memory Oriented Machine — she remembers, so you don't have to._
   <a href="https://go.dev/"><img src="https://img.shields.io/badge/Go-1.26+-3B1F0A?style=flat-square" alt="Go 1.26+"></a>
   <a href="https://github.com/momhq/homebrew-tap"><img src="https://img.shields.io/badge/Homebrew-momhq/tap-4A6B3A?style=flat-square" alt="Homebrew tap"></a>
   <a href="https://github.com/momhq/mom/blob/main/LICENSE"><img src="https://img.shields.io/badge/license-Apache%202.0-4A6B3A?style=flat-square" alt="Apache 2.0 license"></a>
+  <a href="https://skills.sh/momhq/mom"><img src="https://skills.sh/b/momhq/mom" alt="skills.sh installs"></a>
 </p>
 
 [Install](#install) • [Quick start](#quick-start) • [How it works](#how-it-works) • [Typical workflow](#typical-workflow) • [Harness support](#harness-support)
