@@ -1,130 +1,232 @@
-<p align="center">
-  <img src="assets/logo.png" width="180" alt="MOM">
-</p>
+<div align="center">
 
-<h2 align="center">MOM<br><sub><em>She remembers, so you don't have to_</em></sub></h2>
+<img src="assets/logo.svg" alt="MOM" width="120" />
 
-<p align="center">
+# _mom_
+
+_Memory Oriented Machine — she remembers, so you don't have to._
+
+<p>
   <a href="https://github.com/momhq/mom/releases"><img src="https://img.shields.io/github/v/release/momhq/mom?style=flat-square&color=FFCC2C" alt="Release"></a>
-  <a href="LICENSE"><img src="https://img.shields.io/badge/license-Apache%202.0-4A6B3A?style=flat-square" alt="License"></a>
-  <a href="https://github.com/momhq/mom"><img src="https://img.shields.io/badge/go-1.26+-3B1F0A?style=flat-square" alt="Go 1.26+"></a>
-  <a href="https://goreportcard.com/report/github.com/momhq/mom/cli"><img src="https://goreportcard.com/badge/github.com/momhq/mom/cli?style=flat-square" alt="Go Report Card"></a>
+  <a href="https://github.com/momhq/mom/actions"><img src="https://img.shields.io/github/actions/workflow/status/momhq/mom/ci.yml?style=flat-square&label=CI" alt="CI"></a>
+  <a href="https://go.dev/"><img src="https://img.shields.io/badge/Go-1.26+-3B1F0A?style=flat-square" alt="Go 1.26+"></a>
+  <a href="https://github.com/momhq/homebrew-tap"><img src="https://img.shields.io/badge/Homebrew-momhq/tap-4A6B3A?style=flat-square" alt="Homebrew tap"></a>
+  <a href="https://github.com/momhq/mom/blob/main/LICENSE"><img src="https://img.shields.io/badge/license-Apache%202.0-4A6B3A?style=flat-square" alt="Apache 2.0 license"></a>
 </p>
 
+[Install](#install) • [Quick start](#quick-start) • [How it works](#how-it-works) • [Typical workflow](#typical-workflow) • [Harness support](#harness-support)
 
-Your AI assistant forgets everything between sessions. You re-explain decisions, conventions, architecture — every time. MOM fixes that.
+</div>
 
-**MOM** (Memory Oriented Machine) is an open-source CLI that gives AI agents persistent, structured memory. Decisions, constraints, patterns, and learnings — stored in your project, loaded automatically, evolving with every session. Harness-agnostic. On-prem. Schema-validated.
+_Mom_ gives AI coding agents persistent memory across sessions, projects, and tools.
 
-Self-hosting since v0.2 — MOM builds itself with its own memory.
+Instead of re-explaining architecture, decisions, conventions, and constraints every time you start a new chat, _mom_ stores them in a local SQLite vault and makes them available inside the agents you already use.
 
-## Quick Start
+> [!IMPORTANT]
+> `v0.30.0-alpha` is the current public alpha. Pi and Claude Code flows have been validated. Windsurf still needs validation. Codex integration is currently broken and will be addressed in the next release.
+
+## Why _mom_?
+
+AI agents are useful, but they forget.
+
+_Mom_ is the memory layer beside them:
+
+- **Persistent** — memory survives `/clear`, compaction, restarts, and tool switches.
+- **Local-first** — the central vault lives at `$HOME/.mom/mom.db`.
+- **Harness-agnostic** — Pi, Claude Code, Windsurf, and Codex are integration targets, not storage silos.
+- **Agent-integrated** — memory is available through _mom_ skills and native harness integrations.
+- **MCP-backed** — MCP remains available for startup, discovery, and fallback access.
+- **Continuously recorded** — supported harness transcripts are watched and distilled into draft memories.
+
+## Install
+
+### Homebrew
 
 ```bash
-# Install via Homebrew
-brew tap momhq/tap
-brew install mom
+brew install momhq/tap/mom
+```
 
-# Update
-brew update && brew upgrade mom
+To upgrade:
 
-# Or build from source
+```bash
+brew update && brew upgrade mom && mom version
+```
+
+### From source
+
+```bash
 git clone https://github.com/momhq/mom.git
-cd mom/cli && make install
+cd mom/cli
+make install
+```
 
-# Initialize in your project
-cd your-project
+## Quick start
+
+Initialize _mom_ once:
+
+```bash
 mom init
-
-# Done. Your agent now has persistent memory.
 ```
 
-## How It Works
+_Mom_ will create the global vault, configure detected harness integrations, install _mom_ skills where supported, and start the global watch daemon.
 
-MOM creates a `.mom/` directory in your project — a structured memory layer your AI agent loads at every session.
+Then open your agent and work normally. _Mom_ runs in the background, watches supported transcript sources, and keeps useful context available through skills:
 
-```
-your-project/
-├── .mom/                           # MOM's home
-│   ├── config.yaml                 # preferences (language, communication mode)
-│   ├── schema.json                 # document schema (v2)
-│   ├── identity.json               # project identity
-│   ├── memory/                     # memory documents (structured JSON)
-│   ├── constraints/                # always-active guardrails
-│   ├── skills/                     # composable procedures
-│   ├── raw/                        # continuous session capture (JSONL)
-│   ├── logs/                       # session logs
-│   └── cache/
-│
-├── .mcp.json                       # MCP server config (auto-injected)
-├── .claude/CLAUDE.md               # auto-generated boot file for Claude Code
-└── your code...
+```text
+/mom-status
+/mom-recall the decision about the auth boundary
+/mom-wrap-up
 ```
 
-You work with your agent. MOM validates, indexes, and delivers memory to the harness. Switch harnesses without losing anything.
+## How it works
 
-## What Makes It Different
+_Mom_ keeps one central memory vault and adapts it to each harness.
 
-**Memory compounds.** Month 6 is structurally richer than month 1. Your agent knows the web of decisions behind your codebase. No one starting from zero can match months of accumulated context.
+```text
+AI harnesses
+  ├─ Pi extension
+  ├─ Claude Code hooks + skills
+  ├─ Windsurf integration
+  └─ MCP fallback
+        │
+        ▼
+mom CLI + watcher daemon
+        │
+        ▼
+$HOME/.mom/mom.db
+  ├─ memories
+  ├─ tags
+  ├─ entities
+  ├─ import mappings
+  └─ operational events
+```
 
-**Harness-agnostic.** Memory lives in `.mom/`, not in `.claude/` or `.cursor/`. MOM generates the right context for each harness through adapters. Your memory is yours, not locked to a vendor.
+## Typical workflow
 
-**Schema-validated.** Every memory document is tagged, scoped, and promotion-managed. Not a loose Markdown file — a structured, queryable memory with free-form content.
+After installing _mom_, open your agent and work normally.
 
-**MCP-first.** MOM delivers context via Model Context Protocol. Agents search, read, and write memory through MCP tools — no file parsing, no guesswork. `.mcp.json` is auto-injected on `mom init`.
+_Mom_ watches supported transcript sources in the background. Useful turns become draft memories. After a long session, or whenever you want to preserve recent context, ask your agent to run:
 
-**On-prem by default.** Your memory stays in your repo. No cloud dependency. No data leaving your machine.
+```text
+/mom-wrap-up
+```
 
-## Commands
+The skill reviews recent drafts with you and helps curate the memories worth keeping.
 
-| Command | What it does |
-|---------|-------------|
-| `mom init` | Interactive onboarding — harness, language, mode |
-| `mom status` | Memory summary — document count, tags, health |
-| `mom doctor` | Diagnostic checks on `.mom/` health |
-| `mom recall <query>` | Search across memory (SQLite FTS5) |
-| `mom export` | Export memory to portable directory |
-| `mom import` | Import memory (merge or replace) |
-| `mom watch` | Watch harness transcripts and ingest turns automatically |
-| `mom serve mcp` | Start MCP stdio server |
-| `mom serve status` | Show MCP server activity |
-| `mom upgrade` | Upgrade `.mom/` to the latest version (preserves memory) |
-| `mom uninstall` | Remove all MOM files from this project |
-| `mom version` | Print version |
+Later, when you need something _mom_ has seen before, ask your agent:
 
-## Supported Harnesses
+```text
+/mom-recall deployment rollback procedure
+```
 
-| Harness | MCP | Watcher | Boot file | Status |
-|---------|-----|---------|-----------|--------|
-| Claude Code | Yes | Yes | CLAUDE.md | Full support |
-| OpenAI Codex | Yes | — | AGENTS.md | Boot file + MCP |
-| Windsurf | Yes | Yes | .windsurf/rules/ | Full support |
-| Pi | Yes | Yes | AGENTS.md | Full support (extension-based, no native hooks) |
+_Mom_ searches both draft and curated memory so the agent can recover decisions, conventions, and context without you re-explaining them.
 
-## Current Status
+To check that _mom_ is connected:
 
-MOM is in active development (v0.14). It works, and it self-hosts — the tool builds itself with its own memory.
+```text
+/mom-status
+```
 
-What's in v0.14:
-- **Progressive recall engine** — searches repo → org → user, curated-first, AND→OR query relaxation when results are sparse
-- **Cleaner MCP surface** — `mom_recall` is the single retrieval tool, wired through the recall engine with optional scope pinning
-- **Harness tier system** — Native / Fluent / Functional classification per harness, surfaced in `mom doctor`
-- **Pi support (Native tier)** — TypeScript extension, `.mcp.json` registration, full watcher integration
-- **Constraints simplified** — audited from 6 to 2: `anti-hallucination` and `escalation-triggers`
-- **`session-wrap-up` redesigned** — surfaces drafts from disk via `mom_recall`, not from context window
-- **`mom init` as config manager** — reconciles harnesses on reinit (enable new, disable removed)
-- **`harness` rename** — `runtime` → `harness` throughout config, CLI flags, and internals
-- SQLite FTS5 search with content-first column weights
-- Global watch daemon (launchd / systemd) for all registered projects
-- Multi-repo support with scope-based memory (repo → org → user)
-- Homebrew installation with automated tap updates
+### Explore with Lens
 
-## Contributing
+For a visual view of sessions, memories, and privacy-projected operational events, run:
 
-See [CONTRIBUTING.md](CONTRIBUTING.md) for setup, conventions, and how to submit PRs.
+```bash
+mom lens
+```
 
-If you work with AI agents and feel the amnesia pain — issues, feedback, and honest criticism are welcome.
+Lens is local and reads from the central _mom_ vault.
 
-## License
+### Export and import memory
 
-[Apache 2.0](LICENSE)
+For backup, migration, or sharing a local vault snapshot:
+
+```bash
+mom export
+mom import <path>
+```
+
+`mom export` writes central SQLite table dumps to `$HOME/.mom/exports/<timestamp>/`. `mom import` safely merges new exports or legacy JSON memory directories and skips existing rows.
+
+## Harness support
+
+| Harness | Current status | Notes |
+| --- | --- | --- |
+| Pi | Validated | Native extension support. Gold standard for _mom_. |
+| Claude Code | Validated | Fluent speaker. Provides all the necessary tools _mom_ needs. |
+| Windsurf | Needs validation | It works. Windsurf has some transcript, hook, and MCP limitations. |
+| Codex | Broken in this alpha | Planned for the next release. |
+
+> [!NOTE]
+> _Mom_ uses **harness** to mean the agent framework around the model: tools, hooks, transcripts, prompt files, and MCP configuration.
+
+## Upgrade from older _mom_ installs
+
+If you already have an older _mom_ install:
+
+```bash
+mom upgrade --dry-run
+mom upgrade
+```
+
+Upgrade can import legacy memories, import legacy operational logs, remove known generated legacy files, preserve custom files, clean obsolete hook commands, and install or update skills as a soft-fail step.
+
+## Data and privacy
+
+_Mom_ is local-first.
+
+- The default vault is `$HOME/.mom/mom.db`.
+- `MOM_VAULT=/path/to/mom.db` overrides the vault for tests or isolated runs.
+- Lens and operational logs use privacy-projected metadata.
+- Raw tool arguments, raw user text, shell command arguments, query strings, paths, and flags are not stored as operational log detail.
+- Explicit record flows reject invented session IDs; runtime session IDs must come from the harness.
+
+## Troubleshooting
+
+### Check installation
+
+```bash
+mom version
+mom status
+mom doctor
+```
+
+### Watcher is not seeing new sessions
+
+```bash
+mom watch --status
+mom watch --sweep
+```
+
+_Mom_ canonicalizes project paths, including macOS `/tmp` and `/private/tmp`, so watcher state should not split across symlinked aliases.
+
+### Skills are missing
+
+Run init or upgrade again:
+
+```bash
+mom init
+# or
+mom upgrade
+```
+
+Skills install is a soft-fail step, so _mom_ can be usable even if the external skills installer is temporarily unavailable.
+
+## Project layout
+
+```text
+.
+├── assets/                 # logo and brand assets
+├── cli/                    # Go CLI, MCP server, watcher, Lens server
+├── skills/                 # _mom_ slash skills
+├── adr/                    # architecture decisions
+├── prd/                    # product requirements
+├── Formula/mom.rb          # Homebrew formula
+└── .github/workflows/      # CI and release automation
+```
+
+## Resources
+
+- [Latest release](https://github.com/momhq/mom/releases/latest)
+- [Issues](https://github.com/momhq/mom/issues)
+- [Homebrew tap](https://github.com/momhq/homebrew-tap)
