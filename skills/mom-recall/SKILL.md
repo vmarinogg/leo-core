@@ -18,14 +18,19 @@ Use Finder through the CLI. Do not call MCP.
 
 Behavior:
 - If user asks to show, find, or list memories: print the recall results.
-- If user asks a question: answer from the recall results and include citations.
+- If user asks a question: answer from the recall results.
 - If recall returns no matches: say no matching memories were found.
 
-Citation format:
+Output format when matches exist:
 
 ```text
-[RECALL:
-sources: <memory-id>, <memory-id>, ...]
+Recalled <N> memories:
+
+<direct answer in 2-6 lines>
+
+Sources:
+- memoryId: <id-1>
+- memoryId: <id-2>
 ```
 
 Do not:
