@@ -1,7 +1,6 @@
 package cmd
 
 import (
-	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -217,35 +216,4 @@ func checkDirWritable(dir string) error {
 	os.Remove(tmp)
 
 	return nil
-}
-
-// readRawIndexInt reads a nested integer from the raw index JSON.
-func readRawIndexInt(leoDir string, keys ...string) int {
-	indexPath := filepath.Join(leoDir, "index.json")
-	data, err := os.ReadFile(indexPath)
-	if err != nil {
-		return 0
-	}
-
-	var raw map[string]any
-	if err := json.Unmarshal(data, &raw); err != nil {
-		return 0
-	}
-
-	var node any = raw
-	for _, key := range keys {
-		m, ok := node.(map[string]any)
-		if !ok {
-			return 0
-		}
-		node = m[key]
-	}
-
-	switch v := node.(type) {
-	case float64:
-		return int(v)
-	case int:
-		return v
-	}
-	return 0
 }

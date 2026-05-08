@@ -260,26 +260,6 @@ func stringArg(args map[string]any, key string) string {
 	return ""
 }
 
-func stringSliceArg(args map[string]any, key string) []string {
-	v, ok := args[key]
-	if !ok {
-		return nil
-	}
-	switch t := v.(type) {
-	case []string:
-		return t
-	case []any:
-		out := make([]string, 0, len(t))
-		for _, item := range t {
-			if s, ok := item.(string); ok {
-				out = append(out, s)
-			}
-		}
-		return out
-	}
-	return nil
-}
-
 func intArg(args map[string]any, key string, defaultVal int) int {
 	v, ok := args[key]
 	if !ok {

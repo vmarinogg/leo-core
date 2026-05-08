@@ -148,7 +148,7 @@ func TestImportCmd_LegacyMemoryJSONPathUsesUpgradeImportRoutine(t *testing.T) {
 	if err != nil {
 		t.Fatalf("SearchMemories: %v", err)
 	}
-	if len(rows) != 1 || !strings.Contains(rows[0].Memory.Content, "legacy import body") {
+	if len(rows) != 1 || !strings.Contains(rows[0].Content, "legacy import body") {
 		t.Fatalf("legacy import rows = %+v", rows)
 	}
 }

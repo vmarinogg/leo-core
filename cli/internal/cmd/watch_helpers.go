@@ -12,7 +12,6 @@ import (
 	"github.com/momhq/mom/cli/internal/daemon"
 	"github.com/momhq/mom/cli/internal/pathutil"
 	"github.com/momhq/mom/cli/internal/scope"
-	"github.com/momhq/mom/cli/internal/ux"
 	"github.com/momhq/mom/cli/internal/watcher"
 )
 
@@ -109,49 +108,6 @@ func unregisterProject(projectRoot, momDir string) error {
 	return nil
 }
 
-// runWatchInstall handles `mom watch --install`.
-func runWatchInstall(projectRoot, momDir string, p *ux.Printer) error {
-	cfg, err := config.Load(momDir)
-	if err != nil {
-		return fmt.Errorf("loading config: %w", err)
-	}
-
-	sp := ux.NewSpinner(os.Stderr)
-	sp.Start("Installing global watch daemon")
-	installErr := ensureGlobalDaemon(projectRoot, momDir, cfg.EnabledHarnesses())
-	if installErr != nil {
-		sp.StopFail()
-		return fmt.Errorf("installing daemon: %w", installErr)
-	}
-	sp.Stop()
-
-	runtimes := watcherRuntimes(cfg)
-	p.Check("global watch daemon installed")
-	p.Chevron(fmt.Sprintf("runtimes: %s", strings.Join(runtimes, ", ")))
-
-	h, err := daemon.StatusGlobal()
-	if err == nil && len(h.Services) > 0 {
-		p.Chevron(fmt.Sprintf("daemon: %s", h.Services[0].DaemonLabel))
-		p.Chevron(fmt.Sprintf("timer:  %s", h.Services[0].TimerLabel))
-	}
-	return nil
-}
-
-// runWatchUninstall handles `mom watch --uninstall`.
-func runWatchUninstall(projectRoot, momDir string, p *ux.Printer) error {
-	sp := ux.NewSpinner(os.Stderr)
-	sp.Start("Removing watch daemon")
-	uninstallErr := unregisterProject(projectRoot, momDir)
-	if uninstallErr != nil {
-		sp.StopFail()
-		return fmt.Errorf("uninstalling daemon: %w", uninstallErr)
-	}
-	sp.Stop()
-
-	p.Check("project unregistered from global watch daemon")
-	return nil
-}
-
 // sweepTranscripts runs a one-shot catch-up sweep for all watcher-capable
 // runtimes. Best-effort: errors are logged to stderr, never returned.
 func sweepTranscripts(projectDir, momDir string) {
@@ -219,18 +175,4 @@ func buildWatcherSources(cfg *config.Config, projectDir string) []watcher.Source
 		})
 	}
 	return sources
-}
-
-// watcherRuntimes returns the names of watcher-capable runtimes from config.
-func watcherRuntimes(cfg *config.Config) []string {
-	var rts []string
-	for _, rt := range cfg.EnabledHarnesses() {
-		if rt == "claude" || rt == "windsurf" {
-			rts = append(rts, rt)
-		}
-	}
-	if len(rts) == 0 {
-		return []string{"claude"}
-	}
-	return rts
 }

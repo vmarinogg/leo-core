@@ -63,13 +63,6 @@ func writeJSON(t *testing.T, path string, v any) {
 	}
 }
 
-func writeMemoryDoc(t *testing.T, leoDir string, doc map[string]any) {
-	t.Helper()
-	id, _ := doc["id"].(string)
-	path := filepath.Join(leoDir, "memory", id+".json")
-	writeJSON(t, path, doc)
-}
-
 func insertCentralMemory(t *testing.T, summary, text string, tags []string) string {
 	t.Helper()
 	lib, closeFn, err := centralvault.OpenLibrarian()

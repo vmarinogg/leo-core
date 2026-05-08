@@ -427,67 +427,6 @@ func installSkillsDuringUpgrade(harnesses []string, dryRun bool, addAction func(
 	}
 }
 
-// propagateUpgrade walks child directories and upgrades each legacy .mom/ found.
-// Org folders (containing repos) are upgraded and recursed into; repos (with
-// .git/) are upgraded.
-func propagateUpgrade(cmd *cobra.Command, rootDir string, dryRun bool) {
-	entries, err := os.ReadDir(rootDir)
-	if err != nil {
-		return
-	}
-
-	for _, e := range entries {
-		if !e.IsDir() || strings.HasPrefix(e.Name(), ".") {
-			continue
-		}
-		childPath := filepath.Join(rootDir, e.Name())
-		childMom := filepath.Join(childPath, ".mom")
-
-		// Only upgrade dirs that have .mom/.
-		if _, statErr := os.Stat(childMom); statErr != nil {
-			continue
-		}
-		if !isMomProject(childMom) {
-			continue
-		}
-
-		if err := upgradeSingleDir(cmd, childPath, dryRun); err != nil {
-			home, _ := os.UserHomeDir()
-			display := childPath
-			if strings.HasPrefix(display, home) {
-				display = "~" + display[len(home):]
-			}
-			up := ux.NewPrinter(cmd.OutOrStdout())
-			up.Warnf("failed to upgrade %s: %v", display, err)
-			continue
-		}
-
-		// Recurse into org folders (dirs that contain repos).
-		if containsGitRepos(childPath) {
-			propagateUpgrade(cmd, childPath, dryRun)
-		}
-	}
-}
-
-// containsGitRepos returns true if dir has at least one immediate child
-// directory that itself contains a .git/ subdirectory.
-func containsGitRepos(dir string) bool {
-	entries, err := os.ReadDir(dir)
-	if err != nil {
-		return false
-	}
-	for _, e := range entries {
-		if !e.IsDir() {
-			continue
-		}
-		gitPath := filepath.Join(dir, e.Name(), ".git")
-		if info, err := os.Stat(gitPath); err == nil && info.IsDir() {
-			return true
-		}
-	}
-	return false
-}
-
 // fileChanged returns true if the file at path doesn't exist or differs from data.
 func fileChanged(path string, data []byte) bool {
 	existing, err := os.ReadFile(path)

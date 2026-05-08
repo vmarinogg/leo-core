@@ -47,42 +47,6 @@ type claudeUsage struct {
 	CacheReadInputTokens     int `json:"cache_read_input_tokens"`
 }
 
-// extractClaudeContent converts message.content (string or []contentItem) to plain text.
-func extractClaudeContent(content any) string {
-	if content == nil {
-		return ""
-	}
-
-	// Fast path: plain string content.
-	if s, ok := content.(string); ok {
-		return strings.TrimSpace(s)
-	}
-
-	// Structured content: []{"type":"text","text":"..."}
-	// JSON unmarshal gives []interface{} for arrays.
-	items, ok := content.([]any)
-	if !ok {
-		return ""
-	}
-
-	var parts []string
-	for _, item := range items {
-		m, ok := item.(map[string]any)
-		if !ok {
-			continue
-		}
-		t, _ := m["type"].(string)
-		if t != "text" {
-			continue // skip tool_use, tool_result, image, etc.
-		}
-		if text, _ := m["text"].(string); text != "" {
-			parts = append(parts, text)
-		}
-	}
-
-	return strings.Join(parts, "\n")
-}
-
 // ExtractTurn implements Adapter. Returns the rich per-turn
 // shape Drafter and Logbook consume from `turn.observed` events. The
 // raw text and tool inputs ride on the bus only — Drafter applies
