@@ -219,9 +219,15 @@ export default async function (pi: ExtensionAPI) {
 			label: name,
 			description: tool.description ?? `MOM tool: ${tool.name}`,
 			parameters: parameters as any,
-			async execute(_toolCallId, params) {
+			async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
 				try {
-					const result = await client.callTool(tool.name, params ?? {});
+					const args = params ?? {};
+					if (tool.name === "mom_record") {
+						// Pi exposes the real runtime session ID to extensions. Always stamp it
+						// here so the model cannot accidentally invent a fake session_id.
+						args.session_id = ctx.sessionManager.getSessionId();
+					}
+					const result = await client.callTool(tool.name, args);
 					const text = extractText(result);
 					return {
 						content: [{ type: "text", text: text || "(empty result)" }],

@@ -53,7 +53,7 @@ func TestMomRecord_PublishesEventWithNormalizedTags(t *testing.T) {
 	srv, rs := newSrvWithSubscriber(t)
 
 	res, err := srv.toolMomRecord(map[string]any{
-		"session_id": "s-1",
+		"session_id": "11111111-1111-4111-8111-111111111111",
 		"summary":    "deploy notes",
 		"content":    map[string]any{"text": "deploy postgres canary"},
 		"tags":       []any{"v0.30", "MCP"},
@@ -73,8 +73,8 @@ func TestMomRecord_PublishesEventWithNormalizedTags(t *testing.T) {
 	if got.Type != MemoryRecordEventType {
 		t.Errorf("event type = %q, want %q", got.Type, MemoryRecordEventType)
 	}
-	if got.SessionID != "s-1" {
-		t.Errorf("session_id = %q, want s-1", got.SessionID)
+	if got.SessionID != "11111111-1111-4111-8111-111111111111" {
+		t.Errorf("session_id = %q, want 11111111-1111-4111-8111-111111111111", got.SessionID)
 	}
 	if _, dup := got.Payload["session_id"]; dup {
 		t.Error("session_id was duplicated into payload bag; should live only on the envelope")
@@ -105,7 +105,7 @@ func TestMomRecord_PublishesEventWithNormalizedTags(t *testing.T) {
 func TestMomRecord_DefaultsActorToMCP(t *testing.T) {
 	srv, rs := newSrvWithSubscriber(t)
 	_, err := srv.toolMomRecord(map[string]any{
-		"session_id": "s",
+		"session_id": "22222222-2222-4222-8222-222222222222",
 		"content":    map[string]any{"text": "hi"},
 	})
 	if err != nil {
@@ -119,14 +119,49 @@ func TestMomRecord_DefaultsActorToMCP(t *testing.T) {
 
 // ── validation ────────────────────────────────────────────────────────────────
 
-func TestMomRecord_RejectsEmptySessionID(t *testing.T) {
+func TestMomRecord_UsesHarnessEnvSessionWhenOmitted(t *testing.T) {
+	srv, rs := newSrvWithSubscriber(t)
+	t.Setenv("CLAUDE_CODE_SESSION_ID", "s-env")
+	_, err := srv.toolMomRecord(map[string]any{
+		"content": map[string]any{"text": "x"},
+	})
+	if err != nil {
+		t.Fatalf("toolMomRecord: %v", err)
+	}
+	got, ok := rs.get()
+	if !ok {
+		t.Fatal("no event published")
+	}
+	if got.SessionID != "s-env" {
+		t.Fatalf("session_id = %q, want s-env", got.SessionID)
+	}
+}
+
+func TestMomRecord_RejectsInventedSessionID(t *testing.T) {
+	srv, rs := newSrvWithSubscriber(t)
+	_, err := srv.toolMomRecord(map[string]any{
+		"session_id": "fresh-install-e2e",
+		"content":    map[string]any{"text": "x"},
+	})
+	if err == nil {
+		t.Fatal("expected error for invented session_id, got nil")
+	}
+	if !strings.Contains(err.Error(), "do not invent") {
+		t.Errorf("error %q should warn against invented session IDs", err)
+	}
+	if rs.count.Load() != 0 {
+		t.Errorf("event count = %d, want 0", rs.count.Load())
+	}
+}
+
+func TestMomRecord_RejectsMissingSessionID(t *testing.T) {
 	srv, rs := newSrvWithSubscriber(t)
 	_, err := srv.toolMomRecord(map[string]any{
 		"session_id": "",
 		"content":    map[string]any{"text": "x"},
 	})
 	if err == nil {
-		t.Fatal("expected error for empty session_id, got nil")
+		t.Fatal("expected error for missing session_id, got nil")
 	}
 	if !strings.Contains(err.Error(), "session_id") {
 		t.Errorf("error %q should mention session_id", err)
@@ -140,7 +175,7 @@ func TestMomRecord_RejectsEmptySessionID(t *testing.T) {
 func TestMomRecord_RejectsMissingContent(t *testing.T) {
 	srv, rs := newSrvWithSubscriber(t)
 	_, err := srv.toolMomRecord(map[string]any{
-		"session_id": "s",
+		"session_id": "22222222-2222-4222-8222-222222222222",
 	})
 	if err == nil {
 		t.Fatal("expected error for missing content")
@@ -153,7 +188,7 @@ func TestMomRecord_RejectsMissingContent(t *testing.T) {
 func TestMomRecord_RejectsEmptyContent(t *testing.T) {
 	srv, rs := newSrvWithSubscriber(t)
 	_, err := srv.toolMomRecord(map[string]any{
-		"session_id": "s",
+		"session_id": "22222222-2222-4222-8222-222222222222",
 		"content":    map[string]any{},
 	})
 	if err == nil {
@@ -172,7 +207,7 @@ func TestMomRecord_RejectsEmptyContent(t *testing.T) {
 func TestMomRecord_RejectsNonObjectContent(t *testing.T) {
 	srv, rs := newSrvWithSubscriber(t)
 	_, err := srv.toolMomRecord(map[string]any{
-		"session_id": "s",
+		"session_id": "22222222-2222-4222-8222-222222222222",
 		"content":    "this is a string, not an object",
 	})
 	if err == nil {
@@ -200,7 +235,7 @@ func TestMomRecord_RejectsTagsThatNormaliseToEmpty(t *testing.T) {
 		t.Run(c.name, func(t *testing.T) {
 			srv, rs := newSrvWithSubscriber(t)
 			_, err := srv.toolMomRecord(map[string]any{
-				"session_id": "s",
+				"session_id": "22222222-2222-4222-8222-222222222222",
 				"content":    map[string]any{"text": "x"},
 				"tags":       c.tags,
 			})
@@ -221,7 +256,7 @@ func TestMomRecord_RejectsTagsThatNormaliseToEmpty(t *testing.T) {
 func TestMomRecord_RejectsMixedTypeTags(t *testing.T) {
 	srv, _ := newSrvWithSubscriber(t)
 	_, err := srv.toolMomRecord(map[string]any{
-		"session_id": "s",
+		"session_id": "22222222-2222-4222-8222-222222222222",
 		"content":    map[string]any{"text": "x"},
 		"tags":       []any{"deploy", 42},
 	})
@@ -275,7 +310,7 @@ func TestServer_SetBusReplacesTheBus(t *testing.T) {
 
 	// Publish via the handler — should hit ONLY the new bus.
 	if _, err := srv.toolMomRecord(map[string]any{
-		"session_id": "s",
+		"session_id": "22222222-2222-4222-8222-222222222222",
 		"content":    map[string]any{"text": "x"},
 	}); err != nil {
 		t.Fatalf("toolMomRecord: %v", err)

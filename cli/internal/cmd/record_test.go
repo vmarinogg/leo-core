@@ -65,7 +65,7 @@ func TestRunRecord_PersistsToCentralVault(t *testing.T) {
 	resetRecordFlags()
 	lib := openCentralVaultForTest(t)
 
-	recordSession = "s-cli"
+	recordSession = "11111111-1111-4111-8111-111111111111"
 	recordSummary = "decision summary"
 	recordTags = []string{"deploy", "decision"}
 	recordActor = "vmarino"
@@ -78,7 +78,7 @@ func TestRunRecord_PersistsToCentralVault(t *testing.T) {
 		t.Errorf("expected 'recorded:' in stdout, got %q", out)
 	}
 
-	rows, _ := lib.SearchMemories(librarian.SearchFilter{SessionID: "s-cli", Limit: 10})
+	rows, _ := lib.SearchMemories(librarian.SearchFilter{SessionID: "11111111-1111-4111-8111-111111111111", Limit: 10})
 	if len(rows) != 1 {
 		t.Fatalf("got %d memories, want 1", len(rows))
 	}
@@ -119,7 +119,7 @@ func TestRunRecord_JSONInput_SilentBail(t *testing.T) {
 	resetRecordFlags()
 	lib := openCentralVaultForTest(t)
 
-	recordSession = "s-cli"
+	recordSession = "11111111-1111-4111-8111-111111111111"
 	out, err := runRecordWithStdin(t, `{"session_id":"abc","transcript_path":"/tmp/x"}`)
 	if err != nil {
 		t.Fatalf("runRecord should not error on JSON bail-out: %v", err)
@@ -127,25 +127,40 @@ func TestRunRecord_JSONInput_SilentBail(t *testing.T) {
 	if strings.Contains(out, "recorded:") {
 		t.Errorf("unexpected write on JSON input: %q", out)
 	}
-	rows, _ := lib.SearchMemories(librarian.SearchFilter{SessionID: "s-cli", Limit: 10})
+	rows, _ := lib.SearchMemories(librarian.SearchFilter{SessionID: "11111111-1111-4111-8111-111111111111", Limit: 10})
 	if len(rows) != 0 {
 		t.Errorf("got %d memories, want 0 (JSON bail-out must not persist)", len(rows))
 	}
 }
 
-// TestRunRecord_MissingSession_SilentBail locks the missing-flag
-// hook-friendly path. Old hook configs invoke `mom record` without
-// flags; this must exit 0 without writing.
-func TestRunRecord_MissingSession_SilentBail(t *testing.T) {
+func TestRunRecord_UsesHarnessEnvSession(t *testing.T) {
+	resetRecordFlags()
+	lib := openCentralVaultForTest(t)
+	t.Setenv("CLAUDE_CODE_SESSION_ID", "s-env")
+
+	out, err := runRecordWithStdin(t, "some text with env session")
+	if err != nil {
+		t.Fatalf("runRecord: %v\noutput: %s", err, out)
+	}
+	if !strings.Contains(out, "session=s-env") {
+		t.Fatalf("output = %q, want session=s-env", out)
+	}
+	rows, _ := lib.SearchMemories(librarian.SearchFilter{SessionID: "s-env", Limit: 10})
+	if len(rows) != 1 {
+		t.Fatalf("got %d memories, want 1", len(rows))
+	}
+}
+
+func TestRunRecord_MissingSessionRejectsRealText(t *testing.T) {
 	resetRecordFlags()
 	lib := openCentralVaultForTest(t)
 
 	out, err := runRecordWithStdin(t, "some text without a session flag")
-	if err != nil {
-		t.Fatalf("runRecord should not error on missing session: %v", err)
+	if err == nil {
+		t.Fatalf("expected missing session error; output: %q", out)
 	}
-	if strings.Contains(out, "recorded:") {
-		t.Errorf("unexpected write on missing session: %q", out)
+	if !strings.Contains(err.Error(), "session_id") {
+		t.Fatalf("error = %v, want session_id", err)
 	}
 	rows, _ := lib.SearchMemories(librarian.SearchFilter{Limit: 10})
 	if len(rows) != 0 {
@@ -159,7 +174,7 @@ func TestRunRecord_EmptyStdin_SilentBail(t *testing.T) {
 	resetRecordFlags()
 	lib := openCentralVaultForTest(t)
 
-	recordSession = "s-cli"
+	recordSession = "11111111-1111-4111-8111-111111111111"
 	out, err := runRecordWithStdin(t, "")
 	if err != nil {
 		t.Fatalf("runRecord should not error on empty stdin: %v", err)
@@ -167,7 +182,7 @@ func TestRunRecord_EmptyStdin_SilentBail(t *testing.T) {
 	if strings.Contains(out, "recorded:") {
 		t.Errorf("unexpected write on empty stdin: %q", out)
 	}
-	rows, _ := lib.SearchMemories(librarian.SearchFilter{SessionID: "s-cli", Limit: 10})
+	rows, _ := lib.SearchMemories(librarian.SearchFilter{SessionID: "11111111-1111-4111-8111-111111111111", Limit: 10})
 	if len(rows) != 0 {
 		t.Errorf("got %d memories, want 0 (empty stdin must not persist)", len(rows))
 	}
@@ -182,7 +197,7 @@ func TestRunRecord_RejectsEmptyNormalisedTag(t *testing.T) {
 	resetRecordFlags()
 	lib := openCentralVaultForTest(t)
 
-	recordSession = "s-cli"
+	recordSession = "11111111-1111-4111-8111-111111111111"
 	recordTags = []string{"valid", "!!!"} // second normalises to empty
 	out, err := runRecordWithStdin(t, "some real memory text")
 	if err == nil {
@@ -191,7 +206,7 @@ func TestRunRecord_RejectsEmptyNormalisedTag(t *testing.T) {
 	if !strings.Contains(err.Error(), "normalises to empty") {
 		t.Errorf("error = %v, want 'normalises to empty'", err)
 	}
-	rows, _ := lib.SearchMemories(librarian.SearchFilter{SessionID: "s-cli", Limit: 10})
+	rows, _ := lib.SearchMemories(librarian.SearchFilter{SessionID: "11111111-1111-4111-8111-111111111111", Limit: 10})
 	if len(rows) != 0 {
 		t.Errorf("got %d memories, want 0 (rejection must not persist)", len(rows))
 	}

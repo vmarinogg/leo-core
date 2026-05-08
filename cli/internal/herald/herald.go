@@ -66,8 +66,7 @@ const (
 // envelope.
 //
 // Payload carries per-event-type fields. The bus is type-agnostic; the
-// payload contract is defined by each producer/consumer pair (see
-// e.g. mcp.MemoryRecordPayload).
+// payload contract is defined by each producer/consumer pair.
 type Event struct {
 	Type      EventType
 	SessionID string
