@@ -3,8 +3,8 @@
   "version": "1.0.0",
   "description": "User-invocable MOM skills for status, recall, and wrap-up.",
   "skills": [
-    "skills/mom-status",
-    "skills/mom-recall",
-    "skills/mom-wrap-up"
+    "mom-status",
+    "mom-recall",
+    "mom-wrap-up"
   ]
 }
