@@ -11,7 +11,6 @@ import (
 	"github.com/momhq/mom/cli/internal/daemon"
 	"github.com/momhq/mom/cli/internal/librarian"
 	"github.com/momhq/mom/cli/internal/memory"
-	"github.com/momhq/mom/cli/internal/scope"
 	"github.com/momhq/mom/cli/internal/ux"
 	"github.com/spf13/cobra"
 )
@@ -91,20 +90,6 @@ func cliWatcherState() string {
 		return "active"
 	}
 	return "inactive"
-}
-
-// printScopesSection prints the active scopes discovered by walk-up from cwd.
-func printScopesSection(p *ux.Printer, cwd string) {
-	scopes := scope.Walk(cwd)
-	if len(scopes) == 0 {
-		return
-	}
-	p.Blank()
-	p.Bold("Active scopes (nearest first)")
-	for _, s := range scopes {
-		p.KeyValue(fmt.Sprintf("  %s", s.Label),
-			fmt.Sprintf("%s  (%d memories)", shortenPath(s.Path), s.MemoryCount()), 14)
-	}
 }
 
 // validateAllDocs reads and validates every .json file in dir.

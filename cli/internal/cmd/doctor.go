@@ -15,7 +15,6 @@ import (
 	"github.com/momhq/mom/cli/internal/adapters/storage"
 	"github.com/momhq/mom/cli/internal/config"
 	"github.com/momhq/mom/cli/internal/memory"
-	"github.com/momhq/mom/cli/internal/scope"
 	"github.com/momhq/mom/cli/internal/ux"
 	"github.com/spf13/cobra"
 )
@@ -194,13 +193,9 @@ func runDoctorBase(cmd *cobra.Command, verbose bool) error {
 		}
 	}
 
-	// Check 9: Active scopes + memory counts.
-	cwd, cwdErr := os.Getwd()
-	if cwdErr == nil {
-		printScopesSection(p, cwd)
-		if verbose {
-			printVerboseMemoryBreakdown(p, cwd)
-		}
+	// Check 9: Memory breakdown.
+	if verbose {
+		printVerboseMemoryBreakdown(p, leoDir)
 	}
 
 	// Check 10: Last session timestamp + recent errors from telemetry.
@@ -249,50 +244,43 @@ func checkSQLiteConsistency(p *ux.Printer, leoDir string, diskDocIDs map[string]
 
 // ─── --verbose additions ──────────────────────────────────────────────────────
 
-// printVerboseMemoryBreakdown reads all memory docs in scope and prints
-// breakdowns by confidence, promotion_state, and classification.
-func printVerboseMemoryBreakdown(p *ux.Printer, cwd string) {
-	scopes := scope.Walk(cwd)
-	if len(scopes) == 0 {
+// printVerboseMemoryBreakdown reads local memory docs and prints breakdowns by
+// confidence, promotion_state, and classification.
+func printVerboseMemoryBreakdown(p *ux.Printer, momDir string) {
+	memDir := filepath.Join(momDir, "memory")
+	entries, err := os.ReadDir(memDir)
+	if err != nil {
 		return
 	}
 
 	p.Blank()
 	p.Bold("Memory breakdown (verbose)")
 
-	for _, s := range scopes {
-		memDir := filepath.Join(s.Path, "memory")
-		entries, err := os.ReadDir(memDir)
+	promotion := map[string]int{}
+	classification := map[string]int{}
+	landmarks := 0
+
+	for _, e := range entries {
+		if e.IsDir() || filepath.Ext(e.Name()) != ".json" {
+			continue
+		}
+		doc, err := memory.LoadDoc(filepath.Join(memDir, e.Name()))
 		if err != nil {
 			continue
 		}
-
-		promotion := map[string]int{}
-		classification := map[string]int{}
-		landmarks := 0
-
-		for _, e := range entries {
-			if e.IsDir() || filepath.Ext(e.Name()) != ".json" {
-				continue
-			}
-			doc, err := memory.LoadDoc(filepath.Join(memDir, e.Name()))
-			if err != nil {
-				continue
-			}
-			promotion[doc.PromotionState]++
-			classification[doc.Classification]++
-			if doc.Landmark {
-				landmarks++
-			}
+		promotion[doc.PromotionState]++
+		classification[doc.Classification]++
+		if doc.Landmark {
+			landmarks++
 		}
-
-		p.KeyValue("  Scope", fmt.Sprintf("%s (%s)", s.Label, shortenPath(s.Path)), 10)
-		p.KeyValue("    Promotion", fmt.Sprintf("draft=%d  curated=%d",
-			promotion["draft"], promotion["curated"]), 16)
-		p.KeyValue("    Classification", fmt.Sprintf("PUBLIC=%d  INTERNAL=%d  CONFIDENTIAL=%d",
-			classification["PUBLIC"], classification["INTERNAL"], classification["CONFIDENTIAL"]), 20)
-		p.KeyValue("    Landmarks", fmt.Sprintf("%d", landmarks), 16)
 	}
+
+	p.KeyValue("  Path", shortenPath(memDir), 10)
+	p.KeyValue("    Promotion", fmt.Sprintf("draft=%d  curated=%d",
+		promotion["draft"], promotion["curated"]), 16)
+	p.KeyValue("    Classification", fmt.Sprintf("PUBLIC=%d  INTERNAL=%d  CONFIDENTIAL=%d",
+		classification["PUBLIC"], classification["INTERNAL"], classification["CONFIDENTIAL"]), 20)
+	p.KeyValue("    Landmarks", fmt.Sprintf("%d", landmarks), 16)
 
 	// Capture pipeline latency from telemetry.
 	leoDir, err := findMomDir()
@@ -478,20 +466,12 @@ const landmarkComputationThreshold = 100
 
 func runDoctorLandmarks(cmd *cobra.Command) error {
 	p := ux.NewPrinter(cmd.OutOrStdout())
-	cwd, err := os.Getwd()
+	momDir, err := findMomDir()
 	if err != nil {
-		return err
-	}
-
-	scopes := scope.Walk(cwd)
-	if len(scopes) == 0 {
 		p.Warn("no .mom/ directory found — run 'mom init' first")
 		return nil
 	}
-
-	// Use nearest scope.
-	s := scopes[0]
-	memDir := filepath.Join(s.Path, "memory")
+	memDir := filepath.Join(momDir, "memory")
 	entries, err := os.ReadDir(memDir)
 	if err != nil {
 		p.Warn("no landmark memories found (memory/ unreadable)")
@@ -548,7 +528,7 @@ func runDoctorLandmarks(cmd *cobra.Command) error {
 	})
 
 	p.Bold("Top Landmarks")
-	p.Muted(fmt.Sprintf("scope: %s (%s)", s.Label, shortenPath(s.Path)))
+	p.Muted(fmt.Sprintf("memory: %s", shortenPath(memDir)))
 	p.Blank()
 
 	w := 16
@@ -619,37 +599,19 @@ func runDoctorBundle(cmd *cobra.Command) error {
 	}
 	cmd.Printf("\n")
 
-	// Scope list (paths only).
-	cmd.Printf("--- Scopes ---\n")
-	cwd, _ := os.Getwd()
-	scopes := scope.Walk(cwd)
-	if len(scopes) == 0 {
-		cmd.Printf("(none)\n")
-	} else {
-		for _, s := range scopes {
-			cmd.Printf("  %s  %s\n", s.Label, s.Path)
-		}
-	}
+	// Current local project metadata (not a scope hierarchy).
+	cmd.Printf("--- Project ---\n")
+	cmd.Printf("mom_dir: %s\n", leoDir)
 	cmd.Printf("\n")
 
-	// Memory counts per scope.
 	cmd.Printf("--- Memory Counts ---\n")
+	memDir := filepath.Join(leoDir, "memory")
+	entries, _ := os.ReadDir(memDir)
 	totalMem := 0
-	for _, s := range scopes {
-		memDir := filepath.Join(s.Path, "memory")
-		entries, err := os.ReadDir(memDir)
-		if err != nil {
-			continue
+	for _, e := range entries {
+		if !e.IsDir() && filepath.Ext(e.Name()) == ".json" {
+			totalMem++
 		}
-		scopeCount := 0
-		for _, e := range entries {
-			if e.IsDir() || filepath.Ext(e.Name()) != ".json" {
-				continue
-			}
-			scopeCount++
-		}
-		cmd.Printf("  %-15s %d\n", s.Label, scopeCount)
-		totalMem += scopeCount
 	}
 	cmd.Printf("Total: %d\n", totalMem)
 	cmd.Printf("\n")

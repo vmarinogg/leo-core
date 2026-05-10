@@ -208,6 +208,34 @@ func TestToolsListV030Surface(t *testing.T) {
 	}
 }
 
+func TestResourcesListUsesCentralVaultSurface(t *testing.T) {
+	leoDir := newTestLeoDir(t)
+	inW, outR, _ := runServer(t, leoDir)
+	defer inW.Close()
+
+	sendRequest(t, inW, "initialize", 1, map[string]any{"protocolVersion": "2024-11-05"})
+	readResponse(t, outR)
+	sendRequest(t, inW, "resources/list", 2, nil)
+	resp := readResponse(t, outR)
+
+	result := resp["result"].(map[string]any)
+	resources := result["resources"].([]any)
+	uris := map[string]bool{}
+	for _, raw := range resources {
+		resource := raw.(map[string]any)
+		uris[resource["uri"].(string)] = true
+	}
+
+	if !uris["mom://vault"] {
+		t.Fatalf("resources/list must expose central vault status resource; got %v", uris)
+	}
+	for _, legacy := range []string{"mom://scopes", "mom://identity", "mom://constraints"} {
+		if uris[legacy] {
+			t.Fatalf("resources/list exposed obsolete scope-era resource %q", legacy)
+		}
+	}
+}
+
 func TestToolsCallMomRecallUsesCentralFinder(t *testing.T) {
 	leoDir := newTestLeoDir(t)
 	insertCentralMemory(t, "Authentication pattern for JWT", "Use JWT with RS256", []string{"auth", "security"})

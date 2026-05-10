@@ -151,16 +151,14 @@ func TestDoctorCmd_ShowsCheckSymbols(t *testing.T) {
 
 	out := buf.String()
 	// Most lines should have a check/cross/warning symbol.
-	// Exceptions: blank lines, section headers (e.g. "Active scopes…:"),
-	// and indented scope entries.
+	// Exceptions: blank lines and indented detail lines.
 	lines := strings.Split(strings.TrimSpace(out), "\n")
 	for _, line := range lines {
 		if line == "" {
 			continue
 		}
 		// Section headers and indented detail lines are allowed without a symbol.
-		if strings.HasPrefix(line, "Active scopes") ||
-			strings.HasPrefix(line, "Adapter capabilities") ||
+		if strings.HasPrefix(line, "Adapter capabilities") ||
 			strings.HasPrefix(line, "  ") {
 			continue
 		}
@@ -173,16 +171,12 @@ func TestDoctorCmd_ShowsCheckSymbols(t *testing.T) {
 	}
 }
 
-func TestDoctorCmd_ShowsScopesSection(t *testing.T) {
+func TestDoctorCmd_DoesNotShowLegacyScopeHierarchy(t *testing.T) {
 	dir := setupTestMemoryWithConfig(t, "claude")
 
 	origDir, _ := os.Getwd()
 	os.Chdir(dir)
 	defer os.Chdir(origDir)
-
-	// Set HOME to the parent so the project .mom/ is classified as repo,
-	// not as the special $HOME/.mom user scope.
-	t.Setenv("HOME", filepath.Dir(dir))
 
 	buf := new(bytes.Buffer)
 	rootCmd.SetOut(buf)
@@ -192,12 +186,8 @@ func TestDoctorCmd_ShowsScopesSection(t *testing.T) {
 	rootCmd.Execute()
 
 	out := buf.String()
-	if !strings.Contains(out, "Active scopes") {
-		t.Errorf("expected 'Active scopes' section in doctor output, got:\n%s", out)
-	}
-	// The nearest scope should appear (repo label since no scope: in config from setupTestMemoryWithConfig).
-	if !strings.Contains(out, "repo") {
-		t.Errorf("expected 'repo' scope label in doctor output, got:\n%s", out)
+	if strings.Contains(out, "Active scopes") {
+		t.Errorf("doctor output must not expose legacy scope hierarchy, got:\n%s", out)
 	}
 }
 

@@ -4,10 +4,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"path/filepath"
-	"strings"
 
-	"github.com/momhq/mom/cli/internal/scope"
+	"github.com/momhq/mom/cli/internal/centralvault"
 )
 
 // resourceDef describes one MCP resource for resources/list.
@@ -29,21 +27,9 @@ type resourceContent struct {
 func allResources() []resourceDef {
 	return []resourceDef{
 		{
-			URI:         "mom://identity",
-			Name:        "MOM Identity",
-			Description: "Identity document from the nearest .mom/ scope.",
-			MIMEType:    "application/json",
-		},
-		{
-			URI:         "mom://constraints",
-			Name:        "MOM Constraints",
-			Description: "Constraint summaries from the nearest .mom/ scope.",
-			MIMEType:    "application/json",
-		},
-		{
-			URI:         "mom://scopes",
-			Name:        "MOM Scopes",
-			Description: "Scope hierarchy discovered from the current working directory.",
+			URI:         "mom://vault",
+			Name:        "MOM Central Vault",
+			Description: "Central vault status for MOM's single-vault architecture.",
 			MIMEType:    "application/json",
 		},
 	}
@@ -69,129 +55,41 @@ func (s *Server) handleResourcesRead(params json.RawMessage) (any, *rpcError) {
 	}
 
 	switch req.URI {
-	case "mom://identity":
-		return s.readIdentity()
-	case "mom://constraints":
-		return s.readConstraints()
-	case "mom://scopes":
-		return s.readScopes()
+	case "mom://vault":
+		return s.readVault()
 	default:
 		return nil, &rpcError{Code: errCodeInvalidParams, Message: "unknown resource URI: " + req.URI}
 	}
 }
 
-// readIdentity returns the identity.json from the nearest scope.
-func (s *Server) readIdentity() (any, *rpcError) {
-	// Look for identity.json in the momDir first, then walk up.
-	candidates := []string{filepath.Join(s.momDir, "identity.json")}
-	for _, sc := range scope.Walk(s.momDir) {
-		candidates = append(candidates, filepath.Join(sc.Path, "identity.json"))
-	}
-
-	for _, path := range candidates {
-		data, err := os.ReadFile(path)
-		if err != nil {
-			continue
-		}
-		return map[string]any{
-			"contents": []resourceContent{
-				{URI: "mom://identity", MIMEType: "application/json", Text: string(data)},
-			},
-		}, nil
-	}
-
-	return map[string]any{
-		"contents": []resourceContent{
-			{URI: "mom://identity", MIMEType: "application/json", Text: "{}"},
-		},
-	}, nil
-}
-
-// readConstraints returns summaries of all constraint docs in the nearest scope.
-func (s *Server) readConstraints() (any, *rpcError) {
-	// Collect constraint JSON files from momDir/constraints/ and walk-up scopes.
-	type constraintSummary struct {
-		ID      string `json:"id"`
-		Summary string `json:"summary,omitempty"`
-		Path    string `json:"path"`
-	}
-
-	var summaries []constraintSummary
-	seen := make(map[string]bool)
-
-	addFromDir := func(dir string) {
-		entries, err := os.ReadDir(dir)
-		if err != nil {
-			return
-		}
-		for _, e := range entries {
-			if e.IsDir() || !strings.HasSuffix(e.Name(), ".json") {
-				continue
-			}
-			path := filepath.Join(dir, e.Name())
-			if seen[path] {
-				continue
-			}
-			seen[path] = true
-
-			data, err := os.ReadFile(path)
-			if err != nil {
-				continue
-			}
-			var raw map[string]any
-			if err := json.Unmarshal(data, &raw); err != nil {
-				continue
-			}
-			id, _ := raw["id"].(string)
-			if id == "" {
-				id = strings.TrimSuffix(e.Name(), ".json")
-			}
-			summary, _ := raw["summary"].(string)
-			summaries = append(summaries, constraintSummary{ID: id, Summary: summary, Path: path})
-		}
-	}
-
-	addFromDir(filepath.Join(s.momDir, "constraints"))
-	for _, sc := range scope.Walk(s.momDir) {
-		addFromDir(filepath.Join(sc.Path, "constraints"))
-	}
-
-	text, _ := json.MarshalIndent(summaries, "", "  ")
-	return map[string]any{
-		"contents": []resourceContent{
-			{URI: "mom://constraints", MIMEType: "application/json", Text: string(text)},
-		},
-	}, nil
-}
-
-// readScopes returns the scope hierarchy.
-func (s *Server) readScopes() (any, *rpcError) {
-	scopes := scope.Walk(s.momDir)
-	if len(scopes) == 0 {
-		scopes = []scope.Scope{{Path: s.momDir, Label: "repo"}}
-	}
-
-	type scopeEntry struct {
-		Label       string `json:"label"`
-		Path        string `json:"path"`
-		MemoryCount int    `json:"memory_count"`
-	}
-	entries := make([]scopeEntry, len(scopes))
-	for i, sc := range scopes {
-		entries[i] = scopeEntry{
-			Label:       sc.Label,
-			Path:        sc.Path,
-			MemoryCount: sc.MemoryCount(),
-		}
-	}
-
-	text, err := json.MarshalIndent(entries, "", "  ")
+// readVault returns central-vault status without scope hierarchy semantics.
+func (s *Server) readVault() (any, *rpcError) {
+	path, err := centralvault.Path()
 	if err != nil {
-		return nil, &rpcError{Code: errCodeInternalError, Message: fmt.Sprintf("marshaling scopes: %v", err)}
+		return nil, &rpcError{Code: errCodeInternalError, Message: fmt.Sprintf("resolving central vault path: %v", err)}
+	}
+	cwd, _ := os.Getwd()
+
+	status := map[string]any{
+		"architecture":    "central-vault",
+		"vault_path":      path,
+		"project_mom_dir": s.momDir,
+		"cwd":             cwd,
+	}
+	if s.openErr != nil {
+		status["status"] = "unavailable"
+		status["error"] = s.openErr.Error()
+	} else {
+		status["status"] = "ok"
+	}
+
+	text, err := json.MarshalIndent(status, "", "  ")
+	if err != nil {
+		return nil, &rpcError{Code: errCodeInternalError, Message: fmt.Sprintf("marshaling vault status: %v", err)}
 	}
 	return map[string]any{
 		"contents": []resourceContent{
-			{URI: "mom://scopes", MIMEType: "application/json", Text: string(text)},
+			{URI: "mom://vault", MIMEType: "application/json", Text: string(text)},
 		},
 	}, nil
 }
