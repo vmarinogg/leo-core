@@ -31,12 +31,12 @@ var (
 
 var watchCmd = &cobra.Command{
 	Use:   "watch",
-	Short: "Watch runtime transcripts and ingest turns automatically",
-	Long: `Starts a filesystem watcher on a runtime transcript directory and
+	Short: "Watch harness transcripts and ingest turns automatically",
+	Long: `Starts a filesystem watcher on a harness transcript directory and
 ingests new conversation turns into the central vault at $HOME/.mom/mom.db
 without MCP calls or hook overhead.
 
-Supported runtimes:
+Supported harnesses:
   claude    — ~/.claude/projects/ (default)
   windsurf  — ~/.windsurf/transcripts/
   pi        — ~/.pi/agent/sessions/
@@ -95,7 +95,7 @@ func runWatch(cmd *cobra.Command, _ []string) error {
 	}
 	sources := buildWatcherSources(momCfg, projectDir)
 	if len(sources) == 0 {
-		return fmt.Errorf("no watcher-capable runtimes enabled in config")
+		return fmt.Errorf("no watcher-capable harnesses enabled in config")
 	}
 
 	// Sweep mode: one-shot catch-up and exit.
@@ -508,7 +508,7 @@ func (cw centralWorkers) AttachToBus(bus *herald.Bus) {
 // the librarian/vault concurrency contract keep this safe across
 // goroutines.
 //
-// The vault stays open for the process's lifetime. The runtime owns
+// The vault stays open for the process's lifetime. The harness owns
 // the lifecycle; on shutdown the OS reclaims the handle. A future
 // refactor should plumb an explicit Close, but for alpha this is
 // acceptable.

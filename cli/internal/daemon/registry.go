@@ -12,8 +12,24 @@ import (
 
 // RegistryEntry describes a single MOM-enabled project in the global registry.
 type RegistryEntry struct {
-	MomDir   string   `json:"momDir"`
-	Runtimes []string `json:"runtimes"`
+	MomDir    string   `json:"momDir"`
+	Harnesses []string `json:"harnesses"`
+}
+
+func (e *RegistryEntry) UnmarshalJSON(data []byte) error {
+	type registryEntryAlias RegistryEntry
+	var raw struct {
+		registryEntryAlias
+		LegacyRuntimes []string `json:"runtimes"`
+	}
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return err
+	}
+	*e = RegistryEntry(raw.registryEntryAlias)
+	if len(e.Harnesses) == 0 && len(raw.LegacyRuntimes) > 0 {
+		e.Harnesses = raw.LegacyRuntimes
+	}
+	return nil
 }
 
 // Registry maps absolute project directory paths to their entries.
@@ -119,7 +135,7 @@ func withRegistryLock(fn func() error) error {
 }
 
 // RegisterProject adds or updates a project in the registry (lock → load → upsert → save).
-func RegisterProject(projectDir, momDir string, runtimes []string) error {
+func RegisterProject(projectDir, momDir string, harnesses []string) error {
 	canonicalProjectDir := pathutil.CanonicalDir(projectDir)
 	return withRegistryLock(func() error {
 		reg, err := LoadRegistry()
@@ -132,8 +148,8 @@ func RegisterProject(projectDir, momDir string, runtimes []string) error {
 			}
 		}
 		reg[canonicalProjectDir] = RegistryEntry{
-			MomDir:   momDir,
-			Runtimes: runtimes,
+			MomDir:    momDir,
+			Harnesses: harnesses,
 		}
 		return SaveRegistry(reg)
 	})

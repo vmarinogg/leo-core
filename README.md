@@ -180,7 +180,7 @@ _Mom_ is local-first.
 - `MOM_VAULT=/path/to/mom.db` overrides the vault for tests or isolated runs.
 - Lens and operational logs use privacy-projected metadata.
 - Raw tool arguments, raw user text, shell command arguments, query strings, paths, and flags are not stored as operational log detail.
-- Explicit record flows reject invented session IDs; runtime session IDs must come from the harness.
+- Explicit record flows reject invented session IDs; harness session IDs must come from the harness.
 
 ## Troubleshooting
 
@@ -231,3 +231,4 @@ Skills install is a soft-fail step, so _mom_ can be usable even if the external 
 - [Latest release](https://github.com/momhq/mom/releases/latest)
 - [Issues](https://github.com/momhq/mom/issues)
 - [Homebrew tap](https://github.com/momhq/homebrew-tap)
+- [Privacy policy](https://github.com/momhq/mom/blob/main/PRIVACY.md)

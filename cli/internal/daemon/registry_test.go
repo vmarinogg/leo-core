@@ -14,12 +14,12 @@ func TestRegistryRoundTrip(t *testing.T) {
 
 	reg := Registry{
 		"/home/user/project-a": RegistryEntry{
-			MomDir:   "/home/user/project-a/.mom",
-			Runtimes: []string{"claude"},
+			MomDir:    "/home/user/project-a/.mom",
+			Harnesses: []string{"claude"},
 		},
 		"/home/user/project-b": RegistryEntry{
-			MomDir:   "/home/user/project-b/.mom",
-			Runtimes: []string{"claude", "windsurf"},
+			MomDir:    "/home/user/project-b/.mom",
+			Harnesses: []string{"claude", "windsurf"},
 		},
 	}
 
@@ -39,8 +39,31 @@ func TestRegistryRoundTrip(t *testing.T) {
 	if entryA.MomDir != "/home/user/project-a/.mom" {
 		t.Errorf("unexpected momDir: %q", entryA.MomDir)
 	}
-	if len(entryA.Runtimes) != 1 || entryA.Runtimes[0] != "claude" {
-		t.Errorf("unexpected runtimes: %v", entryA.Runtimes)
+	if len(entryA.Harnesses) != 1 || entryA.Harnesses[0] != "claude" {
+		t.Errorf("unexpected harnesses: %v", entryA.Harnesses)
+	}
+}
+
+func TestLoadRegistry_PromotesLegacyRuntimesField(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+
+	path, err := RegistryPath()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte(`{
+  "/proj": {"momDir":"/proj/.mom", "runtimes":["claude"]}
+}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	reg, err := LoadRegistry()
+	if err != nil {
+		t.Fatalf("LoadRegistry: %v", err)
+	}
+	if got := reg["/proj"].Harnesses; len(got) != 1 || got[0] != "claude" {
+		t.Fatalf("Harnesses = %v, want legacy runtimes promoted", got)
 	}
 }
 
@@ -127,7 +150,7 @@ func TestLoadRegistryCanonicalizesSymlinkedProjectDir(t *testing.T) {
 
 	// Simulate an older registry entry written before canonicalization.
 	if err := SaveRegistry(Registry{
-		linkProjectDir: {MomDir: filepath.Join(linkProjectDir, ".mom"), Runtimes: []string{"claude"}},
+		linkProjectDir: {MomDir: filepath.Join(linkProjectDir, ".mom"), Harnesses: []string{"claude"}},
 	}); err != nil {
 		t.Fatalf("SaveRegistry: %v", err)
 	}

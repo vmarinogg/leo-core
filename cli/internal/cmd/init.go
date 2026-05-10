@@ -431,7 +431,7 @@ func runReinit(cmd *cobra.Command, cwd, momDir string, result OnboardingResult, 
 
 // buildRuntimeConfig converts a config.Config to a harness.Config.
 // Autonomy was retired from the persisted config; generated context files still
-// include the balanced default so the runtime retains the behavioral directive.
+// include the balanced default so the harness retains the behavioral directive.
 func buildRuntimeConfig(cfg *config.Config) harness.Config {
 	commMode := cfg.Communication.Mode
 	if commMode == "" {

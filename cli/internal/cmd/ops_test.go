@@ -13,7 +13,7 @@ import (
 )
 
 // setupTestMemoryWithConfig creates a .mom/ with config.yaml and returns the temp dir.
-func setupTestMemoryWithConfig(t *testing.T, runtime string) string {
+func setupTestMemoryWithConfig(t *testing.T, harness string) string {
 	t.Helper()
 	dir := setupTestMemory(t) // reuse existing helper from memory_test.go (formerly kb_test.go)
 
@@ -21,10 +21,10 @@ func setupTestMemoryWithConfig(t *testing.T, runtime string) string {
 
 	// Write a real config.yaml.
 	cfg := config.Default()
-	// Default() already includes claude; if a different runtime is requested,
+	// Default() already includes claude; if a different harness is requested,
 	// add it (for test flexibility).
-	if runtime != "claude" {
-		cfg.Harnesses[runtime] = config.HarnessConfig{Enabled: true}
+	if harness != "claude" {
+		cfg.Harnesses[harness] = config.HarnessConfig{Enabled: true}
 	}
 	if err := config.Save(momDir, &cfg); err != nil {
 		t.Fatalf("writing test config: %v", err)

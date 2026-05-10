@@ -19,8 +19,8 @@ type ServiceConfig struct {
 	ProjectDir string
 	// MomDir is the absolute path to the .mom/ directory.
 	MomDir string
-	// Runtimes is the list of enabled runtimes (kept for reference, not used by daemon).
-	Runtimes []string
+	// Harnesses is the list of enabled harnesses (kept for reference, not used by daemon).
+	Harnesses []string
 	// MomBinary is the absolute path to the mom binary.
 	MomBinary string
 }

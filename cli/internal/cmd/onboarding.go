@@ -28,11 +28,11 @@ type OnboardingResult struct {
 // runOnboarding executes the interactive wizard and returns the chosen config.
 // r is the source of user input (os.Stdin in production, strings.Reader in tests).
 // w is the destination for wizard output (os.Stdout in production, bytes.Buffer in tests).
-// cwd is used for runtime auto-detection.
+// cwd is used for harness auto-detection.
 func runOnboarding(r io.Reader, w io.Writer, cwd string) (OnboardingResult, error) {
 	accessible := !isTerminalReader(r)
 
-	// ── Prepare runtime options ─────────────────────────────────────────────
+	// ── Prepare harness options ─────────────────────────────────────────────
 	registry := harness.NewRegistry(cwd)
 	allAdapters := registry.All()
 	detected := registry.DetectAll()
@@ -45,7 +45,7 @@ func runOnboarding(r io.Reader, w io.Writer, cwd string) (OnboardingResult, erro
 		detectedSet["claude"] = true
 	}
 
-	var runtimeOptions []huh.Option[string]
+	var harnessOptions []huh.Option[string]
 	for _, a := range allAdapters {
 		label := harnessLabel(a.Name())
 		if detectedSet[a.Name()] {
@@ -55,7 +55,7 @@ func runOnboarding(r io.Reader, w io.Writer, cwd string) (OnboardingResult, erro
 		if detectedSet[a.Name()] {
 			opt = opt.Selected(true)
 		}
-		runtimeOptions = append(runtimeOptions, opt)
+		harnessOptions = append(harnessOptions, opt)
 	}
 
 	// ── Bind variables ──────────────────────────────────────────────────────
@@ -94,8 +94,8 @@ func runOnboarding(r io.Reader, w io.Writer, cwd string) (OnboardingResult, erro
 		huh.NewGroup(
 			huh.NewMultiSelect[string]().
 				Title("Which AI Assistants do you want to enable?").
-				Options(runtimeOptions...).
-				Height(len(runtimeOptions)+2).
+				Options(harnessOptions...).
+				Height(len(harnessOptions)+2).
 				Value(&selectedHarnesses).
 				Validate(func(selected []string) error {
 					if len(selected) == 0 {
@@ -112,7 +112,7 @@ func runOnboarding(r io.Reader, w io.Writer, cwd string) (OnboardingResult, erro
 				Options(
 					huh.NewOption("Concise — direct, no filler, grammar intact (recommended)", "concise"),
 					huh.NewOption("Efficient — telegraphic, fragments OK, max token savings", "efficient"),
-					huh.NewOption("Default — no instructions, runtime decides", "default"),
+					huh.NewOption("Default — no instructions, harness decides", "default"),
 				).
 				Value(&mode),
 		),

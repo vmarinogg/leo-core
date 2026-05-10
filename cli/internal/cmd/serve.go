@@ -26,7 +26,7 @@ var serveMCPCmd = &cobra.Command{
 	Short: "Start the MCP stdio server",
 	Long: `Start the MOM MCP (Model Context Protocol) server on stdio.
 
-Any MCP-aware runtime (Claude Code, Cursor, Cline, …) can connect by adding
+Any MCP-aware harness (Claude Code, Cursor, Cline, …) can connect by adding
 this command to its MCP config:
 
   {
@@ -62,7 +62,7 @@ func runServeMCP(_ *cobra.Command, _ []string) error {
 		return fmt.Errorf("getting working directory: %w", err)
 	}
 
-	// Allow runtimes that don't set cwd (Windsurf, Cline VS Code) to specify
+	// Allow harnesses that do not set cwd (Windsurf, Cline VS Code) to specify
 	// the project directory via environment variable.
 	if envDir := os.Getenv("MOM_PROJECT_DIR"); envDir != "" {
 		cwd = envDir

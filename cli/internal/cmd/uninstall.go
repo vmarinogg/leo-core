@@ -17,7 +17,7 @@ import (
 var uninstallCmd = &cobra.Command{
 	Use:   "uninstall",
 	Short: "Remove all MOM files from this project",
-	Long: `Removes .mom/ directory and any generated runtime files (e.g. .claude/CLAUDE.md, AGENTS.md).
+	Long: `Removes .mom/ directory and any generated harness files (e.g. .claude/CLAUDE.md, AGENTS.md).
 Optionally backs up your memory before removal using the export command.`,
 	RunE: runUninstall,
 }
@@ -53,7 +53,7 @@ func runUninstall(cmd *cobra.Command, args []string) error {
 	// Project root is the parent of .mom/.
 	projectRoot := filepath.Dir(momDir)
 
-	// Resolve adapters from config — use registry for all enabled runtimes.
+	// Resolve adapters from config — use registry for all enabled harnesses.
 	registry := harness.NewRegistry(projectRoot)
 	var adapters []harness.Adapter
 
@@ -164,7 +164,7 @@ func runUninstall(cmd *cobra.Command, args []string) error {
 		p.Checkf("removed .mom/")
 	}
 
-	// Remove generated runtime files via adapters (deduplicated).
+	// Remove generated harness files via adapters (deduplicated).
 	removed := make(map[string]bool)
 	for _, adapter := range adapters {
 		for _, relPath := range adapter.GeneratedFiles() {

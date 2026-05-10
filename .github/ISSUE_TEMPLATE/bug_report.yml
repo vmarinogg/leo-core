@@ -28,9 +28,9 @@ body:
     validations:
       required: true
   - type: dropdown
-    id: runtime
+    id: harness
     attributes:
-      label: Runtime
+      label: Harness
       options:
         - Claude Code
         - Cursor

@@ -1,11 +1,11 @@
-name: Runtime Adapter Proposal
-description: Propose a new runtime adapter (Cursor, Windsurf, etc.)
+name: Harness Adapter Proposal
+description: Propose a new harness adapter (Cursor, Windsurf, etc.)
 labels: ["adapter"]
 body:
   - type: input
-    id: runtime
+    id: harness
     attributes:
-      label: Runtime name
+      label: Harness name
       placeholder: "e.g. Cursor, Windsurf"
     validations:
       required: true
@@ -20,4 +20,4 @@ body:
     id: approach
     attributes:
       label: Implementation approach
-      description: How would the adapter work? What files does the runtime use?
+      description: How would the adapter work? What files does the harness use?
