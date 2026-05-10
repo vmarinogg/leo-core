@@ -22,7 +22,8 @@ var upgradeCmd = &cobra.Command{
 	Long: `Upgrades core infrastructure (schema and harness files)
 to match the installed mom binary. Your documents in .mom/memory/ are never touched.
 
-Legacy central import scans $HOME and asks before writing.`,
+Users on versions older than v0.30 must first upgrade to v0.30 and run
+mom upgrade there before upgrading to v0.40 or newer.`,
 	RunE: runUpgrade,
 }
 
@@ -36,6 +37,10 @@ type upgradeAction struct {
 	desc   string
 }
 
+func errPreV030Layout(layout string) error {
+	return fmt.Errorf("pre-v0.30 layout %s is no longer migrated by this MOM version; upgrade to MOM v0.30 first, run `mom upgrade`, then upgrade to v0.40+", layout)
+}
+
 func runUpgrade(cmd *cobra.Command, args []string) error {
 	dryRun, _ := cmd.Flags().GetBool("dry-run")
 
@@ -46,12 +51,7 @@ func runUpgrade(cmd *cobra.Command, args []string) error {
 
 	projectRoot := filepath.Dir(momDir)
 
-	// Upgrade the root scope.
-	if err := upgradeSingleDir(cmd, projectRoot, dryRun); err != nil {
-		return err
-	}
-
-	return runCentralImport(cmd, dryRun)
+	return upgradeSingleDir(cmd, projectRoot, dryRun)
 }
 
 // upgradeSingleDir runs the full upgrade pipeline on a single .mom/ directory.
@@ -61,12 +61,10 @@ func upgradeSingleDir(cmd *cobra.Command, projectRoot string, dryRun bool) error
 
 	// Check if this dir has a .mom/ at all.
 	if _, err := os.Stat(momDir); os.IsNotExist(err) {
-		// Try .leo/ fallback.
-		leoDir := filepath.Join(projectRoot, ".leo")
-		if _, err := os.Stat(leoDir); os.IsNotExist(err) {
-			return nil // not a MOM project, skip silently
+		if _, leoErr := os.Stat(filepath.Join(projectRoot, ".leo")); leoErr == nil {
+			return errPreV030Layout(".leo/")
 		}
-		momDir = leoDir
+		return nil // not a MOM project, skip silently
 	}
 
 	if !isMomProject(momDir) {
@@ -78,38 +76,9 @@ func upgradeSingleDir(cmd *cobra.Command, projectRoot string, dryRun bool) error
 		actions = append(actions, upgradeAction{symbol, desc})
 	}
 
-	// ── Phase -1: Migrate .leo/ → .mom/ legacy path ─────────────────────────
-	isLegacyLeoDir := filepath.Base(momDir) == ".leo"
-	if isLegacyLeoDir {
-		if dryRun {
-			addAction("⚠", fmt.Sprintf("would migrate %s → %s (run without --dry-run)", momDir, filepath.Join(projectRoot, ".mom")))
-		} else {
-			pathActions, err := migrateLeoToMom(momDir)
-			if err != nil {
-				return fmt.Errorf("path migration: %w", err)
-			}
-			for _, a := range pathActions {
-				addAction(a.symbol, a.desc)
-			}
-			momDir = filepath.Join(projectRoot, ".mom")
-		}
-	}
-
 	leoDir := momDir
-
-	// ── Phase 0: Migrate legacy kb/ layout to flat layout ───────────────────
-	if !dryRun {
-		layoutActions, err := migrateKBLayout(leoDir)
-		if err != nil {
-			return fmt.Errorf("migrating layout: %w", err)
-		}
-		for _, a := range layoutActions {
-			addAction(a.symbol, a.desc)
-		}
-	} else {
-		if _, statErr := os.Stat(filepath.Join(leoDir, "kb")); statErr == nil {
-			addAction("⚠", "legacy .mom/kb/ detected — would flatten to new layout (run without --dry-run)")
-		}
+	if _, statErr := os.Stat(filepath.Join(leoDir, "kb")); statErr == nil {
+		return errPreV030Layout(".mom/kb/")
 	}
 
 	// ── Phase 1: Load, migrate, and persist config ───────────────────────────
@@ -568,86 +537,102 @@ func isDeadHookCommand(command string) bool {
 	return len(fields) >= 2 && fields[0] == "mom" && (fields[1] == "draft" || fields[1] == "record")
 }
 
-// migrateKBLayout detects a legacy .mom/kb/ layout and promotes each subdirectory
-// one level up to the new flat layout. It is idempotent: if the destination already
-// exists it skips that step and reports a conflict rather than overwriting.
-func migrateKBLayout(leoDir string) ([]upgradeAction, error) {
-	kbDir := filepath.Join(leoDir, "kb")
-	if _, err := os.Stat(kbDir); os.IsNotExist(err) {
-		return nil, nil
+// scrubDeadConfigFields reads config.yaml from leoDir, removes the retired
+// "tiers" key from every harness block and the "autonomy" key from the user
+// block, and returns the cleaned bytes plus a changed flag. It does nothing
+// when the keys are already absent.
+//
+// The scrub operates on the raw YAML node tree so that comments and
+// formatting are preserved as much as possible.
+func scrubDeadConfigFields(leoDir string) (scrubbed []byte, changed bool, err error) {
+	configPath := filepath.Join(leoDir, "config.yaml")
+	data, err := os.ReadFile(configPath)
+	if err != nil {
+		return nil, false, fmt.Errorf("reading config: %w", err)
 	}
 
-	var actions []upgradeAction
-
-	type migration struct {
-		src  string
-		dst  string
-		desc string
+	var root yaml.Node
+	if err := yaml.Unmarshal(data, &root); err != nil {
+		return nil, false, fmt.Errorf("parsing config: %w", err)
+	}
+	if root.Kind == 0 || len(root.Content) == 0 {
+		return data, false, nil
 	}
 
-	moves := []migration{
-		{filepath.Join(kbDir, "docs"), filepath.Join(leoDir, "memory"), "kb/docs/ → memory/"},
-		{filepath.Join(kbDir, "constraints"), filepath.Join(leoDir, "constraints"), "kb/constraints/ → constraints/"},
-		{filepath.Join(kbDir, "skills"), filepath.Join(leoDir, "skills"), "kb/skills/ → skills/"},
-		{filepath.Join(kbDir, "logs"), filepath.Join(leoDir, "logs"), "kb/logs/ → logs/"},
+	doc := root.Content[0] // document node wraps a mapping node
+	if doc.Kind != yaml.MappingNode {
+		return data, false, nil
 	}
 
-	for _, m := range moves {
-		if _, err := os.Stat(m.src); os.IsNotExist(err) {
-			continue
-		}
-		if _, err := os.Stat(m.dst); err == nil {
-			actions = append(actions, upgradeAction{"⚠", fmt.Sprintf("skipped %s — destination already exists", m.desc)})
-			continue
-		}
-		if err := os.Rename(m.src, m.dst); err != nil {
-			return nil, fmt.Errorf("moving %s: %w", m.desc, err)
-		}
-		actions = append(actions, upgradeAction{"✔", fmt.Sprintf("migrated %s", m.desc)})
-	}
+	changed = renameYAMLKey(doc, "runtimes", "harnesses") || changed
 
-	fileMovs := []migration{
-		{filepath.Join(kbDir, "index.json"), filepath.Join(leoDir, "index.json"), "kb/index.json → index.json"},
-		{filepath.Join(kbDir, "schema.json"), filepath.Join(leoDir, "schema.json"), "kb/schema.json → schema.json"},
-	}
-	for _, m := range fileMovs {
-		if _, err := os.Stat(m.src); os.IsNotExist(err) {
-			continue
-		}
-		if _, err := os.Stat(m.dst); err == nil {
-			actions = append(actions, upgradeAction{"⚠", fmt.Sprintf("skipped %s — destination already exists", m.desc)})
-			continue
-		}
-		if err := os.Rename(m.src, m.dst); err != nil {
-			return nil, fmt.Errorf("moving %s: %w", m.desc, err)
-		}
-		actions = append(actions, upgradeAction{"✔", fmt.Sprintf("migrated %s", m.desc)})
-	}
-
-	remaining, _ := os.ReadDir(kbDir)
-	hasVisible := false
-	for _, e := range remaining {
-		if !strings.HasPrefix(e.Name(), ".") {
-			hasVisible = true
-			break
-		}
-	}
-	if !hasVisible {
-		if err := os.RemoveAll(kbDir); err != nil {
-			actions = append(actions, upgradeAction{"⚠", fmt.Sprintf("could not remove empty kb/: %v", err)})
-		} else {
-			actions = append(actions, upgradeAction{"✔", "removed empty kb/ directory"})
+	// Strip retired "tiers" sub-keys from each harness block.
+	if harnessesNode := findMappingValue(doc, "harnesses"); harnessesNode != nil && harnessesNode.Kind == yaml.MappingNode {
+		for i := 1; i < len(harnessesNode.Content); i += 2 {
+			rtVal := harnessesNode.Content[i]
+			if rtVal.Kind == yaml.MappingNode {
+				if removeYAMLKey(rtVal, "tiers") {
+					changed = true
+				}
+			}
 		}
 	}
 
-	if len(actions) > 0 {
-		actions = append([]upgradeAction{{"✔", "filesystem layout migrated (kb/ flattened)"}}, actions...)
+	if removeYAMLKey(findMappingValue(doc, "user"), "autonomy") {
+		changed = true
 	}
 
-	return actions, nil
+	if !changed {
+		return data, false, nil
+	}
+
+	out, err := yaml.Marshal(&root)
+	if err != nil {
+		return nil, false, fmt.Errorf("marshaling scrubbed config: %w", err)
+	}
+	return out, true, nil
 }
 
-// migrateMetricDocs finds docs with type "metric" and migrates them to "session-log".
+// renameYAMLKey renames a top-level key in a YAML mapping node from oldKey to
+// newKey, preserving the value and its position. Returns true if the key was
+// found and renamed.
+func renameYAMLKey(mapping *yaml.Node, oldKey, newKey string) bool {
+	for i := 0; i+1 < len(mapping.Content); i += 2 {
+		if mapping.Content[i].Value == oldKey {
+			mapping.Content[i].Value = newKey
+			return true
+		}
+	}
+	return false
+}
+
+// findMappingValue returns the value node for key in a YAML mapping node, or nil.
+func findMappingValue(mapping *yaml.Node, key string) *yaml.Node {
+	if mapping == nil {
+		return nil
+	}
+	for i := 0; i+1 < len(mapping.Content); i += 2 {
+		if mapping.Content[i].Value == key {
+			return mapping.Content[i+1]
+		}
+	}
+	return nil
+}
+
+// removeYAMLKey removes the key+value pair for key from a YAML mapping node.
+// Returns true if the key was present and removed.
+func removeYAMLKey(mapping *yaml.Node, key string) bool {
+	if mapping == nil || mapping.Kind != yaml.MappingNode {
+		return false
+	}
+	for i := 0; i+1 < len(mapping.Content); i += 2 {
+		if mapping.Content[i].Value == key {
+			mapping.Content = append(mapping.Content[:i], mapping.Content[i+2:]...)
+			return true
+		}
+	}
+	return false
+}
 func migrateMetricDocs(docsDir string, dryRun bool) []string {
 	var migrated []string
 
@@ -884,152 +869,4 @@ func regenerateHarnessFiles(projectRoot, leoDir string, cfg *config.Config) erro
 	}
 
 	return nil
-}
-
-// scrubDeadConfigFields reads config.yaml from leoDir, removes the retired
-// "tiers" key from every harness block and the "autonomy" key from the user
-// block, and returns the cleaned bytes plus a changed flag. It does nothing
-// when the keys are already absent.
-//
-// The scrub operates on the raw YAML node tree so that comments and
-// formatting are preserved as much as possible.
-func scrubDeadConfigFields(leoDir string) (scrubbed []byte, changed bool, err error) {
-	configPath := filepath.Join(leoDir, "config.yaml")
-	data, err := os.ReadFile(configPath)
-	if err != nil {
-		return nil, false, fmt.Errorf("reading config: %w", err)
-	}
-
-	var root yaml.Node
-	if err := yaml.Unmarshal(data, &root); err != nil {
-		return nil, false, fmt.Errorf("parsing config: %w", err)
-	}
-	if root.Kind == 0 || len(root.Content) == 0 {
-		return data, false, nil
-	}
-
-	doc := root.Content[0] // document node wraps a mapping node
-	if doc.Kind != yaml.MappingNode {
-		return data, false, nil
-	}
-
-	changed = renameYAMLKey(doc, "runtimes", "harnesses") || changed
-
-	// Strip retired "tiers" sub-keys from each harness block.
-	if harnessesNode := findMappingValue(doc, "harnesses"); harnessesNode != nil && harnessesNode.Kind == yaml.MappingNode {
-		for i := 1; i < len(harnessesNode.Content); i += 2 {
-			rtVal := harnessesNode.Content[i]
-			if rtVal.Kind == yaml.MappingNode {
-				if removeYAMLKey(rtVal, "tiers") {
-					changed = true
-				}
-			}
-		}
-	}
-
-	if removeYAMLKey(findMappingValue(doc, "user"), "autonomy") {
-		changed = true
-	}
-
-	if !changed {
-		return data, false, nil
-	}
-
-	out, err := yaml.Marshal(&root)
-	if err != nil {
-		return nil, false, fmt.Errorf("marshaling scrubbed config: %w", err)
-	}
-	return out, true, nil
-}
-
-// renameYAMLKey renames a top-level key in a YAML mapping node from oldKey to
-// newKey, preserving the value and its position. Returns true if the key was
-// found and renamed.
-func renameYAMLKey(mapping *yaml.Node, oldKey, newKey string) bool {
-	for i := 0; i+1 < len(mapping.Content); i += 2 {
-		if mapping.Content[i].Value == oldKey {
-			mapping.Content[i].Value = newKey
-			return true
-		}
-	}
-	return false
-}
-
-// findMappingValue returns the value node for key in a YAML mapping node, or nil.
-func findMappingValue(mapping *yaml.Node, key string) *yaml.Node {
-	if mapping == nil {
-		return nil
-	}
-	for i := 0; i+1 < len(mapping.Content); i += 2 {
-		if mapping.Content[i].Value == key {
-			return mapping.Content[i+1]
-		}
-	}
-	return nil
-}
-
-// removeYAMLKey removes the key+value pair for key from a YAML mapping node.
-// Returns true if the key was present and removed.
-func removeYAMLKey(mapping *yaml.Node, key string) bool {
-	if mapping == nil || mapping.Kind != yaml.MappingNode {
-		return false
-	}
-	for i := 0; i+1 < len(mapping.Content); i += 2 {
-		if mapping.Content[i].Value == key {
-			mapping.Content = append(mapping.Content[:i], mapping.Content[i+2:]...)
-			return true
-		}
-	}
-	return false
-}
-
-// migrateLeoToMom copies a .leo/ directory to .mom/ at the same level.
-// The .leo/ directory is preserved (not deleted) — users can remove it manually
-// or it will be removed. Returns actions describing what was done.
-// If .mom/ already exists, the migration is skipped.
-func migrateLeoToMom(leoDir string) ([]upgradeAction, error) {
-	parent := filepath.Dir(leoDir)
-	momDir := filepath.Join(parent, ".mom")
-
-	if _, err := os.Stat(momDir); err == nil {
-		return nil, nil
-	}
-
-	var actions []upgradeAction
-
-	if err := copyDirRecursive(leoDir, momDir); err != nil {
-		return nil, fmt.Errorf("copying .leo/ to .mom/: %w", err)
-	}
-
-	actions = append(actions, upgradeAction{"✔", fmt.Sprintf("migrated %s → %s", leoDir, momDir)})
-	actions = append(actions, upgradeAction{"⚠", ".leo/ preserved — remove it manually after verifying .mom/ works"})
-
-	return actions, nil
-}
-
-// copyDirRecursive recursively copies src directory to dst.
-func copyDirRecursive(src, dst string) error {
-	return filepath.Walk(src, func(path string, info os.FileInfo, err error) error {
-		if err != nil {
-			return err
-		}
-
-		rel, err := filepath.Rel(src, path)
-		if err != nil {
-			return err
-		}
-
-		target := filepath.Join(dst, rel)
-
-		if info.IsDir() {
-			return os.MkdirAll(target, info.Mode())
-		}
-
-		data, err := os.ReadFile(path)
-		if err != nil {
-			return err
-		}
-
-		return os.WriteFile(target, data, info.Mode())
-	})
 }
