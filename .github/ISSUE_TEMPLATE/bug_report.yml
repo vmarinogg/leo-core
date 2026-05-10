@@ -1,5 +1,5 @@
 name: Bug Report
-description: Report a bug in Leo
+description: Report a bug in MOM
 labels: ["bug"]
 body:
   - type: textarea
@@ -41,8 +41,8 @@ body:
   - type: input
     id: version
     attributes:
-      label: Leo version
-      placeholder: "leo version"
+      label: MOM version
+      placeholder: "mom version"
     validations:
       required: true
   - type: input

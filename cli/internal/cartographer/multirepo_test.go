@@ -7,14 +7,14 @@ import (
 	"testing"
 )
 
-// TestCollectFiles_RespectsLeoBoundary verifies that collectFiles stops
+// TestCollectFiles_RespectsMomBoundary verifies that collectFiles stops
 // descending into subdirectories that have their own .mom/ directory.
-func TestCollectFiles_RespectsLeoBoundary(t *testing.T) {
+func TestCollectFiles_RespectsMomBoundary(t *testing.T) {
 	root := t.TempDir()
 
 	// Root repo: has .mom/ and some files.
-	leoDir := filepath.Join(root, ".mom")
-	os.MkdirAll(leoDir, 0755)
+	momDir := filepath.Join(root, ".mom")
+	os.MkdirAll(momDir, 0755)
 	writeFile(t, filepath.Join(root, "README.md"), "# Root")
 	writeFile(t, filepath.Join(root, "main.go"), "package main")
 
@@ -25,7 +25,7 @@ func TestCollectFiles_RespectsLeoBoundary(t *testing.T) {
 	writeFile(t, filepath.Join(childRepo, "child.go"), "package child")
 
 	cfg := DefaultConfig()
-	cfg.ScopeDir = leoDir
+	cfg.ScopeDir = momDir
 	cart := New(cfg)
 
 	paths, err := cart.collectFiles(root)
@@ -55,12 +55,12 @@ func TestCollectFiles_RespectsLeoBoundary(t *testing.T) {
 	}
 }
 
-// TestCollectFiles_ScansChildWithoutLeo verifies that a child dir WITHOUT .mom/
+// TestCollectFiles_ScansChildWithoutMom verifies that a child dir WITHOUT .mom/
 // is still walked normally.
-func TestCollectFiles_ScansChildWithoutLeo(t *testing.T) {
+func TestCollectFiles_ScansChildWithoutMom(t *testing.T) {
 	root := t.TempDir()
-	leoDir := filepath.Join(root, ".mom")
-	os.MkdirAll(leoDir, 0755)
+	momDir := filepath.Join(root, ".mom")
+	os.MkdirAll(momDir, 0755)
 
 	// Child without .mom/ — should be walked.
 	childRepo := filepath.Join(root, "lib")
@@ -68,7 +68,7 @@ func TestCollectFiles_ScansChildWithoutLeo(t *testing.T) {
 	writeFile(t, filepath.Join(childRepo, "README.md"), "# Lib")
 
 	cfg := DefaultConfig()
-	cfg.ScopeDir = leoDir
+	cfg.ScopeDir = momDir
 	cart := New(cfg)
 
 	paths, err := cart.collectFiles(root)
@@ -94,19 +94,19 @@ func TestMultiScan_ScansTwoRepos(t *testing.T) {
 
 	// repo1
 	r1 := filepath.Join(root, "repo1")
-	r1Leo := filepath.Join(r1, ".mom")
-	os.MkdirAll(r1Leo, 0755)
+	r1Mom := filepath.Join(r1, ".mom")
+	os.MkdirAll(r1Mom, 0755)
 	writeFile(t, filepath.Join(r1, "README.md"), "# Repo1\n\nDecision: use Go for repo1.")
 
 	// repo2
 	r2 := filepath.Join(root, "repo2")
-	r2Leo := filepath.Join(r2, ".mom")
-	os.MkdirAll(r2Leo, 0755)
+	r2Mom := filepath.Join(r2, ".mom")
+	os.MkdirAll(r2Mom, 0755)
 	writeFile(t, filepath.Join(r2, "README.md"), "# Repo2\n\nPattern: repository pattern used.")
 
 	results, err := MultiScan(context.Background(), []ScanTarget{
-		{RootDir: r1, MomDir: r1Leo},
-		{RootDir: r2, MomDir: r2Leo},
+		{RootDir: r1, MomDir: r1Mom},
+		{RootDir: r2, MomDir: r2Mom},
 	}, DefaultConfig())
 	if err != nil {
 		t.Fatalf("MultiScan: %v", err)
@@ -129,21 +129,21 @@ func TestScanTarget_ScopeDir(t *testing.T) {
 	root := t.TempDir()
 
 	r1 := filepath.Join(root, "repo1")
-	r1Leo := filepath.Join(r1, ".mom")
-	os.MkdirAll(r1Leo, 0755)
+	r1Mom := filepath.Join(r1, ".mom")
+	os.MkdirAll(r1Mom, 0755)
 	writeFile(t, filepath.Join(r1, "go.mod"), "module github.com/test/r1\ngo 1.21\n")
 
 	r2 := filepath.Join(root, "repo2")
-	r2Leo := filepath.Join(r2, ".mom")
-	os.MkdirAll(r2Leo, 0755)
+	r2Mom := filepath.Join(r2, ".mom")
+	os.MkdirAll(r2Mom, 0755)
 	writeFile(t, filepath.Join(r2, "go.mod"), "module github.com/test/r2\ngo 1.21\n")
 
 	cfg := DefaultConfig()
 	cfg.DryRun = true // don't write cache
 
 	results, err := MultiScan(context.Background(), []ScanTarget{
-		{RootDir: r1, MomDir: r1Leo},
-		{RootDir: r2, MomDir: r2Leo},
+		{RootDir: r1, MomDir: r1Mom},
+		{RootDir: r2, MomDir: r2Mom},
 	}, cfg)
 	if err != nil {
 		t.Fatalf("MultiScan: %v", err)

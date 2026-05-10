@@ -13,8 +13,8 @@ import (
 func setupTestMemory(t *testing.T) string {
 	t.Helper()
 	dir := t.TempDir()
-	leoDir := filepath.Join(dir, ".mom")
-	os.MkdirAll(filepath.Join(leoDir, "memory"), 0755)
+	momDir := filepath.Join(dir, ".mom")
+	os.MkdirAll(filepath.Join(momDir, "memory"), 0755)
 
 	return dir
 }

@@ -128,7 +128,7 @@ type Adapter interface {
 	GeneratedDirs() []string
 
 	// Watermark returns the header comment inserted into generated files.
-	// Used to distinguish Leo-generated files from user-created ones.
+	// Used to distinguish MOM-generated files from user-created ones.
 	Watermark() string
 
 	// Capabilities returns the MRP v0 capability declaration for this adapter.

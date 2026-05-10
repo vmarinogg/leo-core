@@ -343,7 +343,7 @@ func BuildGraphData(memDir string, maxTagSize int) (*GraphData, error) {
 	}
 
 	type docInfo struct {
-		id  string
+		id   string
 		tags []string
 		raw  map[string]any
 	}

@@ -37,7 +37,7 @@ Use flags to access additional diagnostic sections:
   --bundle            Redacted diagnostic bundle (stdout only, safe to share)`
 }
 
-// runDoctor is the main entry point for `leo doctor` and all its flag variants.
+// runDoctor is the main entry point for `mom doctor` and all its flag variants.
 func runDoctor(cmd *cobra.Command, args []string) error {
 	verbose, _ := cmd.Flags().GetBool("verbose")
 	telemetryPreview, _ := cmd.Flags().GetBool("telemetry-preview")
@@ -61,14 +61,14 @@ func runDoctor(cmd *cobra.Command, args []string) error {
 func runDoctorBase(cmd *cobra.Command, verbose bool) error {
 	p := ux.NewPrinter(cmd.OutOrStdout())
 
-	leoDir, err := findMomDir()
+	momDir, err := findMomDir()
 	if err != nil {
 		p.Fail(".mom/ directory: not found — run 'mom init' first")
 		return err
 	}
 
 	// Detect legacy layout (.mom/kb/ present = pre-v0.8.0 install).
-	if _, statErr := os.Stat(filepath.Join(leoDir, "kb")); statErr == nil {
+	if _, statErr := os.Stat(filepath.Join(momDir, "kb")); statErr == nil {
 		p.Warn("Legacy layout detected (.mom/kb/ present)")
 		p.Textf("  Run %s to migrate to the v0.8.0 flat layout.", p.HighlightCmd("mom upgrade"))
 		return nil
@@ -77,7 +77,7 @@ func runDoctorBase(cmd *cobra.Command, verbose bool) error {
 	failed := false
 
 	// Check 1: .mom/ exists and is writable.
-	if err := checkDirWritable(leoDir); err != nil {
+	if err := checkDirWritable(momDir); err != nil {
 		p.Failf(".mom/ directory: %v", err)
 		failed = true
 	} else {
@@ -85,7 +85,7 @@ func runDoctorBase(cmd *cobra.Command, verbose bool) error {
 	}
 
 	// Check 2: config.yaml is valid.
-	cfg, cfgErr := config.Load(leoDir)
+	cfg, cfgErr := config.Load(momDir)
 	if cfgErr != nil {
 		p.Failf("config.yaml: %v", cfgErr)
 		failed = true
@@ -121,7 +121,7 @@ func runDoctorBase(cmd *cobra.Command, verbose bool) error {
 	}
 
 	// Check 3: memory and core dirs exist.
-	docsDir := filepath.Join(leoDir, "memory")
+	docsDir := filepath.Join(momDir, "memory")
 	if _, statErr := os.Stat(docsDir); statErr != nil {
 		p.Failf("memory/: %v", statErr)
 		failed = true
@@ -129,14 +129,14 @@ func runDoctorBase(cmd *cobra.Command, verbose bool) error {
 		p.Check("memory/: exists")
 	}
 
-	constraintsDir := filepath.Join(leoDir, "constraints")
+	constraintsDir := filepath.Join(momDir, "constraints")
 	if _, statErr := os.Stat(constraintsDir); statErr != nil {
 		p.Warn("constraints/: not found")
 	} else {
 		p.Check("constraints/: exists")
 	}
 
-	skillsDir := filepath.Join(leoDir, "skills")
+	skillsDir := filepath.Join(momDir, "skills")
 	if _, statErr := os.Stat(skillsDir); statErr != nil {
 		p.Warn("skills/: not found")
 	} else {
@@ -165,12 +165,12 @@ func runDoctorBase(cmd *cobra.Command, verbose bool) error {
 
 	// Check 5: Index consistency (JSON index).
 	// Only memory docs are indexed — constraints and skills are static config.
-	if orphanFail := checkIndexConsistency(p, leoDir, diskDocIDs); orphanFail {
+	if orphanFail := checkIndexConsistency(p, momDir, diskDocIDs); orphanFail {
 		failed = true
 	}
 
 	// Check 5b: SQLite index consistency.
-	checkSQLiteConsistency(p, leoDir, diskDocIDs)
+	checkSQLiteConsistency(p, momDir, diskDocIDs)
 
 	// Check 6: Communication mode.
 	if cfg != nil {
@@ -195,12 +195,12 @@ func runDoctorBase(cmd *cobra.Command, verbose bool) error {
 
 	// Check 9: Memory breakdown.
 	if verbose {
-		printVerboseMemoryBreakdown(p, leoDir)
+		printVerboseMemoryBreakdown(p, momDir)
 	}
 
 	// Check 10: Last session timestamp + recent errors from telemetry.
 	if cfg != nil {
-		telDir := filepath.Join(leoDir, "logs")
+		telDir := filepath.Join(momDir, "logs")
 		printLastSession(p, telDir)
 		printRecentErrors(p, telDir, 5)
 	}
@@ -214,15 +214,15 @@ func runDoctorBase(cmd *cobra.Command, verbose bool) error {
 
 // checkSQLiteConsistency verifies the SQLite search index is present and
 // its document count matches the JSON files on disk.
-func checkSQLiteConsistency(p *ux.Printer, leoDir string, diskDocIDs map[string]bool) {
+func checkSQLiteConsistency(p *ux.Printer, momDir string, diskDocIDs map[string]bool) {
 	// Check if the cache/index.db file exists.
-	dbPath := filepath.Join(leoDir, "cache", "index.db")
+	dbPath := filepath.Join(momDir, "cache", "index.db")
 	if _, err := os.Stat(dbPath); os.IsNotExist(err) {
 		p.Warnf("SQLite index: not found — it will be rebuilt automatically on next indexed access")
 		return
 	}
 
-	idx := storage.NewIndexedAdapter(leoDir)
+	idx := storage.NewIndexedAdapter(momDir)
 	defer idx.Close()
 
 	// Compare counts via a search-all query.
@@ -283,9 +283,8 @@ func printVerboseMemoryBreakdown(p *ux.Printer, momDir string) {
 	p.KeyValue("    Landmarks", fmt.Sprintf("%d", landmarks), 16)
 
 	// Capture pipeline latency from telemetry.
-	leoDir, err := findMomDir()
-	if err == nil {
-		telDir := filepath.Join(leoDir, "logs")
+	if momDir != "" {
+		telDir := filepath.Join(momDir, "logs")
 		printCapturePipelineLatency(p, telDir)
 		printExtractorModelUsage(p, telDir)
 	}
@@ -363,12 +362,12 @@ func printExtractorModelUsage(p *ux.Printer, telDir string) {
 
 func runDoctorTelemetryPreview(cmd *cobra.Command) error {
 	p := ux.NewPrinter(cmd.OutOrStdout())
-	leoDir, leoDirErr := findMomDir()
+	momDir, momDirErr := findMomDir()
 
 	// Config for telemetry enabled status.
 	var telEnabled bool
-	if leoDirErr == nil {
-		cfg, cfgErr := config.Load(leoDir)
+	if momDirErr == nil {
+		cfg, cfgErr := config.Load(momDir)
 		if cfgErr == nil {
 			telEnabled = cfg.Telemetry.TelemetryEnabled()
 		} else {
@@ -388,13 +387,13 @@ func runDoctorTelemetryPreview(cmd *cobra.Command) error {
 	}
 	p.KeyValue("Status", "enabled", w)
 
-	if leoDirErr != nil {
+	if momDirErr != nil {
 		p.Blank()
 		p.Warn("no .mom/ directory found")
 		return nil
 	}
 
-	telDir := filepath.Join(leoDir, "logs")
+	telDir := filepath.Join(momDir, "logs")
 	today := time.Now().UTC().Format("2006-01-02")
 	todayFile := filepath.Join(telDir, today+".jsonl")
 
@@ -580,14 +579,14 @@ func runDoctorBundle(cmd *cobra.Command) error {
 	cmd.Printf("OS:   %s/%s\n", runtime.GOOS, runtime.GOARCH)
 	cmd.Printf("\n")
 
-	leoDir, leoDirErr := findMomDir()
-	if leoDirErr != nil {
+	momDir, momDirErr := findMomDir()
+	if momDirErr != nil {
 		cmd.Printf("--- Error ---\n")
 		cmd.Printf(".mom/ directory not found. Run 'mom init' first.\n")
 		return nil
 	}
 
-	cfg, cfgErr := config.Load(leoDir)
+	cfg, cfgErr := config.Load(momDir)
 
 	// Adapter status.
 	cmd.Printf("--- Adapter Status ---\n")
@@ -601,11 +600,11 @@ func runDoctorBundle(cmd *cobra.Command) error {
 
 	// Current local project metadata (not a scope hierarchy).
 	cmd.Printf("--- Project ---\n")
-	cmd.Printf("mom_dir: %s\n", leoDir)
+	cmd.Printf("mom_dir: %s\n", momDir)
 	cmd.Printf("\n")
 
 	cmd.Printf("--- Memory Counts ---\n")
-	memDir := filepath.Join(leoDir, "memory")
+	memDir := filepath.Join(momDir, "memory")
 	entries, _ := os.ReadDir(memDir)
 	totalMem := 0
 	for _, e := range entries {
@@ -618,7 +617,7 @@ func runDoctorBundle(cmd *cobra.Command) error {
 
 	// Recent errors from RuntimeHealth — content stripped.
 	cmd.Printf("--- Recent Errors ---\n")
-	telDir := filepath.Join(leoDir, "logs")
+	telDir := filepath.Join(momDir, "logs")
 	bundleErrors := readRecentErrors(telDir, 10)
 	if len(bundleErrors) == 0 {
 		cmd.Printf("(none)\n")

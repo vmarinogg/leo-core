@@ -7,11 +7,11 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/spf13/cobra"
 	"github.com/momhq/mom/cli/internal/adapters/harness"
 	"github.com/momhq/mom/cli/internal/config"
 	"github.com/momhq/mom/cli/internal/scope"
 	"github.com/momhq/mom/cli/internal/ux"
+	"github.com/spf13/cobra"
 )
 
 var uninstallCmd = &cobra.Command{
@@ -35,10 +35,10 @@ func runUninstall(cmd *cobra.Command, args []string) error {
 	}
 
 	// Find .mom/ via scope walk (works from any subdirectory).
-	var leoDir string
+	var momDir string
 	hasLeoDir := false
 	if sc, ok := scope.NearestWritable(cwd); ok {
-		leoDir = sc.Path
+		momDir = sc.Path
 		hasLeoDir = true
 	}
 
@@ -47,18 +47,18 @@ func runUninstall(cmd *cobra.Command, args []string) error {
 		if !force {
 			return fmt.Errorf("no .mom/ directory found from %s", cwd)
 		}
-		leoDir = filepath.Join(cwd, ".mom")
+		momDir = filepath.Join(cwd, ".mom")
 	}
 
 	// Project root is the parent of .mom/.
-	projectRoot := filepath.Dir(leoDir)
+	projectRoot := filepath.Dir(momDir)
 
 	// Resolve adapters from config — use registry for all enabled runtimes.
 	registry := harness.NewRegistry(projectRoot)
 	var adapters []harness.Adapter
 
 	if hasLeoDir {
-		cfg, err := config.Load(leoDir)
+		cfg, err := config.Load(momDir)
 		if err == nil {
 			for _, rt := range cfg.EnabledHarnesses() {
 				if a, ok := registry.Get(rt); ok {
@@ -150,7 +150,7 @@ func runUninstall(cmd *cobra.Command, args []string) error {
 	}
 
 	// Unregister from global watch daemon.
-	if err := unregisterProject(projectRoot, leoDir); err != nil {
+	if err := unregisterProject(projectRoot, momDir); err != nil {
 		p.Warnf("watch daemon removal: %v", err)
 	} else {
 		p.Check("watch daemon removed")
@@ -158,7 +158,7 @@ func runUninstall(cmd *cobra.Command, args []string) error {
 
 	// Remove .mom/.
 	if hasLeoDir {
-		if err := os.RemoveAll(leoDir); err != nil {
+		if err := os.RemoveAll(momDir); err != nil {
 			return fmt.Errorf("removing .mom/: %w", err)
 		}
 		p.Checkf("removed .mom/")

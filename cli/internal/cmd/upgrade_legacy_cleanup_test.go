@@ -11,11 +11,11 @@ import (
 
 func TestUpgradeRejectsPreV030LeoLayout(t *testing.T) {
 	dir := t.TempDir()
-	leoDir := filepath.Join(dir, ".leo")
-	if err := os.MkdirAll(leoDir, 0o755); err != nil {
+	momDir := filepath.Join(dir, ".leo")
+	if err := os.MkdirAll(momDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(leoDir, "config.yaml"), []byte("version: \"1\"\nharnesses: {}\n"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(momDir, "config.yaml"), []byte("version: \"1\"\nharnesses: {}\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 

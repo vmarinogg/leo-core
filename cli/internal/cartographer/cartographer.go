@@ -1,5 +1,5 @@
 // Package cartographer scans existing code, docs, and commits to seed the memory store
-// with initial memories. It is the bootstrap pass for new Leo installations.
+// with initial memories. It is the bootstrap pass for new MOM installations.
 package cartographer
 
 import (

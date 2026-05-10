@@ -140,8 +140,8 @@ func validateAllDocs(p *ux.Printer, dir string, label string) (int, map[string]b
 
 // checkIndexConsistency compares the index to the docs actually on disk.
 // Returns true if there are hard failures.
-func checkIndexConsistency(p *ux.Printer, leoDir string, diskDocIDs map[string]bool) bool {
-	adapter := storage.NewIndexedAdapter(leoDir)
+func checkIndexConsistency(p *ux.Printer, momDir string, diskDocIDs map[string]bool) bool {
+	adapter := storage.NewIndexedAdapter(momDir)
 	defer adapter.Close()
 	idx, err := adapter.List()
 	if err != nil {

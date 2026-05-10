@@ -36,9 +36,9 @@ func TestIngestFile_PublishesTurnObserved(t *testing.T) {
 			Bus:           bus,
 			DebounceMs:    300,
 		},
-		timers:  make(map[string]*time.Timer),
+		timers:    make(map[string]*time.Timer),
 		cursorDir: filepath.Join(momDir, "cache"),
-		logFile: filepath.Join(momDir, "watch.log"),
+		logFile:   filepath.Join(momDir, "watch.log"),
 	}
 	_ = os.MkdirAll(w.cursorDir, 0755)
 
@@ -115,9 +115,9 @@ func TestIngestFile_PublishesNothingWithoutBus(t *testing.T) {
 			DebounceMs:    300,
 			// Bus intentionally nil
 		},
-		timers:  make(map[string]*time.Timer),
+		timers:    make(map[string]*time.Timer),
 		cursorDir: filepath.Join(momDir, "cache"),
-		logFile: filepath.Join(momDir, "watch.log"),
+		logFile:   filepath.Join(momDir, "watch.log"),
 	}
 	_ = os.MkdirAll(w.cursorDir, 0755)
 
@@ -151,9 +151,9 @@ func TestIngestFile_PublishesOneEventPerTurn(t *testing.T) {
 			Bus:           bus,
 			DebounceMs:    300,
 		},
-		timers:  make(map[string]*time.Timer),
+		timers:    make(map[string]*time.Timer),
 		cursorDir: filepath.Join(momDir, "cache"),
-		logFile: filepath.Join(momDir, "watch.log"),
+		logFile:   filepath.Join(momDir, "watch.log"),
 	}
 	_ = os.MkdirAll(w.cursorDir, 0755)
 

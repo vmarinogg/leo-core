@@ -87,7 +87,7 @@ func NewApplication(name string) *Application {
 	)
 
 	cfg := DefaultConfig()
-	cfg.ScopeDir = filepath.Join(dir, ".leo")
+	cfg.ScopeDir = filepath.Join(dir, ".mom")
 	_ = os.MkdirAll(cfg.ScopeDir, 0755)
 
 	cart := New(cfg)
@@ -121,8 +121,8 @@ func NewApplication(name string) *Application {
 
 func TestScan_DryRun(t *testing.T) {
 	dir := t.TempDir()
-	leoDir := filepath.Join(dir, ".leo")
-	_ = os.MkdirAll(leoDir, 0755)
+	momDir := filepath.Join(dir, ".mom")
+	_ = os.MkdirAll(momDir, 0755)
 
 	writeFile(t, filepath.Join(dir, "go.mod"), `module github.com/test/dry
 
@@ -132,7 +132,7 @@ require github.com/spf13/cobra v1.7.0
 `)
 
 	cfg := DefaultConfig()
-	cfg.ScopeDir = leoDir
+	cfg.ScopeDir = momDir
 	cfg.DryRun = true
 
 	cart := New(cfg)
@@ -147,7 +147,7 @@ require github.com/spf13/cobra v1.7.0
 	}
 
 	// Cache file should NOT exist.
-	manifestPath := filepath.Join(leoDir, "cache", "bootstrap", "manifest.json")
+	manifestPath := filepath.Join(momDir, "cache", "bootstrap", "manifest.json")
 	if _, err := os.Stat(manifestPath); err == nil {
 		t.Error("dry-run should not write cache manifest")
 	}
@@ -155,8 +155,8 @@ require github.com/spf13/cobra v1.7.0
 
 func TestScan_Cache_IncrementalRun(t *testing.T) {
 	dir := t.TempDir()
-	leoDir := filepath.Join(dir, ".leo")
-	_ = os.MkdirAll(leoDir, 0755)
+	momDir := filepath.Join(dir, ".mom")
+	_ = os.MkdirAll(momDir, 0755)
 
 	writeFile(t, filepath.Join(dir, "go.mod"), `module github.com/test/cache
 
@@ -166,7 +166,7 @@ require github.com/spf13/cobra v1.7.0
 `)
 
 	cfg := DefaultConfig()
-	cfg.ScopeDir = leoDir
+	cfg.ScopeDir = momDir
 
 	// First run: should process files.
 	cart1 := New(cfg)
@@ -281,8 +281,8 @@ def top_level():
 
 func TestScan_CacheHitsMisses(t *testing.T) {
 	dir := t.TempDir()
-	leoDir := filepath.Join(dir, ".leo")
-	_ = os.MkdirAll(leoDir, 0755)
+	momDir := filepath.Join(dir, ".mom")
+	_ = os.MkdirAll(momDir, 0755)
 
 	writeFile(t, filepath.Join(dir, "go.mod"), `module github.com/test/cache2
 
@@ -292,7 +292,7 @@ require github.com/spf13/cobra v1.7.0
 `)
 
 	cfg := DefaultConfig()
-	cfg.ScopeDir = leoDir
+	cfg.ScopeDir = momDir
 
 	// First run: all misses.
 	cart1 := New(cfg)

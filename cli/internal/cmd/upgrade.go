@@ -46,6 +46,12 @@ func runUpgrade(cmd *cobra.Command, args []string) error {
 
 	momDir, err := findMomDir()
 	if err != nil {
+		cwd, cwdErr := os.Getwd()
+		if cwdErr == nil {
+			if _, statErr := os.Stat(filepath.Join(cwd, ".leo")); statErr == nil {
+				return errPreV030Layout(".leo/")
+			}
+		}
 		return err
 	}
 
@@ -61,9 +67,6 @@ func upgradeSingleDir(cmd *cobra.Command, projectRoot string, dryRun bool) error
 
 	// Check if this dir has a .mom/ at all.
 	if _, err := os.Stat(momDir); os.IsNotExist(err) {
-		if _, leoErr := os.Stat(filepath.Join(projectRoot, ".leo")); leoErr == nil {
-			return errPreV030Layout(".leo/")
-		}
 		return nil // not a MOM project, skip silently
 	}
 
@@ -76,13 +79,12 @@ func upgradeSingleDir(cmd *cobra.Command, projectRoot string, dryRun bool) error
 		actions = append(actions, upgradeAction{symbol, desc})
 	}
 
-	leoDir := momDir
-	if _, statErr := os.Stat(filepath.Join(leoDir, "kb")); statErr == nil {
+	if _, statErr := os.Stat(filepath.Join(momDir, "kb")); statErr == nil {
 		return errPreV030Layout(".mom/kb/")
 	}
 
 	// ── Phase 1: Load, migrate, and persist config ───────────────────────────
-	cfg, err := config.Load(leoDir)
+	cfg, err := config.Load(momDir)
 	if err != nil {
 		return fmt.Errorf("loading config: %w", err)
 	}
@@ -94,18 +96,18 @@ func upgradeSingleDir(cmd *cobra.Command, projectRoot string, dryRun bool) error
 			addAction("✔", "communication.mode set to concise (default)")
 		}
 
-		if err := config.Save(leoDir, cfg); err != nil {
+		if err := config.Save(momDir, cfg); err != nil {
 			phase1Err = fmt.Errorf("saving config: %w", err)
 			return
 		}
 		addAction("✔", "config.yaml migrated to latest format")
 
-		if scrubbed, changed, err := scrubDeadConfigFields(leoDir); err != nil {
+		if scrubbed, changed, err := scrubDeadConfigFields(momDir); err != nil {
 			phase1Err = fmt.Errorf("scrubbing dead config fields: %w", err)
 			return
 		} else if changed {
 			if !dryRun {
-				configPath := filepath.Join(leoDir, "config.yaml")
+				configPath := filepath.Join(momDir, "config.yaml")
 				if err := os.WriteFile(configPath, scrubbed, 0644); err != nil {
 					phase1Err = fmt.Errorf("writing scrubbed config: %w", err)
 					return
@@ -115,12 +117,12 @@ func upgradeSingleDir(cmd *cobra.Command, projectRoot string, dryRun bool) error
 		}
 
 		newDirs := []string{
-			filepath.Join(leoDir, "memory"),
-			filepath.Join(leoDir, "constraints"),
-			filepath.Join(leoDir, "skills"),
-			filepath.Join(leoDir, "logs"),
-			filepath.Join(leoDir, "cache"),
-			filepath.Join(leoDir, "raw"),
+			filepath.Join(momDir, "memory"),
+			filepath.Join(momDir, "constraints"),
+			filepath.Join(momDir, "skills"),
+			filepath.Join(momDir, "logs"),
+			filepath.Join(momDir, "cache"),
+			filepath.Join(momDir, "raw"),
 		}
 		for _, d := range newDirs {
 			if _, err := os.Stat(d); os.IsNotExist(err) {
@@ -135,7 +137,7 @@ func upgradeSingleDir(cmd *cobra.Command, projectRoot string, dryRun bool) error
 			}
 		}
 
-		profilesDir := filepath.Join(leoDir, "profiles")
+		profilesDir := filepath.Join(momDir, "profiles")
 		if _, statErr := os.Stat(profilesDir); statErr == nil {
 			if !dryRun {
 				if err := os.RemoveAll(profilesDir); err != nil {
@@ -158,7 +160,7 @@ func upgradeSingleDir(cmd *cobra.Command, projectRoot string, dryRun bool) error
 			"metrics-collection",
 			"propagation",
 		}
-		constraintsDir := filepath.Join(leoDir, "constraints")
+		constraintsDir := filepath.Join(momDir, "constraints")
 		for _, name := range retiredConstraints {
 			path := filepath.Join(constraintsDir, name+".json")
 			if _, statErr := os.Stat(path); statErr == nil {
@@ -173,7 +175,7 @@ func upgradeSingleDir(cmd *cobra.Command, projectRoot string, dryRun bool) error
 		}
 
 		retiredSkills := []string{"task-intake"}
-		skillsDir := filepath.Join(leoDir, "skills")
+		skillsDir := filepath.Join(momDir, "skills")
 		for _, name := range retiredSkills {
 			path := filepath.Join(skillsDir, name+".json")
 			if _, statErr := os.Stat(path); statErr == nil {
@@ -187,7 +189,7 @@ func upgradeSingleDir(cmd *cobra.Command, projectRoot string, dryRun bool) error
 			}
 		}
 
-		removedGenerated, err := removeKnownGeneratedCentralDocs(leoDir, dryRun)
+		removedGenerated, err := removeKnownGeneratedCentralDocs(momDir, dryRun)
 		if err != nil {
 			phase1Err = err
 			return
@@ -230,7 +232,7 @@ func upgradeSingleDir(cmd *cobra.Command, projectRoot string, dryRun bool) error
 			phase2Err = fmt.Errorf("reading embedded schema: %w", err)
 			return
 		}
-		schemaPath := filepath.Join(leoDir, "schema.json")
+		schemaPath := filepath.Join(momDir, "schema.json")
 		if changed := fileChanged(schemaPath, schemaData); changed {
 			if !dryRun {
 				if err := os.WriteFile(schemaPath, schemaData, 0644); err != nil {
@@ -241,7 +243,7 @@ func upgradeSingleDir(cmd *cobra.Command, projectRoot string, dryRun bool) error
 			addAction("✔", "schema.json updated")
 		}
 
-		identityPath := filepath.Join(leoDir, "identity.json")
+		identityPath := filepath.Join(momDir, "identity.json")
 		identityBytes := []byte(defaultIdentity())
 		if changed := fileChanged(identityPath, identityBytes); changed {
 			if !dryRun {
@@ -253,7 +255,7 @@ func upgradeSingleDir(cmd *cobra.Command, projectRoot string, dryRun bool) error
 			addAction("✔", "identity.json updated")
 		}
 
-		docsDir := filepath.Join(leoDir, "memory")
+		docsDir := filepath.Join(momDir, "memory")
 		migrated := migrateMetricDocs(docsDir, dryRun)
 		for _, docID := range migrated {
 			addAction("✔", fmt.Sprintf("doc %s migrated metric → session-log", docID))
@@ -291,7 +293,7 @@ func upgradeSingleDir(cmd *cobra.Command, projectRoot string, dryRun bool) error
 	var phase3Err error
 	doPhase3 := func() {
 		if !dryRun {
-			if err := regenerateHarnessFiles(projectRoot, leoDir, cfg); err != nil {
+			if err := regenerateHarnessFiles(projectRoot, momDir, cfg); err != nil {
 				phase3Err = err
 				return
 			}
@@ -304,7 +306,7 @@ func upgradeSingleDir(cmd *cobra.Command, projectRoot string, dryRun bool) error
 
 		// Rebuild SQLite search index from JSON files.
 		if !dryRun {
-			idx := storage.NewIndexedAdapter(leoDir)
+			idx := storage.NewIndexedAdapter(momDir)
 			if err := idx.Reindex(); err != nil {
 				addAction("⚠", fmt.Sprintf("reindex: %v", err))
 			} else {
@@ -332,7 +334,7 @@ func upgradeSingleDir(cmd *cobra.Command, projectRoot string, dryRun bool) error
 
 	// ── Phase 3.5: Register with global watch daemon ────────────────────────
 	if !dryRun {
-		if err := ensureGlobalDaemon(projectRoot, leoDir, cfg.EnabledHarnesses()); err != nil {
+		if err := ensureGlobalDaemon(projectRoot, momDir, cfg.EnabledHarnesses()); err != nil {
 			addAction("⚠", fmt.Sprintf("watch daemon: %v", err))
 		} else {
 			addAction("✔", "watch daemon installed/updated")
@@ -405,10 +407,10 @@ func fileChanged(path string, data []byte) bool {
 	return string(existing) != string(data)
 }
 
-func removeKnownGeneratedCentralDocs(leoDir string, dryRun bool) ([]upgradeAction, error) {
+func removeKnownGeneratedCentralDocs(momDir string, dryRun bool) ([]upgradeAction, error) {
 	var actions []upgradeAction
 	for _, doc := range knownGeneratedCentralDocs {
-		path := filepath.Join(leoDir, doc.DirName, doc.Name+".json")
+		path := filepath.Join(momDir, doc.DirName, doc.Name+".json")
 		if _, statErr := os.Stat(path); statErr != nil {
 			if os.IsNotExist(statErr) {
 				continue
@@ -537,15 +539,15 @@ func isDeadHookCommand(command string) bool {
 	return len(fields) >= 2 && fields[0] == "mom" && (fields[1] == "draft" || fields[1] == "record")
 }
 
-// scrubDeadConfigFields reads config.yaml from leoDir, removes the retired
+// scrubDeadConfigFields reads config.yaml from momDir, removes the retired
 // "tiers" key from every harness block and the "autonomy" key from the user
 // block, and returns the cleaned bytes plus a changed flag. It does nothing
 // when the keys are already absent.
 //
 // The scrub operates on the raw YAML node tree so that comments and
 // formatting are preserved as much as possible.
-func scrubDeadConfigFields(leoDir string) (scrubbed []byte, changed bool, err error) {
-	configPath := filepath.Join(leoDir, "config.yaml")
+func scrubDeadConfigFields(momDir string) (scrubbed []byte, changed bool, err error) {
+	configPath := filepath.Join(momDir, "config.yaml")
 	data, err := os.ReadFile(configPath)
 	if err != nil {
 		return nil, false, fmt.Errorf("reading config: %w", err)
@@ -836,7 +838,7 @@ func kebabOnly(s string) string {
 }
 
 // regenerateHarnessFiles rebuilds all harness context files from the current config.
-func regenerateHarnessFiles(projectRoot, leoDir string, cfg *config.Config) error {
+func regenerateHarnessFiles(projectRoot, momDir string, cfg *config.Config) error {
 	registry := harness.NewRegistry(projectRoot)
 
 	runtimeCfg := buildRuntimeConfig(cfg)

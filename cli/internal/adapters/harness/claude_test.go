@@ -116,7 +116,7 @@ func TestClaudeAdapter_GenerateContextFile_NoProfile(t *testing.T) {
 	s := string(content)
 	// These phrases indicate the retired orchestration model — they must not appear.
 	forbidden := []string{"specialist", "delegation", "task-intake", "Active Profile",
-		"orchestrates, never executes", "leo orchestrates", "task pipeline"}
+		"orchestrates, never executes", "mom orchestrates", "task pipeline"}
 	for _, bad := range forbidden {
 		if strings.Contains(strings.ToLower(s), strings.ToLower(bad)) {
 			t.Errorf("CLAUDE.md must not contain %q", bad)
@@ -372,7 +372,7 @@ func TestNoBackupForLeoFile(t *testing.T) {
 		t.Fatalf("BackupIfNeeded failed: %v", err)
 	}
 	if backed {
-		t.Error("should not backup Leo-generated file")
+		t.Error("should not backup MOM-generated file")
 	}
 }
 

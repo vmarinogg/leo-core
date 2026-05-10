@@ -22,15 +22,15 @@ func setCentralVault(t *testing.T) string {
 	return path
 }
 
-func newTestLeoDir(t *testing.T) string {
+func newTestMomDir(t *testing.T) string {
 	t.Helper()
 	setCentralVault(t)
 	dir := t.TempDir()
-	leoDir := filepath.Join(dir, ".mom")
-	if err := os.MkdirAll(filepath.Join(leoDir, "memory"), 0755); err != nil {
+	momDir := filepath.Join(dir, ".mom")
+	if err := os.MkdirAll(filepath.Join(momDir, "memory"), 0755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(leoDir, "config.yaml"), []byte("scope: repo\n"), 0644); err != nil {
+	if err := os.WriteFile(filepath.Join(momDir, "config.yaml"), []byte("scope: repo\n"), 0644); err != nil {
 		t.Fatal(err)
 	}
 	identity := map[string]any{
@@ -45,8 +45,8 @@ func newTestLeoDir(t *testing.T) string {
 		"updated_by": "test",
 		"content":    map[string]any{"name": "Test Project"},
 	}
-	writeJSON(t, filepath.Join(leoDir, "identity.json"), identity)
-	return leoDir
+	writeJSON(t, filepath.Join(momDir, "identity.json"), identity)
+	return momDir
 }
 
 func writeJSON(t *testing.T, path string, v any) {
@@ -132,12 +132,12 @@ func readResponse(t *testing.T, r *bufio.Reader) map[string]any {
 	return resp
 }
 
-func runServer(t *testing.T, leoDir string) (inW io.WriteCloser, outR *bufio.Reader, done chan struct{}) {
+func runServer(t *testing.T, momDir string) (inW io.WriteCloser, outR *bufio.Reader, done chan struct{}) {
 	t.Helper()
 	inR, inW := io.Pipe()
 	outR2, outW := io.Pipe()
 
-	srv := mcp.New(leoDir)
+	srv := mcp.New(momDir)
 	done = make(chan struct{})
 	go func() {
 		defer close(done)
@@ -149,8 +149,8 @@ func runServer(t *testing.T, leoDir string) (inW io.WriteCloser, outR *bufio.Rea
 }
 
 func TestInitializeHandshake(t *testing.T) {
-	leoDir := newTestLeoDir(t)
-	inW, outR, _ := runServer(t, leoDir)
+	momDir := newTestMomDir(t)
+	inW, outR, _ := runServer(t, momDir)
 	defer inW.Close()
 
 	sendRequest(t, inW, "initialize", 1, map[string]any{"protocolVersion": "2024-11-05"})
@@ -169,8 +169,8 @@ func TestInitializeHandshake(t *testing.T) {
 }
 
 func TestToolsListV030Surface(t *testing.T) {
-	leoDir := newTestLeoDir(t)
-	inW, outR, _ := runServer(t, leoDir)
+	momDir := newTestMomDir(t)
+	inW, outR, _ := runServer(t, momDir)
 	defer inW.Close()
 
 	sendRequest(t, inW, "initialize", 1, map[string]any{"protocolVersion": "2024-11-05"})
@@ -209,8 +209,8 @@ func TestToolsListV030Surface(t *testing.T) {
 }
 
 func TestResourcesListUsesCentralVaultSurface(t *testing.T) {
-	leoDir := newTestLeoDir(t)
-	inW, outR, _ := runServer(t, leoDir)
+	momDir := newTestMomDir(t)
+	inW, outR, _ := runServer(t, momDir)
 	defer inW.Close()
 
 	sendRequest(t, inW, "initialize", 1, map[string]any{"protocolVersion": "2024-11-05"})
@@ -237,9 +237,9 @@ func TestResourcesListUsesCentralVaultSurface(t *testing.T) {
 }
 
 func TestToolsCallMomRecallUsesCentralFinder(t *testing.T) {
-	leoDir := newTestLeoDir(t)
+	momDir := newTestMomDir(t)
 	insertCentralMemory(t, "Authentication pattern for JWT", "Use JWT with RS256", []string{"auth", "security"})
-	inW, outR, _ := runServer(t, leoDir)
+	inW, outR, _ := runServer(t, momDir)
 	defer inW.Close()
 
 	sendRequest(t, inW, "initialize", 1, map[string]any{"protocolVersion": "2024-11-05"})
@@ -256,9 +256,9 @@ func TestToolsCallMomRecallUsesCentralFinder(t *testing.T) {
 }
 
 func TestToolsCallMomRecallReturnsCompactIndex(t *testing.T) {
-	leoDir := newTestLeoDir(t)
+	momDir := newTestMomDir(t)
 	insertCentralMemory(t, "Authentication pattern for JWT", strings.Repeat("Use JWT with RS256. ", 30), []string{"auth", "security"})
-	inW, outR, _ := runServer(t, leoDir)
+	inW, outR, _ := runServer(t, momDir)
 	defer inW.Close()
 
 	sendRequest(t, inW, "initialize", 1, map[string]any{"protocolVersion": "2024-11-05"})
@@ -294,8 +294,8 @@ func TestToolsCallMomRecallReturnsCompactIndex(t *testing.T) {
 }
 
 func TestToolsCallMomRecallRequiresQuery(t *testing.T) {
-	leoDir := newTestLeoDir(t)
-	inW, outR, _ := runServer(t, leoDir)
+	momDir := newTestMomDir(t)
+	inW, outR, _ := runServer(t, momDir)
 	defer inW.Close()
 
 	sendRequest(t, inW, "initialize", 1, map[string]any{"protocolVersion": "2024-11-05"})
@@ -314,9 +314,9 @@ func TestToolsCallMomRecallRequiresQuery(t *testing.T) {
 }
 
 func TestToolsCallMomGet(t *testing.T) {
-	leoDir := newTestLeoDir(t)
+	momDir := newTestMomDir(t)
 	id := insertCentralMemory(t, "Test fact", "some detail", []string{"test"})
-	inW, outR, _ := runServer(t, leoDir)
+	inW, outR, _ := runServer(t, momDir)
 	defer inW.Close()
 
 	sendRequest(t, inW, "initialize", 1, map[string]any{"protocolVersion": "2024-11-05"})
@@ -332,8 +332,8 @@ func TestToolsCallMomGet(t *testing.T) {
 }
 
 func TestToolsCallMomGetRequiresID(t *testing.T) {
-	leoDir := newTestLeoDir(t)
-	inW, outR, _ := runServer(t, leoDir)
+	momDir := newTestMomDir(t)
+	inW, outR, _ := runServer(t, momDir)
 	defer inW.Close()
 
 	sendRequest(t, inW, "initialize", 1, map[string]any{"protocolVersion": "2024-11-05"})
@@ -352,10 +352,10 @@ func TestToolsCallMomGetRequiresID(t *testing.T) {
 }
 
 func TestToolsCallMomLandmarks(t *testing.T) {
-	leoDir := newTestLeoDir(t)
+	momDir := newTestMomDir(t)
 	id := insertCentralMemory(t, "Key architecture", "central vault decision", []string{"arch"})
 	markLandmark(t, id, 0.9)
-	inW, outR, _ := runServer(t, leoDir)
+	inW, outR, _ := runServer(t, momDir)
 	defer inW.Close()
 
 	sendRequest(t, inW, "initialize", 1, map[string]any{"protocolVersion": "2024-11-05"})
@@ -371,8 +371,8 @@ func TestToolsCallMomLandmarks(t *testing.T) {
 }
 
 func TestUnknownMethodReturnsError(t *testing.T) {
-	leoDir := newTestLeoDir(t)
-	inW, outR, _ := runServer(t, leoDir)
+	momDir := newTestMomDir(t)
+	inW, outR, _ := runServer(t, momDir)
 	defer inW.Close()
 
 	sendRequest(t, inW, "initialize", 1, map[string]any{"protocolVersion": "2024-11-05"})
@@ -385,8 +385,8 @@ func TestUnknownMethodReturnsError(t *testing.T) {
 }
 
 func TestNotificationIgnored(t *testing.T) {
-	leoDir := newTestLeoDir(t)
-	inW, outR, _ := runServer(t, leoDir)
+	momDir := newTestMomDir(t)
+	inW, outR, _ := runServer(t, momDir)
 	defer inW.Close()
 
 	sendRequest(t, inW, "initialize", 1, map[string]any{"protocolVersion": "2024-11-05"})
