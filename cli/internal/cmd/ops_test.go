@@ -17,7 +17,7 @@ func setupTestMemoryWithConfig(t *testing.T, runtime string) string {
 	t.Helper()
 	dir := setupTestMemory(t) // reuse existing helper from memory_test.go (formerly kb_test.go)
 
-	leoDir := filepath.Join(dir, ".mom")
+	momDir := filepath.Join(dir, ".mom")
 
 	// Write a real config.yaml.
 	cfg := config.Default()
@@ -26,12 +26,12 @@ func setupTestMemoryWithConfig(t *testing.T, runtime string) string {
 	if runtime != "claude" {
 		cfg.Harnesses[runtime] = config.HarnessConfig{Enabled: true}
 	}
-	if err := config.Save(leoDir, &cfg); err != nil {
+	if err := config.Save(momDir, &cfg); err != nil {
 		t.Fatalf("writing test config: %v", err)
 	}
 
 	// Create profiles dir with a valid profile.
-	profilesDir := filepath.Join(leoDir, "profiles")
+	profilesDir := filepath.Join(momDir, "profiles")
 	if err := os.MkdirAll(profilesDir, 0755); err != nil {
 		t.Fatalf("creating profiles dir: %v", err)
 	}
@@ -67,7 +67,7 @@ func TestStatusCmd_ShowsCentralShape(t *testing.T) {
 	}
 }
 
-// ── leo doctor tests ──────────────────────────────────────────────────────────
+// ── mom doctor tests ──────────────────────────────────────────────────────────
 
 func TestDoctorCmd_AllChecksPass(t *testing.T) {
 	dir := setupTestMemoryWithConfig(t, "claude")
@@ -111,10 +111,10 @@ func TestDoctorCmd_MissingLeoDir(t *testing.T) {
 
 func TestDoctorCmd_InvalidConfigYaml(t *testing.T) {
 	dir := setupTestMemory(t)
-	leoDir := filepath.Join(dir, ".mom")
+	momDir := filepath.Join(dir, ".mom")
 
 	// Write malformed YAML — {unclosed is guaranteed to fail yaml.Unmarshal.
-	os.WriteFile(filepath.Join(leoDir, "config.yaml"), []byte("{unclosed\n"), 0644)
+	os.WriteFile(filepath.Join(momDir, "config.yaml"), []byte("{unclosed\n"), 0644)
 
 	origDir, _ := os.Getwd()
 	os.Chdir(dir)
@@ -193,11 +193,11 @@ func TestDoctorCmd_DoesNotShowLegacyScopeHierarchy(t *testing.T) {
 
 func TestDoctorCmd_InvalidDocFails(t *testing.T) {
 	dir := setupTestMemoryWithConfig(t, "claude")
-	leoDir := filepath.Join(dir, ".mom")
+	momDir := filepath.Join(dir, ".mom")
 
 	// Write a corrupt JSON doc directly (bypassing adapter validation).
 	corruptDoc := []byte(`{"id": "corrupt", "type": ""}`)
-	os.WriteFile(filepath.Join(leoDir, "memory", "corrupt.json"), corruptDoc, 0644)
+	os.WriteFile(filepath.Join(momDir, "memory", "corrupt.json"), corruptDoc, 0644)
 
 	origDir, _ := os.Getwd()
 	os.Chdir(dir)
@@ -220,11 +220,11 @@ func TestDoctorCmd_InvalidDocFails(t *testing.T) {
 
 func TestDoctorCmd_OrphanIndexEntry(t *testing.T) {
 	dir := setupTestMemoryWithConfig(t, "claude")
-	leoDir := filepath.Join(dir, ".mom")
+	momDir := filepath.Join(dir, ".mom")
 
 	// Write a doc, then remove it from disk (leaving index orphan).
 	writeTestDoc(t, dir, sampleDoc("orphan-doc"))
-	os.Remove(filepath.Join(leoDir, "memory", "orphan-doc.json"))
+	os.Remove(filepath.Join(momDir, "memory", "orphan-doc.json"))
 
 	origDir, _ := os.Getwd()
 	os.Chdir(dir)

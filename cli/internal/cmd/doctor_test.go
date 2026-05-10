@@ -12,15 +12,15 @@ import (
 // doctor prints the migration prompt and exits cleanly without running normal checks.
 func TestDoctorBase_LegacyLayoutDetection(t *testing.T) {
 	dir := t.TempDir()
-	leoDir := filepath.Join(dir, ".mom")
+	momDir := filepath.Join(dir, ".mom")
 
 	// Create legacy layout: .mom/kb/ present (pre-v0.8.0 structure).
-	os.MkdirAll(filepath.Join(leoDir, "kb", "docs"), 0755)
-	os.MkdirAll(filepath.Join(leoDir, "kb", "constraints"), 0755)
-	os.MkdirAll(filepath.Join(leoDir, "kb", "skills"), 0755)
+	os.MkdirAll(filepath.Join(momDir, "kb", "docs"), 0755)
+	os.MkdirAll(filepath.Join(momDir, "kb", "constraints"), 0755)
+	os.MkdirAll(filepath.Join(momDir, "kb", "skills"), 0755)
 
 	// Write minimal config so findLeoDir can resolve the path.
-	os.WriteFile(filepath.Join(leoDir, "config.yaml"), []byte("version: \"1\"\nruntime: claude\n"), 0644)
+	os.WriteFile(filepath.Join(momDir, "config.yaml"), []byte("version: \"1\"\nruntime: claude\n"), 0644)
 
 	origDir, _ := os.Getwd()
 	os.Chdir(dir)
@@ -58,16 +58,16 @@ func TestDoctorBase_LegacyLayoutDetection(t *testing.T) {
 // does NOT trigger the legacy detection — normal checks run as expected.
 func TestDoctorBase_ModernLayout_RunsNormally(t *testing.T) {
 	dir := t.TempDir()
-	leoDir := filepath.Join(dir, ".mom")
+	momDir := filepath.Join(dir, ".mom")
 
 	// Create flat v0.8.0 layout — no kb/ directory.
 	for _, d := range []string{"memory", "constraints", "skills", "logs", "cache"} {
-		os.MkdirAll(filepath.Join(leoDir, d), 0755)
+		os.MkdirAll(filepath.Join(momDir, d), 0755)
 	}
 
-	os.WriteFile(filepath.Join(leoDir, "config.yaml"), []byte("version: \"1\"\nruntime: claude\n"), 0644)
-	os.WriteFile(filepath.Join(leoDir, "index.json"), []byte(`{"version":"1","by_tag":{},"by_type":{},"by_scope":{},"by_lifecycle":{}}`), 0644)
-	os.WriteFile(filepath.Join(leoDir, "schema.json"), []byte(`{"version":"1"}`), 0644)
+	os.WriteFile(filepath.Join(momDir, "config.yaml"), []byte("version: \"1\"\nruntime: claude\n"), 0644)
+	os.WriteFile(filepath.Join(momDir, "index.json"), []byte(`{"version":"1","by_tag":{},"by_type":{},"by_scope":{},"by_lifecycle":{}}`), 0644)
+	os.WriteFile(filepath.Join(momDir, "schema.json"), []byte(`{"version":"1"}`), 0644)
 
 	origDir, _ := os.Getwd()
 	os.Chdir(dir)

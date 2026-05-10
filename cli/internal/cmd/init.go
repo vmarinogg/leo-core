@@ -124,14 +124,14 @@ func resolveInitHarnesses(cwd string, requested []string) []string {
 // always the central vault dir ($HOME/.mom or MOM_VAULT's parent for tests/local
 // runs).
 func runInitWithConfig(cmd *cobra.Command, cwd string, force bool, result OnboardingResult) error {
-	leoDir, err := centralvault.Dir()
+	momDir, err := centralvault.Dir()
 	if err != nil {
 		return err
 	}
 
 	// Check if already initialized.
 	alreadyExists := false
-	if _, err := os.Stat(leoDir); err == nil {
+	if _, err := os.Stat(momDir); err == nil {
 		if !force {
 			alreadyExists = true
 		}
@@ -143,7 +143,7 @@ func runInitWithConfig(cmd *cobra.Command, cwd string, force bool, result Onboar
 	// harnesses, refresh global integrations, and reinstall daemon — but skip
 	// scaffold.
 	if alreadyExists {
-		return runReinit(cmd, cwd, leoDir, result, p)
+		return runReinit(cmd, cwd, momDir, result, p)
 	}
 
 	showSpinner := ux.IsTTY(cmd.OutOrStdout())
@@ -152,12 +152,12 @@ func runInitWithConfig(cmd *cobra.Command, cwd string, force bool, result Onboar
 	var scaffoldErr error
 	doScaffold := func() {
 		dirs := []string{
-			leoDir,
-			filepath.Join(leoDir, "memory"),
-			filepath.Join(leoDir, "skills"),
-			filepath.Join(leoDir, "constraints"),
-			filepath.Join(leoDir, "logs"),
-			filepath.Join(leoDir, "cache"),
+			momDir,
+			filepath.Join(momDir, "memory"),
+			filepath.Join(momDir, "skills"),
+			filepath.Join(momDir, "constraints"),
+			filepath.Join(momDir, "logs"),
+			filepath.Join(momDir, "cache"),
 		}
 		for _, d := range dirs {
 			if err := os.MkdirAll(d, 0755); err != nil {
@@ -224,7 +224,7 @@ func runInitWithConfig(cmd *cobra.Command, cwd string, force bool, result Onboar
 			Memory: config.Default().Memory,
 		}
 
-		if err := config.Save(leoDir, &cfg); err != nil {
+		if err := config.Save(momDir, &cfg); err != nil {
 			kbErr = err
 			return
 		}
@@ -235,14 +235,14 @@ func runInitWithConfig(cmd *cobra.Command, cwd string, force bool, result Onboar
 			kbErr = fmt.Errorf("reading embedded schema: %w", err)
 			return
 		}
-		schemaPath := filepath.Join(leoDir, "schema.json")
+		schemaPath := filepath.Join(momDir, "schema.json")
 		if err := os.WriteFile(schemaPath, schemaData, 0644); err != nil {
 			kbErr = fmt.Errorf("writing schema: %w", err)
 			return
 		}
 
 		// Write identity.json.
-		identityPath := filepath.Join(leoDir, "identity.json")
+		identityPath := filepath.Join(momDir, "identity.json")
 		if err := os.WriteFile(identityPath, []byte(defaultIdentity()), 0644); err != nil {
 			kbErr = fmt.Errorf("writing identity.json: %w", err)
 			return
@@ -266,7 +266,7 @@ func runInitWithConfig(cmd *cobra.Command, cwd string, force bool, result Onboar
 	}
 
 	// Re-load config for harness generation.
-	cfg, err := config.Load(leoDir)
+	cfg, err := config.Load(momDir)
 	if err != nil {
 		return fmt.Errorf("loading config after write: %w", err)
 	}
@@ -313,7 +313,7 @@ func runInitWithConfig(cmd *cobra.Command, cwd string, force bool, result Onboar
 	installGlobalSkills(p, result.Harnesses)
 
 	// ── Phase 4: Register with global watch daemon ──────────────────────────
-	if err := ensureGlobalDaemon(cwd, leoDir, result.Harnesses); err != nil {
+	if err := ensureGlobalDaemon(cwd, momDir, result.Harnesses); err != nil {
 		p.Warnf("watch daemon: %v", err)
 	} else {
 		p.Check("Watch daemon installed")
@@ -321,7 +321,7 @@ func runInitWithConfig(cmd *cobra.Command, cwd string, force bool, result Onboar
 
 	// ── Telemetry: emit smoke events ────────────────────────────────────────
 	startedAt := time.Now().UTC().Format(time.RFC3339)
-	emitter := herald.New(leoDir, cfg.Telemetry.TelemetryEnabled())
+	emitter := herald.New(momDir, cfg.Telemetry.TelemetryEnabled())
 	emitter.EmitSessionEvent(herald.SessionEvent{
 		SessionID: "s-init",
 		RepoID:    filepath.Base(cwd),
@@ -350,8 +350,8 @@ func runInitWithConfig(cmd *cobra.Command, cwd string, force bool, result Onboar
 // runReinit handles `mom init` when the central vault already exists. It
 // reconciles selected harnesses, refreshes global integrations even when config
 // is unchanged, and registers the current cwd with the global watch daemon.
-func runReinit(cmd *cobra.Command, cwd, leoDir string, result OnboardingResult, p *ux.Printer) error {
-	cfg, err := config.Load(leoDir)
+func runReinit(cmd *cobra.Command, cwd, momDir string, result OnboardingResult, p *ux.Printer) error {
+	cfg, err := config.Load(momDir)
 	if err != nil {
 		// Corrupt or missing config — fall back to informational message.
 		p.Muted("MOM already exists — run with --force to reinitialize from scratch.")
@@ -382,7 +382,7 @@ func runReinit(cmd *cobra.Command, cwd, leoDir string, result OnboardingResult, 
 	}
 
 	if changed {
-		if err := config.Save(leoDir, cfg); err != nil {
+		if err := config.Save(momDir, cfg); err != nil {
 			return fmt.Errorf("saving config: %w", err)
 		}
 	}
@@ -411,7 +411,7 @@ func runReinit(cmd *cobra.Command, cwd, leoDir string, result OnboardingResult, 
 	installGlobalSkills(p, cfg.EnabledHarnesses())
 
 	// Register with global watch daemon (updated harnesses).
-	if err := ensureGlobalDaemon(cwd, leoDir, cfg.EnabledHarnesses()); err != nil {
+	if err := ensureGlobalDaemon(cwd, momDir, cfg.EnabledHarnesses()); err != nil {
 		p.Warnf("watch daemon: %v", err)
 	} else {
 		p.Check("watch daemon updated")

@@ -138,10 +138,10 @@ func TestQueryOpEvents_FilterBySinceUntilWindow(t *testing.T) {
 	t0 := time.Date(2026, 5, 4, 10, 0, 0, 0, time.UTC)
 
 	for i, dt := range []time.Duration{
-		0,                  // 10:00
-		1 * time.Hour,      // 11:00
-		2 * time.Hour,      // 12:00
-		3 * time.Hour,      // 13:00
+		0,             // 10:00
+		1 * time.Hour, // 11:00
+		2 * time.Hour, // 12:00
+		3 * time.Hour, // 13:00
 	} {
 		_, err := l.InsertOpEvent(librarian.OpEvent{
 			EventType: "op.x",
@@ -155,8 +155,8 @@ func TestQueryOpEvents_FilterBySinceUntilWindow(t *testing.T) {
 	}
 
 	rows, _ := l.QueryOpEvents(librarian.OpEventFilter{
-		Since: t0.Add(1 * time.Hour),    // inclusive
-		Until: t0.Add(3 * time.Hour),    // exclusive
+		Since: t0.Add(1 * time.Hour), // inclusive
+		Until: t0.Add(3 * time.Hour), // exclusive
 	})
 	if len(rows) != 2 {
 		t.Fatalf("expected 2 rows in [11:00, 13:00), got %d", len(rows))

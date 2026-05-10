@@ -22,16 +22,16 @@ func makeTree(t *testing.T, dirs ...string) string {
 }
 
 // writeConfig writes a minimal config.yaml with the given scope label.
-func writeConfig(t *testing.T, leoDir, label string) {
+func writeConfig(t *testing.T, momDir, label string) {
 	t.Helper()
 	content := "version: \"1\"\nscope: " + label + "\nruntimes:\n  claude:\n    enabled: true\n"
-	if err := os.WriteFile(filepath.Join(leoDir, "config.yaml"), []byte(content), 0644); err != nil {
+	if err := os.WriteFile(filepath.Join(momDir, "config.yaml"), []byte(content), 0644); err != nil {
 		t.Fatalf("writeConfig: %v", err)
 	}
 }
 
 func TestWalk_ThreeLevels(t *testing.T) {
-	// Tree: root/.leo, root/a/.leo, root/a/b/.leo — cwd = root/a/b
+	// Tree: root/.mom, root/a/.mom, root/a/b/.mom — cwd = root/a/b
 	root := makeTree(t,
 		".mom",
 		"a/.mom",
@@ -85,7 +85,7 @@ func TestWalk_NoLeoDir(t *testing.T) {
 }
 
 func TestWalk_StopsAtHome(t *testing.T) {
-	// Tree: root/.leo, root/a/.leo — HOME = root/a (so root/.leo should not appear)
+	// Tree: root/.mom, root/a/.mom — HOME = root/a (so root/.mom should not appear)
 	root := makeTree(t,
 		".mom",
 		"a/.mom",
@@ -99,7 +99,7 @@ func TestWalk_StopsAtHome(t *testing.T) {
 	cwd := filepath.Join(root, "a", "b")
 	scopes := scope.Walk(cwd)
 
-	// Should only find root/a/.leo (HOME boundary stops at root/a, inclusive).
+	// Should only find root/a/.mom (HOME boundary stops at root/a, inclusive).
 	if len(scopes) != 1 {
 		t.Fatalf("expected 1 scope, got %d: %v", len(scopes), scopes)
 	}
@@ -109,7 +109,7 @@ func TestWalk_StopsAtHome(t *testing.T) {
 }
 
 func TestWalk_NearestFirst(t *testing.T) {
-	// Single .leo/ one level above cwd.
+	// Single .mom/ one level above cwd.
 	root := makeTree(t, ".mom", "sub")
 	writeConfig(t, filepath.Join(root, ".mom"), "repo")
 	t.Setenv("HOME", root)

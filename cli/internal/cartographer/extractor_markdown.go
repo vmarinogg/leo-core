@@ -24,7 +24,6 @@ func (e *MarkdownExtractor) Matches(path string) bool {
 	return markdownExtensions[ext]
 }
 
-
 func (e *MarkdownExtractor) Extract(_ context.Context, src Source) ([]Draft, error) {
 	lines := linesOf(src.Content)
 	srcHash := hashBytes(src.Content)

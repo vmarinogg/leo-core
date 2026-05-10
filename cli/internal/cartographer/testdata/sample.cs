@@ -1,6 +1,6 @@
 // Sample C# file for Cartographer AST extraction tests.
 
-namespace Leo.Samples;
+namespace Mom.Samples;
 
 public class DataProcessor
 {

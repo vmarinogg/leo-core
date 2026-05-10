@@ -21,9 +21,9 @@ func testDoc(id string) *Doc {
 func setupAdapter(t *testing.T) (*JSONAdapter, string) {
 	t.Helper()
 	dir := t.TempDir()
-	leoDir := filepath.Join(dir, ".leo")
-	os.MkdirAll(filepath.Join(leoDir, "memory"), 0755)
-	return NewJSONAdapter(leoDir), leoDir
+	momDir := filepath.Join(dir, ".mom")
+	os.MkdirAll(filepath.Join(momDir, "memory"), 0755)
+	return NewJSONAdapter(momDir), momDir
 }
 
 func TestJSONAdapter_WriteAndRead(t *testing.T) {

@@ -180,4 +180,3 @@ func redactSecrets(text string) (string, []string) {
 	}
 	return out, cats
 }
-

@@ -174,9 +174,9 @@ func extractViaQuery(h *languageHandler, root *sitter.Node, src Source, srcHash 
 			}
 
 			drafts = append(drafts, Draft{
-				Summary:    summary,
-				Tags:       buildTags(h.name, kind, src.Path, name),
-				Content:    content,
+				Summary: summary,
+				Tags:    buildTags(h.name, kind, src.Path, name),
+				Content: content,
 				Provenance: ProvenanceMeta{
 					SourceFile:   src.Path,
 					SourceLines:  lineRange(line, endLine),
@@ -387,9 +387,9 @@ func goTypeDraft(node *sitter.Node, src Source, srcHash string, lines []string) 
 	}
 
 	return []Draft{{
-		Summary:    summary,
-		Tags:       buildTags("go", "type", src.Path, name),
-		Content:    content,
+		Summary: summary,
+		Tags:    buildTags("go", "type", src.Path, name),
+		Content: content,
 		Provenance: ProvenanceMeta{
 			SourceFile:   src.Path,
 			SourceLines:  lineRange(startLine+1, endLine+1),
@@ -437,9 +437,9 @@ func goFuncDraft(node *sitter.Node, src Source, srcHash string, lines []string) 
 	}
 
 	return &Draft{
-		Summary:    summary,
-		Tags:       buildTags("go", "function", src.Path, name),
-		Content:    content,
+		Summary: summary,
+		Tags:    buildTags("go", "function", src.Path, name),
+		Content: content,
 		Provenance: ProvenanceMeta{
 			SourceFile:   src.Path,
 			SourceLines:  lineRange(startLine+1, endLine+1),
@@ -506,9 +506,9 @@ func goMethodDraft(node *sitter.Node, src Source, srcHash string, lines []string
 	}
 
 	return &Draft{
-		Summary:    summary,
-		Tags:       buildTags("go", "method", src.Path, name, extras...),
-		Content:    content,
+		Summary: summary,
+		Tags:    buildTags("go", "method", src.Path, name, extras...),
+		Content: content,
 		Provenance: ProvenanceMeta{
 			SourceFile:   src.Path,
 			SourceLines:  lineRange(startLine+1, endLine+1),

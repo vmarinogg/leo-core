@@ -268,7 +268,7 @@ func TestTick_FlushesIdleSession(t *testing.T) {
 
 	// Tick well past the idle window — 10 minutes is comfortably
 	// beyond the 90s default.
-	d.Tick(time.Now().Add(10*time.Minute))
+	d.Tick(time.Now().Add(10 * time.Minute))
 
 	rows, _ := lib.SearchMemories(librarian.SearchFilter{SessionID: "s", Limit: 10})
 	if len(rows) != 1 {

@@ -29,9 +29,9 @@ func TestCache_GetSet(t *testing.T) {
 
 func TestCache_SaveLoad(t *testing.T) {
 	dir := t.TempDir()
-	leoDir := filepath.Join(dir, ".leo")
+	momDir := filepath.Join(dir, ".mom")
 
-	c := NewCache(leoDir)
+	c := NewCache(momDir)
 	c.Set("src/main.go", CacheEntry{SHA256: "deadbeef", LastScannedAt: "2026-01-01T00:00:00Z", DraftCount: 5})
 
 	if err := c.Save(); err != nil {
@@ -39,13 +39,13 @@ func TestCache_SaveLoad(t *testing.T) {
 	}
 
 	// Verify manifest file exists.
-	manifestPath := filepath.Join(leoDir, "cache", "bootstrap", "manifest.json")
+	manifestPath := filepath.Join(momDir, "cache", "bootstrap", "manifest.json")
 	if _, err := os.Stat(manifestPath); err != nil {
 		t.Fatalf("manifest.json not found: %v", err)
 	}
 
 	// Load a new cache from the same dir.
-	c2 := NewCache(leoDir)
+	c2 := NewCache(momDir)
 	got, ok := c2.Get("src/main.go")
 	if !ok {
 		t.Fatal("expected cache hit after reload")
@@ -70,10 +70,10 @@ func TestCache_Reset(t *testing.T) {
 	}
 }
 
-func TestCache_EmptyLeoDir(t *testing.T) {
-	// Save on an empty-string leoDir should be a no-op.
+func TestCache_EmptyMomDir(t *testing.T) {
+	// Save on an empty-string momDir should be a no-op.
 	c := NewCache("")
 	if err := c.Save(); err != nil {
-		t.Errorf("Save on empty leoDir should not error, got %v", err)
+		t.Errorf("Save on empty momDir should not error, got %v", err)
 	}
 }
