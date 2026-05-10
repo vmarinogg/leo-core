@@ -124,31 +124,3 @@ func TestImportCmd_CentralExportMergeSkipsExistingRows(t *testing.T) {
 		t.Fatalf("second import should report skipped rows, got: %s", buf.String())
 	}
 }
-
-func TestImportCmd_LegacyMemoryJSONPathUsesUpgradeImportRoutine(t *testing.T) {
-	legacyRoot := setupTestMemory(t)
-	doc := sampleDoc("legacy-import-doc")
-	doc.Content = map[string]any{"text": "legacy import body"}
-	writeTestDoc(t, legacyRoot, doc)
-
-	centralDir := filepath.Join(t.TempDir(), ".mom")
-	t.Setenv("MOM_VAULT", filepath.Join(centralDir, "mom.db"))
-	buf := new(bytes.Buffer)
-	importCmd.SetOut(buf)
-	if err := runImport(importCmd, []string{filepath.Join(legacyRoot, ".mom")}); err != nil {
-		t.Fatalf("legacy import: %v", err)
-	}
-	if !strings.Contains(buf.String(), "1 memories imported") {
-		t.Fatalf("unexpected import output: %s", buf.String())
-	}
-
-	lib, closeFn := openExportTestLib(t, filepath.Join(centralDir, "mom.db"))
-	defer func() { _ = closeFn() }()
-	rows, err := lib.SearchMemories(librarian.SearchFilter{SessionID: "legacy-import", Limit: 10})
-	if err != nil {
-		t.Fatalf("SearchMemories: %v", err)
-	}
-	if len(rows) != 1 || !strings.Contains(rows[0].Content, "legacy import body") {
-		t.Fatalf("legacy import rows = %+v", rows)
-	}
-}

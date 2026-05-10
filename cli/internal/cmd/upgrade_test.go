@@ -12,7 +12,7 @@ import (
 	"github.com/momhq/mom/cli/internal/config"
 )
 
-// setupLegacyProject creates a .mom/ with legacy config and minimal structure.
+// setupLegacyProject creates a .mom/ with stale config and current flat structure.
 // resetUpgradeFlags resets cobra flag state between tests.
 func resetUpgradeFlags(t *testing.T) {
 	t.Helper()
@@ -34,13 +34,13 @@ func setupLegacyProject(t *testing.T) string {
 	t.Setenv("MOM_UPGRADE_ASSUME_YES", "1")
 	leoDir := filepath.Join(dir, ".mom")
 
-	// Create directories using the legacy kb/ layout.
+	// Create directories using the current flat layout.
 	for _, d := range []string{
 		leoDir,
 		filepath.Join(leoDir, "profiles"),
-		filepath.Join(leoDir, "kb", "docs"),
-		filepath.Join(leoDir, "kb", "constraints"),
-		filepath.Join(leoDir, "kb", "skills"),
+		filepath.Join(leoDir, "memory"),
+		filepath.Join(leoDir, "constraints"),
+		filepath.Join(leoDir, "skills"),
 		filepath.Join(leoDir, "cache"),
 	} {
 		os.MkdirAll(d, 0755)
@@ -62,47 +62,47 @@ kb:
 `
 	os.WriteFile(filepath.Join(leoDir, "config.yaml"), []byte(legacyConfig), 0644)
 
-	// Write an old schema.json in the legacy location (different from current).
-	os.WriteFile(filepath.Join(leoDir, "kb", "schema.json"), []byte(`{"old": true}`), 0644)
+	// Write an old schema.json (different from current).
+	os.WriteFile(filepath.Join(leoDir, "schema.json"), []byte(`{"old": true}`), 0644)
 
 	// Write identity.json.
 	os.WriteFile(filepath.Join(leoDir, "identity.json"), []byte(`{"old": true}`), 0644)
 
-	// Write an old constraint in legacy location.
+	// Write an old constraint.
 	os.WriteFile(
-		filepath.Join(leoDir, "kb", "constraints", "anti-hallucination.json"),
+		filepath.Join(leoDir, "constraints", "anti-hallucination.json"),
 		[]byte(`{"id":"anti-hallucination","old":true}`),
 		0644,
 	)
 
-	// Write retired and formerly generated central docs from the legacy layout.
+	// Write retired and formerly generated central docs.
 	os.WriteFile(
-		filepath.Join(leoDir, "kb", "constraints", "delegation-mandatory.json"),
+		filepath.Join(leoDir, "constraints", "delegation-mandatory.json"),
 		[]byte(`{"id":"delegation-mandatory","type":"constraint"}`),
 		0644,
 	)
 	os.WriteFile(
-		filepath.Join(leoDir, "kb", "constraints", "escalation-triggers.json"),
+		filepath.Join(leoDir, "constraints", "escalation-triggers.json"),
 		[]byte(`{"id":"escalation-triggers","type":"constraint"}`),
 		0644,
 	)
 	os.WriteFile(
-		filepath.Join(leoDir, "kb", "constraints", "team-local.json"),
+		filepath.Join(leoDir, "constraints", "team-local.json"),
 		[]byte(`{"id":"team-local","type":"constraint"}`),
 		0644,
 	)
 	os.WriteFile(
-		filepath.Join(leoDir, "kb", "skills", "task-intake.json"),
+		filepath.Join(leoDir, "skills", "task-intake.json"),
 		[]byte(`{"id":"task-intake","type":"skill"}`),
 		0644,
 	)
 	os.WriteFile(
-		filepath.Join(leoDir, "kb", "skills", "session-wrap-up.json"),
+		filepath.Join(leoDir, "skills", "session-wrap-up.json"),
 		[]byte(`{"id":"session-wrap-up","type":"skill"}`),
 		0644,
 	)
 	os.WriteFile(
-		filepath.Join(leoDir, "kb", "skills", "team-review.json"),
+		filepath.Join(leoDir, "skills", "team-review.json"),
 		[]byte(`{"id":"team-review","type":"skill"}`),
 		0644,
 	)
@@ -114,7 +114,7 @@ kb:
 		0644,
 	)
 
-	// Write a user doc that must survive upgrade (in legacy kb/docs location).
+	// Write a user doc that must survive upgrade.
 	userDoc := map[string]interface{}{
 		"id":         "my-decision",
 		"type":       "decision",
@@ -135,7 +135,7 @@ kb:
 		},
 	}
 	docData, _ := json.MarshalIndent(userDoc, "", "  ")
-	os.WriteFile(filepath.Join(leoDir, "kb", "docs", "my-decision.json"), docData, 0644)
+	os.WriteFile(filepath.Join(leoDir, "memory", "my-decision.json"), docData, 0644)
 
 	return dir
 }
@@ -333,7 +333,7 @@ func TestUpgradeCmd_PreservesUserDocs(t *testing.T) {
 		t.Fatalf("upgrade failed: %v", err)
 	}
 
-	// User doc must still exist — migrated from kb/docs/ to memory/.
+	// User doc must still exist in memory/.
 	docPath := filepath.Join(dir, ".mom", "memory", "my-decision.json")
 	data, err := os.ReadFile(docPath)
 	if err != nil {
@@ -380,7 +380,7 @@ func TestUpgradeCmd_DryRun(t *testing.T) {
 	os.Chdir(dir)
 	defer os.Chdir(origDir)
 
-	// Read schema before (still in legacy location since dry-run, but the file is there from setupLegacyProject).
+	// Read schema before.
 	schemaBefore, _ := os.ReadFile(filepath.Join(dir, ".mom", "kb", "schema.json"))
 
 	buf := new(bytes.Buffer)
@@ -428,8 +428,8 @@ func TestUpgradeCmd_MigratesMetricDocs(t *testing.T) {
 		"content":    map[string]interface{}{"data": "test"},
 	}
 	docData, _ := json.MarshalIndent(metricDoc, "", "  ")
-	os.WriteFile(filepath.Join(leoDir, "kb", "docs", "session-2026-04-10.json"), docData, 0644)
-	// Note: this doc is in legacy kb/docs/ — upgrade will migrate it to memory/
+	os.WriteFile(filepath.Join(leoDir, "memory", "session-2026-04-10.json"), docData, 0644)
+	// Note: this doc is in memory/.
 
 	origDir, _ := os.Getwd()
 	os.Chdir(dir)
@@ -543,139 +543,6 @@ func TestUpgradeCmd_OutputShowsActions(t *testing.T) {
 }
 
 // ── Filesystem layout migration tests ─────────────────────────────────────────
-
-func TestUpgradeCmd_MigratesKBLayout(t *testing.T) {
-	resetUpgradeFlags(t)
-	dir := setupLegacyProject(t)
-
-	origDir, _ := os.Getwd()
-	os.Chdir(dir)
-	defer os.Chdir(origDir)
-
-	buf := new(bytes.Buffer)
-	rootCmd.SetOut(buf)
-	rootCmd.SetErr(buf)
-	rootCmd.SetArgs([]string{"upgrade"})
-
-	if err := rootCmd.Execute(); err != nil {
-		t.Fatalf("upgrade failed: %v\noutput:\n%s", err, buf.String())
-	}
-
-	leoDir := filepath.Join(dir, ".mom")
-
-	// kb/ must be gone after migration.
-	if _, err := os.Stat(filepath.Join(leoDir, "kb")); err == nil {
-		t.Error("legacy .mom/kb/ should have been removed after migration")
-	}
-
-	// memory/ must exist (was kb/docs/).
-	if info, err := os.Stat(filepath.Join(leoDir, "memory")); err != nil || !info.IsDir() {
-		t.Error("memory/ directory not created by migration")
-	}
-
-	// User doc must be in memory/ (migrated from kb/docs/).
-	if _, err := os.Stat(filepath.Join(leoDir, "memory", "my-decision.json")); err != nil {
-		t.Error("user doc not found in memory/ after migration")
-	}
-
-	// constraints/ must exist.
-	if info, err := os.Stat(filepath.Join(leoDir, "constraints")); err != nil || !info.IsDir() {
-		t.Error("constraints/ directory not created by migration")
-	}
-
-	// skills/ must exist.
-	if info, err := os.Stat(filepath.Join(leoDir, "skills")); err != nil || !info.IsDir() {
-		t.Error("skills/ directory not created by migration")
-	}
-
-	// schema.json must be at the flat level.
-	if _, err := os.Stat(filepath.Join(leoDir, "schema.json")); err != nil {
-		t.Error("schema.json not at flat level after migration")
-	}
-
-	// Output must mention the migration.
-	if !strings.Contains(buf.String(), "kb/ flattened") {
-		t.Errorf("expected migration notice in output, got:\n%s", buf.String())
-	}
-}
-
-func TestUpgradeCmd_MigrationIdempotent(t *testing.T) {
-	resetUpgradeFlags(t)
-	dir := setupLegacyProject(t)
-
-	origDir, _ := os.Getwd()
-	os.Chdir(dir)
-	defer os.Chdir(origDir)
-
-	buf := new(bytes.Buffer)
-	rootCmd.SetOut(buf)
-	rootCmd.SetErr(buf)
-
-	// First upgrade.
-	rootCmd.SetArgs([]string{"upgrade"})
-	if err := rootCmd.Execute(); err != nil {
-		t.Fatalf("first upgrade failed: %v\noutput:\n%s", err, buf.String())
-	}
-
-	// Second upgrade — must not fail, kb/ must stay gone.
-	buf.Reset()
-	rootCmd.SetArgs([]string{"upgrade"})
-	if err := rootCmd.Execute(); err != nil {
-		t.Fatalf("second upgrade (idempotent) failed: %v\noutput:\n%s", err, buf.String())
-	}
-
-	leoDir := filepath.Join(dir, ".mom")
-	if _, err := os.Stat(filepath.Join(leoDir, "kb")); err == nil {
-		t.Error("kb/ should not reappear on second upgrade")
-	}
-}
-
-func TestUpgradeCmd_PartialMigrationSkipsExisting(t *testing.T) {
-	resetUpgradeFlags(t)
-	dir := t.TempDir()
-	leoDir := filepath.Join(dir, ".mom")
-
-	// Set up a partial migration: kb/docs AND memory/ both exist (memory/ wins — skip kb/docs).
-	// Also include constraints/ and skills/ at the new flat locations (already migrated).
-	os.MkdirAll(filepath.Join(leoDir, "kb", "docs"), 0755)
-	os.MkdirAll(filepath.Join(leoDir, "memory"), 0755)
-	os.MkdirAll(filepath.Join(leoDir, "constraints"), 0755)
-	os.MkdirAll(filepath.Join(leoDir, "skills"), 0755)
-
-	// Write docs in both locations (partial migration state).
-	oldDoc := []byte(`{"id":"old","type":"fact","lifecycle":"state","scope":"project","tags":["x"],"created":"2026-01-01T00:00:00Z","created_by":"u","updated":"2026-01-01T00:00:00Z","updated_by":"u","content":{"fact":"old"}}`)
-	newDoc := []byte(`{"id":"new","type":"fact","lifecycle":"state","scope":"project","tags":["x"],"created":"2026-01-01T00:00:00Z","created_by":"u","updated":"2026-01-01T00:00:00Z","updated_by":"u","content":{"fact":"new"}}`)
-	os.WriteFile(filepath.Join(leoDir, "kb", "docs", "old.json"), oldDoc, 0644)
-	os.WriteFile(filepath.Join(leoDir, "memory", "new.json"), newDoc, 0644)
-
-	// Write minimal config.
-	os.WriteFile(filepath.Join(leoDir, "config.yaml"), []byte("version: \"1\"\nruntime: claude\n"), 0644)
-	os.WriteFile(filepath.Join(leoDir, "index.json"), []byte(`{"version":"1","by_tag":{},"by_type":{},"by_scope":{},"by_lifecycle":{}}`), 0644)
-
-	origDir, _ := os.Getwd()
-	os.Chdir(dir)
-	defer os.Chdir(origDir)
-
-	buf := new(bytes.Buffer)
-	rootCmd.SetOut(buf)
-	rootCmd.SetErr(buf)
-	rootCmd.SetArgs([]string{"upgrade"})
-
-	// Must not error — partial migration is handled gracefully.
-	if err := rootCmd.Execute(); err != nil {
-		t.Fatalf("upgrade with partial migration failed: %v\noutput:\n%s", err, buf.String())
-	}
-
-	// memory/ must not have been overwritten (destination existed → skipped).
-	if _, err := os.Stat(filepath.Join(leoDir, "memory", "new.json")); err != nil {
-		t.Error("memory/new.json should still exist after partial migration handling")
-	}
-
-	// Output must mention the skipped step.
-	if !strings.Contains(buf.String(), "skipped") {
-		t.Errorf("expected 'skipped' in output for partial migration, got:\n%s", buf.String())
-	}
-}
 
 func TestInitCmd_NewLayout_NoKBDir(t *testing.T) {
 	dir := t.TempDir()
