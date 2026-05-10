@@ -48,7 +48,7 @@ func resolveMomContext(cwd string) (projectDir string, momDir string, err error)
 // ensureGlobalDaemon registers the project in the global watch registry and
 // ensures the single global daemon is running. Also cleans up legacy per-project agents.
 // Skipped when MOM_NO_DAEMON=1 or when running inside a test binary.
-func ensureGlobalDaemon(projectRoot, momDir string, runtimes []string) error {
+func ensureGlobalDaemon(projectRoot, momDir string, harnesses []string) error {
 	projectRoot = pathutil.CanonicalDir(projectRoot)
 	if os.Getenv("MOM_NO_DAEMON") == "1" {
 		return nil
@@ -68,7 +68,7 @@ func ensureGlobalDaemon(projectRoot, momDir string, runtimes []string) error {
 	// brew upgrade / package updates are picked up on restart.
 
 	// Register this project in the global registry.
-	if err := daemon.RegisterProject(projectRoot, momDir, runtimes); err != nil {
+	if err := daemon.RegisterProject(projectRoot, momDir, harnesses); err != nil {
 		return fmt.Errorf("registering project: %w", err)
 	}
 
@@ -109,7 +109,7 @@ func unregisterProject(projectRoot, momDir string) error {
 }
 
 // sweepTranscripts runs a one-shot catch-up sweep for all watcher-capable
-// runtimes. Best-effort: errors are logged to stderr, never returned.
+// harnesses. Best-effort: errors are logged to stderr, never returned.
 func sweepTranscripts(projectDir, momDir string) {
 	cfg, err := config.Load(momDir)
 	if err != nil {

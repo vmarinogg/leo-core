@@ -71,7 +71,7 @@ var demoCmd = &cobra.Command{
 		p.Bold("Check List (mom doctor)")
 		p.Blank()
 		p.Check(".mom/ directory: exists and writable")
-		p.Check("config.yaml: valid (runtimes: claude)")
+		p.Check("config.yaml: valid (harnesses: claude)")
 		p.Check("memory/: exists")
 		p.Check("constraints/: exists")
 		p.Warn("skills/: not found")

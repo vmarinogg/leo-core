@@ -43,7 +43,7 @@ rather than persisted as memory text.`,
 }
 
 func init() {
-	recordCmd.Flags().StringVar(&recordSession, "session", "", "Real runtime session ID (optional; MOM also checks harness env vars)")
+	recordCmd.Flags().StringVar(&recordSession, "session", "", "Real harness session ID (optional; MOM also checks harness env vars)")
 	recordCmd.Flags().StringVar(&recordSummary, "summary", "", "One-line summary")
 	recordCmd.Flags().StringSliceVar(&recordTags, "tags", nil, "Tag names (comma-separated; normalised before insert)")
 	recordCmd.Flags().StringVar(&recordActor, "actor", "cli", "Calling agent / human label (defaults to 'cli')")

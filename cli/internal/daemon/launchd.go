@@ -81,7 +81,7 @@ func sweepLabel(hash string) string {
 }
 
 // Install creates and loads the Layer 0 daemon and Layer 1 sweep timer via launchd.
-// A single daemon watches all enabled runtimes (config-driven).
+// A single daemon watches all enabled harnesses (config-driven).
 func Install(cfg ServiceConfig) error {
 	hash := ProjectHash(cfg.ProjectDir)
 	agentsDir, err := launchAgentsDir()
@@ -97,7 +97,7 @@ func Install(cfg ServiceConfig) error {
 		return fmt.Errorf("parsing plist template: %w", err)
 	}
 
-	// Layer 0: persistent daemon — no --runtime flag, reads config for all runtimes.
+	// Layer 0: persistent daemon — no --harness flag, reads config for all harnesses.
 	dLabel := daemonLabel(hash)
 	dPath := filepath.Join(agentsDir, dLabel+".plist")
 	dData := plistData{
@@ -122,7 +122,7 @@ func Install(cfg ServiceConfig) error {
 		return fmt.Errorf("loading daemon: %w", err)
 	}
 
-	// Layer 1: periodic sweep timer — no --runtime flag, sweeps all runtimes.
+	// Layer 1: periodic sweep timer — no --harness flag, sweeps all harnesses.
 	sLabel := sweepLabel(hash)
 	sPath := filepath.Join(agentsDir, sLabel+".plist")
 	sData := plistData{
@@ -164,7 +164,7 @@ func Uninstall(cfg ServiceConfig) error {
 		// Current: com.momhq.watch-{hash}.plist, com.momhq.watch-sweep-{hash}.plist
 		"com.momhq.watch-" + hash + ".plist",
 		"com.momhq.watch-sweep-" + hash + ".plist",
-		// Legacy per-runtime: com.momhq.watch-{runtime}-{hash}.plist
+		// Legacy per-harness: com.momhq.watch-{harness}-{hash}.plist
 		"com.momhq.watch-*-" + hash + ".plist",
 	} {
 		found, _ := filepath.Glob(filepath.Join(agentsDir, pattern))

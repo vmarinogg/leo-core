@@ -35,7 +35,7 @@ func sweepTimerName(hash string) string {
 }
 
 // Install creates and enables the Layer 0 daemon service and Layer 1 sweep timer via systemd.
-// A single daemon watches all enabled runtimes (config-driven).
+// A single daemon watches all enabled harnesses (config-driven).
 func Install(cfg ServiceConfig) error {
 	hash := ProjectHash(cfg.ProjectDir)
 	unitDir, err := systemdUserDir()
@@ -46,7 +46,7 @@ func Install(cfg ServiceConfig) error {
 	logsDir := filepath.Join(cfg.MomDir, "logs")
 	_ = os.MkdirAll(logsDir, 0755)
 
-	// Layer 0: persistent daemon service — no --runtime, reads config.
+	// Layer 0: persistent daemon service — no --harness, reads config.
 	daemonUnit := fmt.Sprintf(`[Unit]
 Description=MOM watch daemon (%s)
 
@@ -70,7 +70,7 @@ WantedBy=default.target
 		return fmt.Errorf("writing daemon service: %w", err)
 	}
 
-	// Layer 1: one-shot sweep service — no --runtime, sweeps all.
+	// Layer 1: one-shot sweep service — no --harness, sweeps all.
 	sweepUnit := fmt.Sprintf(`[Unit]
 Description=MOM watch sweep (%s)
 
@@ -136,7 +136,7 @@ func Uninstall(cfg ServiceConfig) error {
 		"mom-watch-" + hash + ".service",
 		"mom-watch-sweep-" + hash + ".service",
 		"mom-watch-sweep-" + hash + ".timer",
-		// Legacy per-runtime names.
+		// Legacy per-harness names.
 		"mom-watch-*-" + hash + ".service",
 		"mom-watch-sweep-*-" + hash + ".service",
 		"mom-watch-sweep-*-" + hash + ".timer",
