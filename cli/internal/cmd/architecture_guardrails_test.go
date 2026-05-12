@@ -16,6 +16,7 @@ package cmd
 import (
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -233,7 +234,7 @@ func TestGuardrail_CoreFlow_NoScopeWalkOutsideAllowlist(t *testing.T) {
 	if len(hits) > 0 {
 		var lines []string
 		for _, h := range hits {
-			lines = append(lines, "  "+h.file+":"+itoa(h.line)+": "+h.symbol+" → "+h.text)
+			lines = append(lines, "  "+h.file+":"+strconv.Itoa(h.line)+": "+h.symbol+" → "+h.text)
 		}
 		t.Fatalf("scope-walk symbols used outside allowlist (%d hit%s):\n%s\n"+
 			"The central-vault architecture has retired scope walks for core memory operations. "+
@@ -250,25 +251,6 @@ func callerDir(t *testing.T) string {
 		t.Fatalf("getwd: %v", err)
 	}
 	return wd
-}
-
-func itoa(n int) string {
-	if n == 0 {
-		return "0"
-	}
-	neg := n < 0
-	if neg {
-		n = -n
-	}
-	var digits []byte
-	for n > 0 {
-		digits = append([]byte{byte('0' + n%10)}, digits...)
-		n /= 10
-	}
-	if neg {
-		digits = append([]byte{'-'}, digits...)
-	}
-	return string(digits)
 }
 
 // callerFile returns this test file's path, for friendlier failure messages.

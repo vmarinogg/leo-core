@@ -223,6 +223,21 @@ func writePlist(tmpl *template.Template, path string, data plistData) error {
 const globalDaemonLabel = "com.momhq.watch"
 const globalSweepLabel = "com.momhq.watch-sweep"
 
+// GlobalServiceFiles returns the absolute paths of the platform-specific
+// service files the global watch daemon installs. Doctor and other
+// introspection callers use this to detect installation without
+// duplicating platform literals.
+func GlobalServiceFiles() ([]string, error) {
+	agentsDir, err := launchAgentsDir()
+	if err != nil {
+		return nil, err
+	}
+	return []string{
+		filepath.Join(agentsDir, globalDaemonLabel+".plist"),
+		filepath.Join(agentsDir, globalSweepLabel+".plist"),
+	}, nil
+}
+
 const globalPlistTemplate = `<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">

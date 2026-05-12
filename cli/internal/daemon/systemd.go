@@ -195,6 +195,21 @@ const (
 	globalSweepTimer = "mom-watch-sweep.timer"
 )
 
+// GlobalServiceFiles returns the absolute paths of the platform-specific
+// service files the global watch daemon installs. Doctor and other
+// introspection callers use this to detect installation without
+// duplicating platform literals.
+func GlobalServiceFiles() ([]string, error) {
+	unitDir, err := systemdUserDir()
+	if err != nil {
+		return nil, err
+	}
+	return []string{
+		filepath.Join(unitDir, globalDaemonUnit),
+		filepath.Join(unitDir, globalSweepUnit),
+	}, nil
+}
+
 // InstallGlobal creates and enables a single global daemon and sweep timer via systemd.
 // Before installing, removes ALL legacy per-project units.
 func InstallGlobal(cfg GlobalServiceConfig) error {

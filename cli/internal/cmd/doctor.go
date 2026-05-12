@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/momhq/mom/cli/internal/centralvault"
+	"github.com/momhq/mom/cli/internal/daemon"
 	"github.com/momhq/mom/cli/internal/ux"
 	"github.com/spf13/cobra"
 )
@@ -80,14 +81,11 @@ func checkCentralVault() Check {
 }
 
 func checkWatchDaemon() Check {
-	home, err := os.UserHomeDir()
+	paths, err := daemon.GlobalServiceFiles()
 	if err != nil {
 		return Check{Name: "watch daemon", Status: StatusFail, Detail: err.Error()}
 	}
-	// Platform-specific service file paths.
-	macPlist := filepath.Join(home, "Library", "LaunchAgents", "com.momhq.watch.plist")
-	linuxUnit := filepath.Join(home, ".config", "systemd", "user", "mom-watch.service")
-	for _, p := range []string{macPlist, linuxUnit} {
+	for _, p := range paths {
 		if _, err := os.Stat(p); err == nil {
 			return Check{Name: "watch daemon", Status: StatusPass, Detail: p}
 		}

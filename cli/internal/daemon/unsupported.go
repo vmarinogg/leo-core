@@ -34,6 +34,11 @@ func StatusGlobal() (*Health, error) {
 	return &Health{Platform: "unsupported"}, nil
 }
 
+// GlobalServiceFiles is not supported on this platform.
+func GlobalServiceFiles() ([]string, error) {
+	return nil, nil
+}
+
 // CleanupLegacy is not supported on this platform.
 func CleanupLegacy(_ string) error {
 	return nil
