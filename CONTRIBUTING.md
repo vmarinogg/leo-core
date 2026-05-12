@@ -84,6 +84,20 @@ All code must follow test-driven development:
 3. Implement
 4. Verify they pass
 
+## Architecture guardrails
+
+The CLI package ships a small set of guardrail tests that enforce
+post-alpha main-flow invariants — public CLI surface, harness terminology,
+and core-flow architecture. They run as part of the normal Go test suite
+and in CI. To run them in isolation:
+
+```bash
+cd cli && go test ./internal/cmd/ -run 'TestGuardrail_'
+```
+
+Adding a new exception requires updating the corresponding allowlist in
+`internal/cmd/architecture_guardrails_test.go` with explicit rationale.
+
 ## PR process
 
 1. Fork the repo
