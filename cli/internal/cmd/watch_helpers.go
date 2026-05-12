@@ -11,7 +11,6 @@ import (
 	"github.com/momhq/mom/cli/internal/config"
 	"github.com/momhq/mom/cli/internal/daemon"
 	"github.com/momhq/mom/cli/internal/pathutil"
-	"github.com/momhq/mom/cli/internal/scope"
 	"github.com/momhq/mom/cli/internal/watcher"
 )
 
@@ -32,9 +31,6 @@ func harnessTranscriptDir(name string) string {
 
 func resolveMomContext(cwd string) (projectDir string, momDir string, err error) {
 	cwd = pathutil.CanonicalDir(cwd)
-	if sc, ok := scope.NearestWritable(cwd); ok {
-		return filepath.Dir(sc.Path), sc.Path, nil
-	}
 	centralDir, err := centralvault.Dir()
 	if err != nil {
 		return "", "", err
