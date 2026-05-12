@@ -223,6 +223,18 @@ func writePlist(tmpl *template.Template, path string, data plistData) error {
 const globalDaemonLabel = "com.momhq.watch"
 const globalSweepLabel = "com.momhq.watch-sweep"
 
+// GlobalDaemonFile returns the absolute path of the canonical service file
+// for the global watch daemon (the daemon proper, not the auxiliary sweep
+// timer). Doctor uses this to detect installation without duplicating
+// platform literals.
+func GlobalDaemonFile() (string, error) {
+	agentsDir, err := launchAgentsDir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(agentsDir, globalDaemonLabel+".plist"), nil
+}
+
 const globalPlistTemplate = `<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">

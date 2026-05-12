@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/momhq/mom/cli/internal/centralvault"
+	"github.com/momhq/mom/cli/internal/daemon"
 	"github.com/momhq/mom/cli/internal/ux"
 	"github.com/spf13/cobra"
 )
@@ -80,21 +81,21 @@ func checkCentralVault() Check {
 }
 
 func checkWatchDaemon() Check {
-	home, err := os.UserHomeDir()
+	path, err := daemon.GlobalDaemonFile()
 	if err != nil {
 		return Check{Name: "watch daemon", Status: StatusFail, Detail: err.Error()}
 	}
-	// Platform-specific service file paths.
-	macPlist := filepath.Join(home, "Library", "LaunchAgents", "com.momhq.watch.plist")
-	linuxUnit := filepath.Join(home, ".config", "systemd", "user", "mom-watch.service")
-	for _, p := range []string{macPlist, linuxUnit} {
-		if _, err := os.Stat(p); err == nil {
-			return Check{Name: "watch daemon", Status: StatusPass, Detail: p}
-		}
+	if path == "" {
+		return Check{Name: "watch daemon", Status: StatusFail,
+			Detail:     "not supported on this platform",
+			NextAction: "background recording requires macOS launchd or Linux systemd"}
 	}
-	return Check{Name: "watch daemon", Status: StatusFail,
-		Detail:     "no service file installed",
-		NextAction: "run 'mom init' to install the global watch daemon"}
+	if _, err := os.Stat(path); err != nil {
+		return Check{Name: "watch daemon", Status: StatusFail,
+			Detail:     "service file missing at " + path,
+			NextAction: "run 'mom init' to install the global watch daemon"}
+	}
+	return Check{Name: "watch daemon", Status: StatusPass, Detail: path}
 }
 
 func checkHarnessMCP() Check {
