@@ -154,6 +154,9 @@ func buildWatcherSources(cfg *config.Config, projectDir string) []watcher.Source
 		case "pi":
 			override = cfg.Watcher.PiTranscriptDir
 			adapter = watcher.NewPiAdapter()
+		case "codex":
+			override = cfg.Watcher.CodexTranscriptDir
+			adapter = watcher.NewCodexAdapter()
 		default:
 			continue
 		}

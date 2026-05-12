@@ -33,6 +33,16 @@ func (a *CodexAdapter) Tier() Tier {
 	return Fluent
 }
 
+// DefaultTranscriptDir returns Codex's session transcript directory.
+// Honors $CODEX_HOME when set (per Codex docs); otherwise falls back to
+// ~/.codex/sessions.
+func (a *CodexAdapter) DefaultTranscriptDir() string {
+	if home := os.Getenv("CODEX_HOME"); home != "" {
+		return filepath.Join(home, "sessions")
+	}
+	return "~/.codex/sessions"
+}
+
 func (a *CodexAdapter) GenerateContextFile(config Config, constraints []Constraint, skills []Skill, identity *Identity) error {
 	var body string
 	if config.Delivery == "context-file" {
@@ -238,6 +248,7 @@ func codexHomePath(parts ...string) (string, error) {
 }
 
 var (
-	_ GlobalAdapter = (*CodexAdapter)(nil)
-	_ HookInstaller = (*CodexAdapter)(nil)
+	_ GlobalAdapter    = (*CodexAdapter)(nil)
+	_ HookInstaller    = (*CodexAdapter)(nil)
+	_ TranscriptSource = (*CodexAdapter)(nil)
 )
