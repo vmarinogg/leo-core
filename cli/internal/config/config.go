@@ -46,6 +46,9 @@ type WatcherConfig struct {
 	// PiTranscriptDir overrides the default pi session directory.
 	// Defaults to ~/.pi/agent/sessions/ when empty.
 	PiTranscriptDir string `yaml:"pi_transcript_dir,omitempty"`
+	// CodexTranscriptDir overrides the default Codex session directory.
+	// Defaults to $CODEX_HOME/sessions (or ~/.codex/sessions) when empty.
+	CodexTranscriptDir string `yaml:"codex_transcript_dir,omitempty"`
 	// DebounceMs is the debounce delay in milliseconds. Default: 300.
 	DebounceMs int `yaml:"debounce_ms,omitempty"`
 }

@@ -15,6 +15,26 @@ func TestCodexAdapter_Name(t *testing.T) {
 	}
 }
 
+func TestCodexAdapter_DefaultTranscriptDir(t *testing.T) {
+	t.Run("uses CODEX_HOME when set", func(t *testing.T) {
+		t.Setenv("CODEX_HOME", "/custom/codex")
+		a := NewCodexAdapter("/tmp")
+		got := a.DefaultTranscriptDir()
+		want := "/custom/codex/sessions"
+		if got != want {
+			t.Errorf("DefaultTranscriptDir = %q, want %q", got, want)
+		}
+	})
+	t.Run("falls back to ~/.codex/sessions when CODEX_HOME unset", func(t *testing.T) {
+		t.Setenv("CODEX_HOME", "")
+		a := NewCodexAdapter("/tmp")
+		got := a.DefaultTranscriptDir()
+		if got != "~/.codex/sessions" {
+			t.Errorf("DefaultTranscriptDir = %q, want ~/.codex/sessions", got)
+		}
+	})
+}
+
 func TestCodexAdapter_DetectHarness(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
