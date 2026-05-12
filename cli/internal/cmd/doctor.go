@@ -81,18 +81,21 @@ func checkCentralVault() Check {
 }
 
 func checkWatchDaemon() Check {
-	paths, err := daemon.GlobalServiceFiles()
+	path, err := daemon.GlobalDaemonFile()
 	if err != nil {
 		return Check{Name: "watch daemon", Status: StatusFail, Detail: err.Error()}
 	}
-	for _, p := range paths {
-		if _, err := os.Stat(p); err == nil {
-			return Check{Name: "watch daemon", Status: StatusPass, Detail: p}
-		}
+	if path == "" {
+		return Check{Name: "watch daemon", Status: StatusFail,
+			Detail:     "not supported on this platform",
+			NextAction: "background recording requires macOS launchd or Linux systemd"}
 	}
-	return Check{Name: "watch daemon", Status: StatusFail,
-		Detail:     "no service file installed",
-		NextAction: "run 'mom init' to install the global watch daemon"}
+	if _, err := os.Stat(path); err != nil {
+		return Check{Name: "watch daemon", Status: StatusFail,
+			Detail:     "service file missing at " + path,
+			NextAction: "run 'mom init' to install the global watch daemon"}
+	}
+	return Check{Name: "watch daemon", Status: StatusPass, Detail: path}
 }
 
 func checkHarnessMCP() Check {
