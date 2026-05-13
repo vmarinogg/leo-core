@@ -7,6 +7,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/momhq/mom/cli/internal/librarian"
 	"github.com/momhq/mom/cli/internal/vault"
@@ -450,5 +451,129 @@ func TestMigration_BackwardSafe_PreExistingRowsHaveNullProjectId(t *testing.T) {
 	}
 	if !found {
 		t.Errorf("legacy memory %s should remain findable in scoped recall by default", id)
+	}
+}
+
+// TestRecentDrafts_FiltersByProjectId verifies #345 — RecentDrafts
+// honours the ProjectId filter so /mom-wrap-up (which calls
+// `mom drafts`) can scope to the active project.
+func TestRecentDrafts_FiltersByProjectId(t *testing.T) {
+	l := openLib(t)
+
+	a := validInsert(); a.ProjectId = "alpha"; a.SessionID = "s-a"
+	b := validInsert(); b.ProjectId = "beta"; b.SessionID = "s-b"
+	idA, _ := l.Insert(a)
+	idB, _ := l.Insert(b)
+
+	got, err := l.RecentDrafts(librarian.RecentDraftsFilter{
+		Since:     time.Hour,
+		Limit:     50,
+		ProjectId: "alpha",
+	})
+	if err != nil {
+		t.Fatalf("RecentDrafts: %v", err)
+	}
+
+	ids := map[string]bool{}
+	for _, m := range got {
+		ids[m.ID] = true
+	}
+	if !ids[idA] {
+		t.Errorf("expected alpha draft %s in results, got %v", idA, ids)
+	}
+	if ids[idB] {
+		t.Errorf("did NOT expect beta draft %s when scoped to alpha", idB)
+	}
+}
+
+// Cycle 2: filter by SessionID.
+func TestRecentDrafts_FiltersBySessionID(t *testing.T) {
+	l := openLib(t)
+	a := validInsert(); a.SessionID = "s-target"
+	b := validInsert(); b.SessionID = "s-other"
+	idA, _ := l.Insert(a)
+	idB, _ := l.Insert(b)
+
+	got, _ := l.RecentDrafts(librarian.RecentDraftsFilter{
+		Since:     time.Hour,
+		Limit:     50,
+		SessionID: "s-target",
+	})
+	ids := map[string]bool{}
+	for _, m := range got {
+		ids[m.ID] = true
+	}
+	if !ids[idA] {
+		t.Errorf("expected target draft %s", idA)
+	}
+	if ids[idB] {
+		t.Errorf("other-session draft %s should be excluded", idB)
+	}
+}
+
+// Cycle 3: filter by ProvenanceActor (harness).
+func TestRecentDrafts_FiltersByProvenanceActor(t *testing.T) {
+	l := openLib(t)
+	a := validInsert(); a.SessionID = "s-1"; a.ProvenanceActor = "codex"
+	b := validInsert(); b.SessionID = "s-2"; b.ProvenanceActor = "claude-code"
+	idCodex, _ := l.Insert(a)
+	idClaude, _ := l.Insert(b)
+
+	got, _ := l.RecentDrafts(librarian.RecentDraftsFilter{
+		Since:           time.Hour,
+		Limit:           50,
+		ProvenanceActor: "codex",
+	})
+	ids := map[string]bool{}
+	for _, m := range got {
+		ids[m.ID] = true
+	}
+	if !ids[idCodex] {
+		t.Errorf("expected codex draft %s", idCodex)
+	}
+	if ids[idClaude] {
+		t.Errorf("claude draft %s should be excluded when scoped to codex", idClaude)
+	}
+}
+
+// Cycle 4: NULL project_id rows behaviour mirrors recall — included by
+// default, excluded when StrictProject is true.
+func TestRecentDrafts_NullProjectInclusion(t *testing.T) {
+	l := openLib(t)
+	a := validInsert(); a.ProjectId = "alpha"; a.SessionID = "s-a"
+	legacy := validInsert(); legacy.ProjectId = ""; legacy.SessionID = "s-leg"
+	idA, _ := l.Insert(a)
+	idLeg, _ := l.Insert(legacy)
+
+	// Default: NULL included.
+	lax, _ := l.RecentDrafts(librarian.RecentDraftsFilter{
+		Since:     time.Hour,
+		Limit:     50,
+		ProjectId: "alpha",
+	})
+	ids := map[string]bool{}
+	for _, m := range lax {
+		ids[m.ID] = true
+	}
+	if !ids[idA] || !ids[idLeg] {
+		t.Errorf("lax scope should include both alpha and NULL, got %v", ids)
+	}
+
+	// Strict: NULL excluded.
+	strict, _ := l.RecentDrafts(librarian.RecentDraftsFilter{
+		Since:         time.Hour,
+		Limit:         50,
+		ProjectId:     "alpha",
+		StrictProject: true,
+	})
+	ids = map[string]bool{}
+	for _, m := range strict {
+		ids[m.ID] = true
+	}
+	if !ids[idA] {
+		t.Errorf("strict scope should include alpha %s", idA)
+	}
+	if ids[idLeg] {
+		t.Errorf("strict scope should exclude NULL %s", idLeg)
 	}
 }

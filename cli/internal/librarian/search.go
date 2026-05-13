@@ -188,22 +188,63 @@ func (l *Librarian) SearchMemories(f SearchFilter) ([]SearchedMemory, error) {
 	return out, nil
 }
 
-// RecentDrafts returns newest draft memories created within the given window.
-func (l *Librarian) RecentDrafts(since time.Duration, limit int) ([]Memory, error) {
+// RecentDraftsFilter narrows a RecentDrafts call. Since is required;
+// every other field is optional and defaults to "no filter on this
+// dimension." StrictProject defaults to false (matches ADR 0016: NULL
+// project_id rows are INCLUDED in scoped queries by default so legacy
+// drafts stay findable).
+type RecentDraftsFilter struct {
+	Since           time.Duration
+	Limit           int
+	ProjectId       string
+	StrictProject   bool
+	SessionID       string
+	ProvenanceActor string // exact match (e.g. "claude-code", "codex", "pi")
+}
+
+// RecentDrafts returns newest draft memories created within the given
+// window, optionally narrowed by project / session / harness. Used by
+// `mom drafts` to feed the /mom-wrap-up flow.
+func (l *Librarian) RecentDrafts(f RecentDraftsFilter) ([]Memory, error) {
+	limit := f.Limit
 	if limit <= 0 {
 		limit = 50
 	}
-	cutoff := formatTime(l.now().Add(-since))
-	out := []Memory{}
-	err := l.v.Query(
-		`SELECT id, type, summary, content, created_at, session_id,
+	cutoff := formatTime(l.now().Add(-f.Since))
+
+	wheres := []string{"promotion_state = 'draft'", "created_at >= ?"}
+	args := []any{cutoff}
+	if f.ProjectId != "" {
+		if f.StrictProject {
+			wheres = append(wheres, "project_id = ?")
+			args = append(args, f.ProjectId)
+		} else {
+			wheres = append(wheres, "(project_id = ? OR project_id IS NULL)")
+			args = append(args, f.ProjectId)
+		}
+	}
+	if f.SessionID != "" {
+		wheres = append(wheres, "session_id = ?")
+		args = append(args, f.SessionID)
+	}
+	if f.ProvenanceActor != "" {
+		wheres = append(wheres, "provenance_actor = ?")
+		args = append(args, f.ProvenanceActor)
+	}
+	args = append(args, limit)
+
+	query := `SELECT id, type, summary, content, created_at, session_id,
 		        provenance_actor, provenance_source_type, provenance_trigger_event,
 		        promotion_state, landmark, centrality_score
 		 FROM memories
-		 WHERE promotion_state = 'draft' AND created_at >= ?
+		 WHERE ` + strings.Join(wheres, " AND ") + `
 		 ORDER BY created_at DESC, id DESC
-		 LIMIT ?`,
-		[]any{cutoff, limit},
+		 LIMIT ?`
+
+	out := []Memory{}
+	err := l.v.Query(
+		query,
+		args,
 		func(rs *sql.Rows) error {
 			for rs.Next() {
 				var (
