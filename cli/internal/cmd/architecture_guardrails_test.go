@@ -36,6 +36,7 @@ var canonicalCLISurface = []string{
 	"init",
 	"lens",
 	"map",
+	"project",
 	"recall",
 	"record",
 	"serve",

@@ -11,6 +11,7 @@ import (
 	"github.com/momhq/mom/cli/internal/daemon"
 	"github.com/momhq/mom/cli/internal/librarian"
 	"github.com/momhq/mom/cli/internal/memory"
+	"github.com/momhq/mom/cli/internal/project"
 	"github.com/momhq/mom/cli/internal/ux"
 	"github.com/spf13/cobra"
 )
@@ -71,6 +72,11 @@ func runStatus(cmd *cobra.Command, args []string) error {
 	p := ux.NewPrinter(cmd.OutOrStdout())
 	p.Bold("MOM")
 	p.KeyValue("cwd", cwd, 12)
+	if id, found := project.IdForCwd(); found {
+		p.KeyValue("project", id, 12)
+	} else {
+		p.KeyValue("project", "(unbound — run /mom-project to bind this directory)", 12)
+	}
 	p.KeyValue("vault", path, 12)
 	p.KeyValue("memories", fmt.Sprintf("total %d, curated %d, draft %d", len(memories), curated, draft), 12)
 	p.KeyValue("types", fmt.Sprintf("episodic %d, semantic %d, procedural %d, untyped %d", types["episodic"], types["semantic"], types["procedural"], types["untyped"]), 12)

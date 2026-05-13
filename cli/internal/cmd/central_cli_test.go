@@ -489,3 +489,58 @@ func TestRecallCmd_StrictProjectExcludesNull(t *testing.T) {
 		t.Errorf("strict should exclude NULL %s, got:\n%s", legacyID, out)
 	}
 }
+
+// Cycle 7: When cwd has no .mom-project.yaml ancestor, status surfaces
+// a one-line nudge pointing at /mom-project (per ADR 0016 Q5).
+func TestStatusCmd_NudgesWhenCwdUnbound(t *testing.T) {
+	openCentralTestLib(t)
+
+	// Chdir to an unbound dir.
+	unbound := t.TempDir()
+	orig, _ := os.Getwd()
+	if err := os.Chdir(unbound); err != nil {
+		t.Fatalf("chdir: %v", err)
+	}
+	t.Cleanup(func() { _ = os.Chdir(orig) })
+
+	buf := new(bytes.Buffer)
+	statusCmd.SetOut(buf)
+	statusCmd.SetErr(buf)
+	if err := runStatus(statusCmd, nil); err != nil {
+		t.Fatalf("runStatus: %v", err)
+	}
+	out := buf.String()
+	if !strings.Contains(out, "/mom-project") {
+		t.Errorf("expected nudge mentioning /mom-project for unbound cwd, got:\n%s", out)
+	}
+}
+
+// Cycle 8: When cwd is bound, status reports the project id and stays quiet.
+func TestStatusCmd_ShowsProjectWhenBound(t *testing.T) {
+	openCentralTestLib(t)
+
+	bound := t.TempDir()
+	if err := os.WriteFile(filepath.Join(bound, ".mom-project.yaml"),
+		[]byte("version: \"1\"\nid: alpha\n"), 0o644); err != nil {
+		t.Fatalf("write bind file: %v", err)
+	}
+	orig, _ := os.Getwd()
+	if err := os.Chdir(bound); err != nil {
+		t.Fatalf("chdir: %v", err)
+	}
+	t.Cleanup(func() { _ = os.Chdir(orig) })
+
+	buf := new(bytes.Buffer)
+	statusCmd.SetOut(buf)
+	statusCmd.SetErr(buf)
+	if err := runStatus(statusCmd, nil); err != nil {
+		t.Fatalf("runStatus: %v", err)
+	}
+	out := buf.String()
+	if !strings.Contains(out, "alpha") {
+		t.Errorf("expected bound project id in output, got:\n%s", out)
+	}
+	if strings.Contains(out, "/mom-project") {
+		t.Errorf("bound cwd should NOT trigger the nudge, got:\n%s", out)
+	}
+}
