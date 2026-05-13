@@ -4,7 +4,7 @@
 package watcher
 
 // Adapter parses Harness-specific transcript lines into Turn values.
-// Each Harness (Claude Code, Windsurf, Pi) has its own adapter.
+// Each Harness (Claude Code, Codex, Pi) has its own adapter.
 type Adapter interface {
 	// Name returns the adapter's Harness identifier.
 	Name() string
@@ -23,7 +23,7 @@ type Adapter interface {
 }
 
 // ProjectFilter is optionally implemented by adapters that need to
-// filter transcripts by project (e.g. Windsurf, which uses a flat
+// filter transcripts by project (e.g. harnesses that use a flat
 // transcript directory with no per-project subdirectories).
 type ProjectFilter interface {
 	// BelongsToProject reads a transcript file and returns true if it

@@ -981,3 +981,62 @@ kb:
 		t.Error("autonomy appeared in config.yaml after scrub-idempotent upgrade")
 	}
 }
+
+// TestUpgradeCmd_PrunesRetiredWindsurfFromConfig verifies that #342
+// behavior: a legacy config with harnesses.windsurf.enabled = true is
+// not a crash. Upgrade emits a one-line "retired" warning and removes
+// the entry, continuing with the rest of the upgrade.
+func TestUpgradeCmd_PrunesRetiredWindsurfFromConfig(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("HOME", dir)
+	t.Setenv("MOM_VAULT", filepath.Join(dir, ".mom", "central.db"))
+
+	momDir := filepath.Join(dir, ".mom")
+	if err := os.MkdirAll(momDir, 0o755); err != nil {
+		t.Fatalf("mkdir momDir: %v", err)
+	}
+	// Pre-existing config with windsurf enabled (simulating a user who
+	// previously ran `mom init --harnesses windsurf,claude`).
+	yaml := `version: "1"
+scope: repo
+harnesses:
+    claude:
+        enabled: true
+    windsurf:
+        enabled: true
+user:
+    language: en
+communication:
+    mode: concise
+`
+	if err := os.WriteFile(filepath.Join(momDir, "config.yaml"), []byte(yaml), 0o644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	origDir, _ := os.Getwd()
+	os.Chdir(dir)
+	t.Cleanup(func() { os.Chdir(origDir) })
+
+	buf := new(bytes.Buffer)
+	rootCmd.SetOut(buf)
+	rootCmd.SetErr(buf)
+	rootCmd.SetArgs([]string{"upgrade"})
+
+	if err := rootCmd.Execute(); err != nil {
+		t.Fatalf("upgrade must not fail when legacy windsurf is present, got: %v\noutput:\n%s", err, buf.String())
+	}
+
+	out := strings.ToLower(buf.String())
+	if !strings.Contains(out, "windsurf") || !strings.Contains(out, "retired") {
+		t.Errorf("expected retirement warning mentioning windsurf, got:\n%s", buf.String())
+	}
+
+	// Reload config and confirm windsurf was pruned.
+	cfg, err := config.Load(momDir)
+	if err != nil {
+		t.Fatalf("reload config: %v", err)
+	}
+	if _, present := cfg.Harnesses["windsurf"]; present {
+		t.Errorf("windsurf should be pruned from config.Harnesses post-upgrade, got: %v", cfg.Harnesses)
+	}
+}

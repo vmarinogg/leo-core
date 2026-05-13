@@ -88,6 +88,7 @@ func upgradeSingleDir(cmd *cobra.Command, projectRoot string, dryRun bool) error
 	if err != nil {
 		return fmt.Errorf("loading config: %w", err)
 	}
+	pruneRetiredHarnesses(cfg, addAction)
 
 	var phase1Err error
 	doPhase1 := func() {

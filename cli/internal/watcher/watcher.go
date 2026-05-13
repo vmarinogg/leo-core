@@ -19,7 +19,7 @@ import (
 
 // Source describes one Harness's transcript directory and parser.
 type Source struct {
-	// Harness is the name of the Harness (e.g. "claude", "windsurf").
+	// Harness is the name of the Harness (e.g. "claude", "codex", "pi").
 	Harness string
 	// TranscriptDir is the directory to watch (e.g. ~/.claude/projects/).
 	// Tilde expansion is performed automatically.
@@ -307,7 +307,7 @@ func (w *Watcher) handleEvent(event fsnotify.Event) {
 
 	if event.Has(fsnotify.Create) || event.Has(fsnotify.Write) {
 		adapter := w.adapterForPath(path)
-		// Check project filter for adapters that need it (e.g. Windsurf).
+		// Check project filter for adapters that need it (flat transcript dirs).
 		if pf, ok := adapter.(ProjectFilter); ok {
 			if !pf.BelongsToProject(path) {
 				return
@@ -344,7 +344,7 @@ func (w *Watcher) catchUp() (sessions int, turns int) {
 				return nil
 			}
 			if strings.HasSuffix(path, ".jsonl") && !strings.Contains(path, "subagents") {
-				// Check project filter for adapters that need it (e.g. Windsurf).
+				// Check project filter for adapters that need it (flat transcript dirs).
 				if pf, ok := src.adapter.(ProjectFilter); ok {
 					if !pf.BelongsToProject(path) {
 						return nil

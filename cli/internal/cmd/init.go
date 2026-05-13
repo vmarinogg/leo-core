@@ -32,7 +32,7 @@ var initCmd = &cobra.Command{
 }
 
 func init() {
-	initCmd.Flags().String("harnesses", "", "AI harnesses to configure as a comma list (claude,codex,windsurf,pi,all)")
+	initCmd.Flags().String("harnesses", "", "AI harnesses to configure as a comma list (claude,codex,pi,all)")
 	initCmd.Flags().Bool("force", false, "Overwrite existing global MOM configuration")
 	initCmd.Flags().BoolP("no-interactive", "y", false, "Skip the interactive wizard and use defaults/flags")
 }
@@ -80,6 +80,9 @@ func runInit(cmd *cobra.Command, args []string) error {
 	harnesses := parseHarnessList(harnessesFlag)
 	if len(harnesses) == 0 {
 		harnesses = []string{"claude"}
+	}
+	if err := rejectRetiredHarnesses(harnesses); err != nil {
+		return err
 	}
 	harnesses = resolveInitHarnesses(cwd, harnesses)
 
@@ -507,8 +510,6 @@ func skillsAgentForHarness(h string) (string, bool) {
 		return "claude-code", true
 	case "codex":
 		return "codex", true
-	case "windsurf":
-		return "windsurf", true
 	case "pi":
 		return "pi", true
 	default:

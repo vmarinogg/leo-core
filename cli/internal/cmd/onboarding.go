@@ -15,7 +15,7 @@ import (
 // OnboardingResult holds the choices the user made during the interactive
 // onboarding wizard. All values are the internal identifiers used by MOM.
 type OnboardingResult struct {
-	Harnesses  []string // ["claude", "codex", "windsurf"]
+	Harnesses  []string // ["claude", "codex", "pi"]
 	Language   string   // always "en" — language selection removed
 	Mode       string   // "default", "concise", "efficient"
 	CoreSource string   // path to mom clone, or "" if skipped
@@ -186,8 +186,6 @@ func harnessLabel(rt string) string {
 		return "Codex"
 	case "cursor":
 		return "Cursor"
-	case "windsurf":
-		return "Windsurf"
 	case "pi":
 		return "Pi"
 	default:

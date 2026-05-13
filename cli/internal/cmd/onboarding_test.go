@@ -167,7 +167,7 @@ func TestOnboarding_OutputContainsSummary(t *testing.T) {
 // TestOnboarding_MultipleHarnessesSelected verifies toggling multiple harnesses.
 func TestOnboarding_MultipleHarnessesSelected(t *testing.T) {
 	isolateHarnessDetection(t)
-	// Toggle codex (2) and windsurf (3), confirm (0), then defaults for mode and confirm.
+	// Toggle codex (2) and pi (3), confirm (0), then defaults for mode and confirm.
 	input := testReader("2\n3\n0\n\n\n")
 	output := &bytes.Buffer{}
 
