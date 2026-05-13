@@ -26,6 +26,15 @@ const BindFilename = ".mom-project.yaml"
 // id is a user-chosen string, but unbounded length would be abuse.
 const MaxIdLength = 256
 
+// BindFileWatermark is the comment header stamped at the top of every
+// freshly-written .mom-project.yaml so users can see at a glance that
+// they own the file. Per ADR 0016 the file is user-owned; MOM only
+// reads it after the first write (the skill or the bind CLI writes it
+// once with the user's chosen id, then never touches it again).
+const BindFileWatermark = `# MOM project binding — owned by you, not regenerated.
+# Edit freely; check this file into version control.
+`
+
 // bindFile is the on-disk shape of .mom-project.yaml.
 type bindFile struct {
 	Version string `yaml:"version"`
@@ -144,13 +153,6 @@ func WriteBinding(dir, id string, force bool) error {
 	body := BindFileWatermark + "version: \"1\"\nid: " + id + "\n"
 	return os.WriteFile(path, []byte(body), 0o644)
 }
-
-// BindFileWatermark is the comment header stamped at the top of every
-// freshly-written .mom-project.yaml so users can see at a glance that
-// they own the file.
-const BindFileWatermark = `# MOM project binding — owned by you, not regenerated.
-# Edit freely; check this file into version control.
-`
 
 // validateId is the lax sanity check on a project id. Per ADR 0016 the
 // data layer does not enforce a strict slug regex — users may choose
