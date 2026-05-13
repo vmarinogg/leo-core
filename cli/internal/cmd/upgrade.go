@@ -377,19 +377,6 @@ func upgradeSingleDir(cmd *cobra.Command, projectRoot string, dryRun bool) error
 	return nil
 }
 
-// pruneRetiredHarnesses removes any retired harness (see #342) from
-// cfg.Harnesses and surfaces a warning per pruned entry. Legacy configs
-// that still declare a retired harness should not crash upgrade — the
-// entry is silently dropped so the rest of the upgrade can continue.
-func pruneRetiredHarnesses(cfg *config.Config, addAction func(string, string)) {
-	for name, reason := range retiredHarnesses {
-		if hc, present := cfg.Harnesses[name]; present && hc.Enabled {
-			delete(cfg.Harnesses, name)
-			addAction("⚠", fmt.Sprintf("harness %s retired — pruned from config; %s (see issue #342)", name, reason))
-		}
-	}
-}
-
 func installSkillsDuringUpgrade(harnesses []string, dryRun bool, addAction func(string, string)) {
 	for _, h := range harnesses {
 		agent, ok := skillsAgentForHarness(h)

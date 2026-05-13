@@ -96,24 +96,6 @@ func runInit(cmd *cobra.Command, args []string) error {
 	})
 }
 
-// retiredHarnesses maps a retired harness name to a one-line rationale
-// surfaced to users who try to enable it. See #342 for the design
-// discussion and conditions that would unblock revival.
-var retiredHarnesses = map[string]string{
-	"windsurf": "no stable transcript export from Codeium; chat data is in encrypted .pb files and the hook payload's cwd is unreliable for project scoping",
-}
-
-// rejectRetiredHarnesses returns an error if any requested harness has
-// been retired, with the documented rationale.
-func rejectRetiredHarnesses(requested []string) error {
-	for _, h := range requested {
-		if reason, retired := retiredHarnesses[h]; retired {
-			return fmt.Errorf("harness %q is retired — %s. See issue #342", h, reason)
-		}
-	}
-	return nil
-}
-
 func parseHarnessList(raw string) []string {
 	parts := strings.Split(raw, ",")
 	out := make([]string, 0, len(parts))
