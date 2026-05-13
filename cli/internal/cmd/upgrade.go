@@ -863,11 +863,6 @@ func regenerateHarnessFiles(projectRoot, momDir string, cfg *config.Config) erro
 				return fmt.Errorf("registering %s hooks: %w", rt, err)
 			}
 		}
-		if e, ok := adapter.(harness.ExtensionInstaller); ok {
-			if err := e.RegisterExtension(); err != nil {
-				return fmt.Errorf("registering %s extension: %w", rt, err)
-			}
-		}
 	}
 
 	return nil

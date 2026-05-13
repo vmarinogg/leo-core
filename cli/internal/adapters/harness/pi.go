@@ -4,6 +4,7 @@ import (
 	_ "embed"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 
 	"gopkg.in/yaml.v3"
@@ -12,20 +13,32 @@ import (
 //go:embed capabilities/pi.yaml
 var piCapabilitiesYAML []byte
 
-// piMomToolsExtension is the source of the .pi/extensions/mom-tools.ts file
-// that exposes MOM's MCP tools as native pi tools. Embedded so `mom init`
-// can lay it down without depending on a network or external package.
-//
-//go:embed pi_assets/mom-tools.ts
-var piMomToolsExtension []byte
+// piInstallCommand runs `pi install <pkg>` and returns the combined
+// output. Package-level var so tests can inject a stub.
+var piInstallCommand = func(pkg string) ([]byte, error) {
+	return exec.Command("pi", "install", pkg).CombinedOutput()
+}
+
+// commandExistsForPi reports whether the `pi` CLI is on PATH. Same
+// seam pattern as piInstallCommand — tests stub it directly.
+var commandExistsForPi = func() bool { return commandExists("pi") }
+
+// piMomPackage is the canonical npm package distributed through the Pi
+// marketplace. ADR pointer: see closed issue #255 for the design lock
+// (delegation over embedding). The package is published to npm and
+// auto-listed at https://pi.dev/packages/pi-mom by the `pi-package`
+// keyword. Pi installs globally by default — the extension lands at
+// ~/.pi/agent/extensions/ and every Pi session sees it.
+const piMomPackage = "npm:pi-mom"
 
 // PiAdapter implements the Adapter interface for pi
 // (https://github.com/mariozechner/pi), a TypeScript-based coding agent.
 //
 // Pi reads AGENTS.md at the project root for context (shared with Codex)
-// and supports project-local extensions in .pi/extensions/. It has no
-// native hook system; instead, "RegisterHooks" lays down a TypeScript
-// extension that wires MOM's MCP tools into pi as first-class native tools.
+// and supports user-level extensions installed via the Pi marketplace.
+// `mom init` delegates extension installation to `pi install npm:pi-mom`
+// rather than laying down a project-local TypeScript file — the extension
+// is maintained as a standalone npm package and updated through `pi update`.
 type PiAdapter struct {
 	projectRoot string
 }
@@ -62,20 +75,6 @@ func (a *PiAdapter) DefaultTranscriptDir() string {
 	return "~/.pi/agent/sessions/"
 }
 
-// RegisterExtension lays down the MOM TypeScript extension in .pi/extensions/.
-func (a *PiAdapter) RegisterExtension() error {
-	extDir := filepath.Join(a.projectRoot, ".pi", "extensions")
-	if err := os.MkdirAll(extDir, 0755); err != nil {
-		return fmt.Errorf("creating .pi/extensions dir: %w", err)
-	}
-
-	target := filepath.Join(extDir, "mom-tools.ts")
-	if err := os.WriteFile(target, piMomToolsExtension, 0644); err != nil {
-		return fmt.Errorf("writing %s: %w", target, err)
-	}
-	return nil
-}
-
 func (a *PiAdapter) DetectHarness() bool {
 	if commandExists("pi") {
 		return true
@@ -98,17 +97,21 @@ func (a *PiAdapter) RegisterGlobalMCP() error {
 	return nil
 }
 
+// RegisterGlobalExtension installs the pi-mom extension through the Pi
+// marketplace (`pi install npm:pi-mom`). Pi places the extension at
+// ~/.pi/agent/extensions/ where every Pi session picks it up; updates
+// flow through `pi update`. Per the #255 design lock, MOM no longer
+// embeds or writes the TypeScript source — the extension is a
+// standalone published artifact.
+//
+// Requires the `pi` CLI on PATH. The caller (mom init) handles the
+// not-installed case by surfacing the install hint to the user.
 func (a *PiAdapter) RegisterGlobalExtension() error {
-	extDir, err := homePath(".pi", "agent", "extensions")
-	if err != nil {
-		return err
+	if !commandExistsForPi() {
+		return fmt.Errorf("pi CLI not found on PATH; install pi first, then re-run mom init")
 	}
-	if err := os.MkdirAll(extDir, 0755); err != nil {
-		return fmt.Errorf("creating pi global extensions dir: %w", err)
-	}
-	target := filepath.Join(extDir, "mom-tools.ts")
-	if err := os.WriteFile(target, piMomToolsExtension, 0644); err != nil {
-		return fmt.Errorf("writing %s: %w", target, err)
+	if out, err := piInstallCommand(piMomPackage); err != nil {
+		return fmt.Errorf("pi install %s: %w (output: %s)", piMomPackage, err, string(out))
 	}
 	return nil
 }
@@ -126,9 +129,12 @@ func (a *PiAdapter) RegisterMCP() error {
 }
 
 func (a *PiAdapter) GeneratedFiles() []string {
+	// The pi-mom extension is installed by Pi itself into
+	// ~/.pi/agent/extensions/ and is not a MOM-generated file from
+	// the project's perspective. AGENTS.md and .mcp.json are the only
+	// files MOM puts down in the project root.
 	return []string{
 		"AGENTS.md",
-		filepath.Join(".pi", "extensions", "mom-tools.ts"),
 		".mcp.json",
 	}
 }
@@ -152,6 +158,5 @@ func (a *PiAdapter) Capabilities() AdapterCapability {
 var (
 	_ GlobalAdapter            = (*PiAdapter)(nil)
 	_ GlobalExtensionInstaller = (*PiAdapter)(nil)
-	_ ExtensionInstaller       = (*PiAdapter)(nil)
 	_ TranscriptSource         = (*PiAdapter)(nil)
 )
