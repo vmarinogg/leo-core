@@ -20,7 +20,7 @@ func (m *mockAdapter) Name() string { return "mock" }
 
 // ExtractTurn records the line and returns a minimal Turn for any
 // non-empty input. Rich-content adapter tests exercise the real
-// ClaudeAdapter / PiAdapter / WindsurfAdapter.
+// ClaudeAdapter / CodexAdapter / PiAdapter.
 func (m *mockAdapter) ExtractTurn(line []byte, sessionID string) (Turn, bool) {
 	m.calls = append(m.calls, string(line))
 	if len(strings.TrimSpace(string(line))) == 0 {
