@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"os"
 	"regexp"
 	"strings"
 	"unicode"
@@ -79,7 +78,7 @@ func runRecall(cmd *cobra.Command, args []string) error {
 	}
 	defer func() { _ = closeFn() }()
 
-	scopedProjectId := resolveRecallScope(cmd, p)
+	scopedProjectId := resolveRecallScope(p)
 	results, err := finder.New(lib).Recall(finder.Options{
 		Query:         query,
 		Limit:         recallDefaultLimit,
@@ -126,19 +125,15 @@ func runRecall(cmd *cobra.Command, args []string) error {
 //  2. --project=<id>  → explicit override
 //  3. cwd-resolved via .mom-project.yaml  → scope to that project
 //  4. cwd unbound  → no filter + emit a one-line hint pointing at /mom-project
-func resolveRecallScope(cmd *cobra.Command, p *ux.Printer) string {
+func resolveRecallScope(p *ux.Printer) string {
 	if recallAllProjects {
 		return ""
 	}
 	if recallProject != "" {
 		return recallProject
 	}
-	cwd, err := os.Getwd()
-	if err != nil {
-		return ""
-	}
-	id, _, found, err := project.ResolveProject(cwd)
-	if err != nil || !found {
+	id, found := project.IdForCwd()
+	if !found {
 		p.Muted("cwd not in a MOM project — searching all. Run /mom-project to bind this directory.")
 		return ""
 	}

@@ -86,6 +86,29 @@ func readBindFile(path string) (string, error) {
 	return bf.ID, nil
 }
 
+// IdForCwd returns the declared project id for the caller's current
+// working directory by walking up the filesystem for .mom-project.yaml.
+// Returns ("", false) on any error or when no binding is found —
+// callers decide fallback behaviour (e.g. NULL stamp on capture; stderr
+// hint on recall).
+//
+// This is the standard CLI-side convenience over ResolveProject for
+// callers that only care about "give me the id, or nothing." The
+// long-form ResolveProject remains the right call when the caller
+// needs to distinguish "no file" from "malformed file" or surface the
+// source path.
+func IdForCwd() (id string, found bool) {
+	cwd, err := os.Getwd()
+	if err != nil {
+		return "", false
+	}
+	id, _, found, err = ResolveProject(cwd)
+	if err != nil {
+		return "", false
+	}
+	return id, found
+}
+
 // validateId is the lax sanity check on a project id. Per ADR 0016 the
 // data layer does not enforce a strict slug regex — users may choose
 // whatever string identifies their project (mixed case, spaces, emoji
