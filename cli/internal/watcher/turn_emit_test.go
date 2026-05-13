@@ -291,3 +291,30 @@ func TestIngestFile_OmitsProjectIdWhenUnbound(t *testing.T) {
 		t.Errorf("payload should omit project_id when unbound, got %v", captured[0].Payload["project_id"])
 	}
 }
+
+// TestTurn_ToPayload_EmitsHarness locks the contract that watcher
+// adapters' harness identity (claude-code, codex, pi, …) rides on the
+// herald payload so Logbook and Drafter can attribute the turn to the
+// right harness. Pre-#340 ToPayload silently dropped this field.
+func TestTurn_ToPayload_EmitsHarness(t *testing.T) {
+	turn := Turn{
+		SessionID: "s",
+		Role:      "user",
+		Text:      "hi",
+		Harness:   "pi",
+	}
+	p := turn.ToPayload()
+	if p["harness"] != "pi" {
+		t.Errorf("payload[harness] = %v, want pi", p["harness"])
+	}
+}
+
+// When Harness is empty, payload omits the key — keeps the bus clean
+// for paths that don't carry harness information.
+func TestTurn_ToPayload_OmitsHarnessWhenEmpty(t *testing.T) {
+	turn := Turn{SessionID: "s", Role: "user", Text: "hi"}
+	p := turn.ToPayload()
+	if _, ok := p["harness"]; ok {
+		t.Errorf("payload should omit harness when empty, got %v", p["harness"])
+	}
+}

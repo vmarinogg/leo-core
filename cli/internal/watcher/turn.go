@@ -62,7 +62,8 @@ type Usage struct {
 // reinvent extraction.
 //
 // Keys: "role", "text", "tool_calls" ([]map with name/input/category),
-// "usage" (map of token counts), "model", "provider".
+// "usage" (map of token counts), "model", "provider", "harness",
+// "project_id".
 func (t Turn) ToPayload() map[string]any {
 	out := map[string]any{
 		"role": t.Role,
@@ -103,6 +104,9 @@ func (t Turn) ToPayload() map[string]any {
 	}
 	if t.Provider != "" {
 		out["provider"] = t.Provider
+	}
+	if t.Harness != "" {
+		out["harness"] = t.Harness
 	}
 	if t.ProjectId != "" {
 		out["project_id"] = t.ProjectId
