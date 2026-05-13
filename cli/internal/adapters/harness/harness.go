@@ -102,10 +102,10 @@ type HookDef struct {
 }
 
 // Adapter is the interface that Harness integrations must implement.
-// Each Harness (Claude, Codex, Windsurf, etc.) provides an Adapter
+// Each Harness (Claude, Codex, Pi) provides an Adapter
 // that reads from .mom/ and generates Harness-specific files.
 type Adapter interface {
-	// Name returns the Harness identifier (e.g. "claude", "codex", "windsurf").
+	// Name returns the Harness identifier (e.g. "claude", "codex", "pi").
 	Name() string
 
 	// Tier returns the Harness's integration quality classification.

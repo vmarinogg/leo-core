@@ -38,7 +38,7 @@ without MCP calls or hook overhead.
 
 Supported harnesses:
   claude    — ~/.claude/projects/ (default)
-  windsurf  — ~/.windsurf/transcripts/
+  codex     — ~/.codex/sessions/ (or $CODEX_HOME/sessions/)
   pi        — ~/.pi/agent/sessions/
 
 Each session's JSONL transcript is tailed incrementally.

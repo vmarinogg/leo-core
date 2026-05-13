@@ -25,7 +25,7 @@ type Turn struct {
 	// surface the data.
 	Model    string // "the model": e.g. "claude-sonnet-4-6", "gpt-4o"
 	Provider string // "provided by whom": model vendor — "anthropic", "openai", …
-	Harness  string // "used in which client": "claude-code", "codex", "windsurf", "pi"
+	Harness  string // "used in which client": "claude-code", "codex", "pi"
 
 	// ProjectId carries the resolved project identity (ADR 0016).
 	// Empty means "unknown" — the resolver found no .mom-project.yaml.

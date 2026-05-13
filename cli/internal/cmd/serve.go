@@ -62,8 +62,8 @@ func runServeMCP(_ *cobra.Command, _ []string) error {
 		return fmt.Errorf("getting working directory: %w", err)
 	}
 
-	// Allow harnesses that do not set cwd (Windsurf, Cline VS Code) to specify
-	// the project directory via environment variable.
+	// Allow harnesses that do not set cwd (e.g. Pi launches MCP children from
+	// a different working dir) to specify the project directory via env var.
 	if envDir := os.Getenv("MOM_PROJECT_DIR"); envDir != "" {
 		cwd = envDir
 	}

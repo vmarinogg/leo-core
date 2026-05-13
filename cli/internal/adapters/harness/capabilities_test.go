@@ -101,7 +101,6 @@ func TestAdapterCapability_NoOverlap(t *testing.T) {
 	adapters := []Adapter{
 		NewClaudeAdapter("/tmp/test"),
 		NewCodexAdapter("/tmp/test"),
-		NewWindsurfAdapter("/tmp/test"),
 		NewPiAdapter("/tmp/test"),
 	}
 	for _, a := range adapters {

@@ -11,7 +11,6 @@ func TestAdapterTiers(t *testing.T) {
 		{"pi", NewPiAdapter(""), Native},
 		{"claude", NewClaudeAdapter(""), Fluent},
 		{"codex", NewCodexAdapter(""), Fluent},
-		{"windsurf", NewWindsurfAdapter(""), Functional},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {

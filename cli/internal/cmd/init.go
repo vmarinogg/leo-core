@@ -32,7 +32,7 @@ var initCmd = &cobra.Command{
 }
 
 func init() {
-	initCmd.Flags().String("harnesses", "", "AI harnesses to configure as a comma list (claude,codex,windsurf,pi,all)")
+	initCmd.Flags().String("harnesses", "", "AI harnesses to configure as a comma list (claude,codex,pi,all)")
 	initCmd.Flags().Bool("force", false, "Overwrite existing global MOM configuration")
 	initCmd.Flags().BoolP("no-interactive", "y", false, "Skip the interactive wizard and use defaults/flags")
 }
@@ -81,6 +81,9 @@ func runInit(cmd *cobra.Command, args []string) error {
 	if len(harnesses) == 0 {
 		harnesses = []string{"claude"}
 	}
+	if err := rejectRetiredHarnesses(harnesses); err != nil {
+		return err
+	}
 	harnesses = resolveInitHarnesses(cwd, harnesses)
 
 	defaults := config.Default()
@@ -91,6 +94,24 @@ func runInit(cmd *cobra.Command, args []string) error {
 		InstallDir: installDir,
 		ScopeLabel: "repo",
 	})
+}
+
+// retiredHarnesses maps a retired harness name to a one-line rationale
+// surfaced to users who try to enable it. See #342 for the design
+// discussion and conditions that would unblock revival.
+var retiredHarnesses = map[string]string{
+	"windsurf": "no stable transcript export from Codeium; chat data is in encrypted .pb files and the hook payload's cwd is unreliable for project scoping",
+}
+
+// rejectRetiredHarnesses returns an error if any requested harness has
+// been retired, with the documented rationale.
+func rejectRetiredHarnesses(requested []string) error {
+	for _, h := range requested {
+		if reason, retired := retiredHarnesses[h]; retired {
+			return fmt.Errorf("harness %q is retired — %s. See issue #342", h, reason)
+		}
+	}
+	return nil
 }
 
 func parseHarnessList(raw string) []string {
@@ -507,8 +528,6 @@ func skillsAgentForHarness(h string) (string, bool) {
 		return "claude-code", true
 	case "codex":
 		return "codex", true
-	case "windsurf":
-		return "windsurf", true
 	case "pi":
 		return "pi", true
 	default:

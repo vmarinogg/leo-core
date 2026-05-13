@@ -40,9 +40,6 @@ type WatcherConfig struct {
 	// TranscriptDir overrides the default Claude Code transcript directory.
 	// Defaults to ~/.claude/projects/ when empty.
 	TranscriptDir string `yaml:"transcript_dir,omitempty"`
-	// WindsurfTranscriptDir overrides the default Windsurf transcript directory.
-	// Defaults to ~/.windsurf/transcripts/ when empty.
-	WindsurfTranscriptDir string `yaml:"windsurf_transcript_dir,omitempty"`
 	// PiTranscriptDir overrides the default pi session directory.
 	// Defaults to ~/.pi/agent/sessions/ when empty.
 	PiTranscriptDir string `yaml:"pi_transcript_dir,omitempty"`

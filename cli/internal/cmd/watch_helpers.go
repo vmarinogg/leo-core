@@ -162,9 +162,6 @@ func buildWatcherSources(cfg *config.Config, projectDir string) []watcher.Source
 		case "claude":
 			override = cfg.Watcher.TranscriptDir
 			adapter = watcher.NewClaudeAdapter()
-		case "windsurf":
-			override = cfg.Watcher.WindsurfTranscriptDir
-			adapter = &watcher.WindsurfAdapter{ProjectDir: projectDir}
 		case "pi":
 			override = cfg.Watcher.PiTranscriptDir
 			adapter = watcher.NewPiAdapter()

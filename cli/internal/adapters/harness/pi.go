@@ -2,6 +2,7 @@ package harness
 
 import (
 	_ "embed"
+	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
@@ -160,3 +161,37 @@ var (
 	_ GlobalExtensionInstaller = (*PiAdapter)(nil)
 	_ TranscriptSource         = (*PiAdapter)(nil)
 )
+
+// upsertMCPEntryWithEnv writes the MOM MCP server entry to path while
+// preserving any other mcpServers entries. MOM_PROJECT_DIR is set so
+// the MCP server resolves the correct scope when pi spawns it from a
+// different cwd.
+func upsertMCPEntryWithEnv(path, projectRoot string) error {
+	root := make(map[string]any)
+	if data, err := os.ReadFile(path); err == nil {
+		if err := json.Unmarshal(data, &root); err != nil {
+			return fmt.Errorf("parsing %s: %w", filepath.Base(path), err)
+		}
+	}
+	servers, _ := root["mcpServers"].(map[string]any)
+	if servers == nil {
+		servers = make(map[string]any)
+	}
+	servers["mom"] = map[string]any{
+		"command": resolveCommand(),
+		"args":    []string{"serve", "mcp"},
+		"env": map[string]string{
+			"MOM_PROJECT_DIR": projectRoot,
+		},
+	}
+	root["mcpServers"] = servers
+	data, err := json.MarshalIndent(root, "", "  ")
+	if err != nil {
+		return fmt.Errorf("marshaling %s: %w", filepath.Base(path), err)
+	}
+	data = append(data, '\n')
+	if err := os.WriteFile(path, data, 0o644); err != nil {
+		return fmt.Errorf("writing %s: %w", filepath.Base(path), err)
+	}
+	return nil
+}
