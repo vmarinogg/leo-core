@@ -61,15 +61,33 @@ func (a *CodexAdapter) GenerateContextFile(config Config, constraints []Constrai
 }
 
 func (a *CodexAdapter) RegisterHooks() error {
+	return writeCodexHooks(filepath.Join(a.projectRoot, ".codex", "hooks.json"))
+}
+
+// RegisterGlobalHooks writes the same hook contract to the user-level
+// Codex config dir (~/.codex/hooks.json, or $CODEX_HOME/hooks.json when
+// set) so Codex Desktop sessions fire `mom watch --sweep` after each
+// Cascade response — same defensive sweep wired for project-local
+// installs, scoped to the user.
+func (a *CodexAdapter) RegisterGlobalHooks() error {
+	path, err := codexHomePath("hooks.json")
+	if err != nil {
+		return err
+	}
+	return writeCodexHooks(path)
+}
+
+// writeCodexHooks renders Codex's hooks.json format at the given path,
+// creating parent dirs as needed. The hook set is intentionally small:
+// one Stop hook running `mom watch --sweep`. Auxiliary signal — the
+// daemon's fsnotify watcher catches new transcripts even when this
+// hook never fires.
+func writeCodexHooks(hooksPath string) error {
 	hooks := []HookDef{
 		{Event: "Stop", Command: "mom watch --sweep"},
 	}
-	codexDir := filepath.Join(a.projectRoot, ".codex")
-	hooksPath := filepath.Join(codexDir, "hooks.json")
-
-	// Ensure .codex/ exists.
-	if err := os.MkdirAll(codexDir, 0755); err != nil {
-		return fmt.Errorf("creating .codex dir: %w", err)
+	if err := os.MkdirAll(filepath.Dir(hooksPath), 0755); err != nil {
+		return fmt.Errorf("creating %s: %w", filepath.Dir(hooksPath), err)
 	}
 
 	// Codex hooks.json format: { "hooks": { "Event": [ { "hooks": [ {...} ] } ] } }
@@ -89,20 +107,15 @@ func (a *CodexAdapter) RegisterHooks() error {
 		byEvent[h.Event] = append(byEvent[h.Event], group)
 	}
 
-	root := map[string]any{
-		"hooks": byEvent,
-	}
-
+	root := map[string]any{"hooks": byEvent}
 	data, err := json.MarshalIndent(root, "", "  ")
 	if err != nil {
 		return fmt.Errorf("marshaling hooks: %w", err)
 	}
-
 	data = append(data, '\n')
 	if err := os.WriteFile(hooksPath, data, 0644); err != nil {
-		return fmt.Errorf("writing hooks.json: %w", err)
+		return fmt.Errorf("writing %s: %w", hooksPath, err)
 	}
-
 	return nil
 }
 
@@ -249,6 +262,7 @@ func codexHomePath(parts ...string) (string, error) {
 
 var (
 	_ GlobalAdapter    = (*CodexAdapter)(nil)
-	_ HookInstaller    = (*CodexAdapter)(nil)
+	_ HookInstaller       = (*CodexAdapter)(nil)
+	_ GlobalHookInstaller = (*CodexAdapter)(nil)
 	_ TranscriptSource = (*CodexAdapter)(nil)
 )

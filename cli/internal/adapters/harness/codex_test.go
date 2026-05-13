@@ -274,3 +274,58 @@ func TestCodexAdapter_NoIdentity(t *testing.T) {
 		t.Error("should have fallback identity")
 	}
 }
+
+// TestCodexAdapter_RegisterGlobalHooks_WritesToHomeCodexDir locks the
+// global-install contract: mom init --harnesses codex must drop
+// hooks.json at ~/.codex/ so Codex Desktop fires `mom watch --sweep`
+// after each Cascade response. Without this, only project-local
+// inits get the hook wired.
+func TestCodexAdapter_RegisterGlobalHooks_WritesToHomeCodexDir(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("CODEX_HOME", "")
+	a := NewCodexAdapter("/tmp/unused-project-root")
+
+	if err := a.RegisterGlobalHooks(); err != nil {
+		t.Fatalf("RegisterGlobalHooks: %v", err)
+	}
+
+	hooksPath := filepath.Join(home, ".codex", "hooks.json")
+	data, err := os.ReadFile(hooksPath)
+	if err != nil {
+		t.Fatalf("reading global hooks.json: %v", err)
+	}
+	var root map[string]any
+	if err := json.Unmarshal(data, &root); err != nil {
+		t.Fatalf("parse hooks.json: %v", err)
+	}
+	hooks, ok := root["hooks"].(map[string]any)
+	if !ok {
+		t.Fatal("missing top-level 'hooks' key")
+	}
+	stop, ok := hooks["Stop"].([]any)
+	if !ok || len(stop) == 0 {
+		t.Fatal("missing Stop event")
+	}
+	group := stop[0].(map[string]any)
+	inner := group["hooks"].([]any)
+	entry := inner[0].(map[string]any)
+	if entry["command"] != "mom watch --sweep" {
+		t.Errorf("Stop hook command = %v, want 'mom watch --sweep'", entry["command"])
+	}
+}
+
+// CODEX_HOME override puts the hooks.json under the override path.
+func TestCodexAdapter_RegisterGlobalHooks_HonorsCodexHome(t *testing.T) {
+	codexHome := t.TempDir()
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("CODEX_HOME", codexHome)
+	a := NewCodexAdapter("/tmp/unused")
+
+	if err := a.RegisterGlobalHooks(); err != nil {
+		t.Fatalf("RegisterGlobalHooks: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(codexHome, "hooks.json")); err != nil {
+		t.Errorf("expected hooks.json under CODEX_HOME, got: %v", err)
+	}
+}
