@@ -109,6 +109,49 @@ func IdForCwd() (id string, found bool) {
 	return id, found
 }
 
+// WriteBinding writes (or rewrites) the .mom-project.yaml at dir with
+// the given id. Implements the ADR 0016 binding-write policy:
+//
+//   - The id is validated via the same lax rule the reader uses.
+//   - If no binding file exists, it is created with a watermark comment
+//     header so the user-owned distinction is visible in-place.
+//   - If a binding file exists with the SAME id, the call is a no-op
+//     success (idempotent re-bind).
+//   - If a binding file exists with a DIFFERENT id, the call fails
+//     unless force is true. Per ADR 0016 the user owns the file; we do
+//     not silently rewrite their declared identity.
+//
+// Per ADR 0016 changing the id starts a fresh project from MOM's
+// perspective — old memories keep the old id; the two cohorts do not
+// merge.
+func WriteBinding(dir, id string, force bool) error {
+	if err := validateId(id); err != nil {
+		return err
+	}
+	path := filepath.Join(dir, BindFilename)
+	if existing, err := os.ReadFile(path); err == nil {
+		// File exists; compare declared id.
+		var bf bindFile
+		if uerr := yaml.Unmarshal(existing, &bf); uerr == nil && bf.ID == id {
+			return nil // idempotent re-bind
+		}
+		if !force {
+			return fmt.Errorf("%s already declares a different project id; pass --force to overwrite", path)
+		}
+	} else if !os.IsNotExist(err) {
+		return fmt.Errorf("read %s: %w", path, err)
+	}
+	body := BindFileWatermark + "version: \"1\"\nid: " + id + "\n"
+	return os.WriteFile(path, []byte(body), 0o644)
+}
+
+// BindFileWatermark is the comment header stamped at the top of every
+// freshly-written .mom-project.yaml so users can see at a glance that
+// they own the file.
+const BindFileWatermark = `# MOM project binding — owned by you, not regenerated.
+# Edit freely; check this file into version control.
+`
+
 // validateId is the lax sanity check on a project id. Per ADR 0016 the
 // data layer does not enforce a strict slug regex — users may choose
 // whatever string identifies their project (mixed case, spaces, emoji
