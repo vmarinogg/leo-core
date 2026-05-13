@@ -261,8 +261,8 @@ func codexHomePath(parts ...string) (string, error) {
 }
 
 var (
-	_ GlobalAdapter    = (*CodexAdapter)(nil)
+	_ GlobalAdapter       = (*CodexAdapter)(nil)
 	_ HookInstaller       = (*CodexAdapter)(nil)
 	_ GlobalHookInstaller = (*CodexAdapter)(nil)
-	_ TranscriptSource = (*CodexAdapter)(nil)
+	_ TranscriptSource    = (*CodexAdapter)(nil)
 )
