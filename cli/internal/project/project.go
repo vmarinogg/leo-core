@@ -95,6 +95,32 @@ func readBindFile(path string) (string, error) {
 	return bf.ID, nil
 }
 
+// ScopeForCwd resolves the project_id filter for project-scoped CLI
+// commands (mom recall, mom drafts). Returns the id to filter by
+// (empty string means "no scope — show all projects") and a hint
+// the caller should surface when the cwd has no binding. Encapsulates
+// the standard precedence rule:
+//
+//   1. --all-projects → no scope, no hint
+//   2. --project=<id> → explicit scope, no hint
+//   3. cwd-resolved (.mom-project.yaml found) → scoped, no hint
+//   4. cwd unbound → no scope, hint pointing at /mom-project
+//
+// The hint string is intentionally returned rather than logged here
+// so the project package stays free of ux / printer dependencies.
+func ScopeForCwd(allProjects bool, explicit string) (id, hint string) {
+	if allProjects {
+		return "", ""
+	}
+	if explicit != "" {
+		return explicit, ""
+	}
+	if id, found := IdForCwd(); found {
+		return id, ""
+	}
+	return "", "cwd not in a MOM project — searching all. Run /mom-project to bind this directory."
+}
+
 // IdForCwd returns the declared project id for the caller's current
 // working directory by walking up the filesystem for .mom-project.yaml.
 // Returns ("", false) on any error or when no binding is found —

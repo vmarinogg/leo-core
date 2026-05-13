@@ -99,19 +99,11 @@ func runDrafts(cmd *cobra.Command, _ []string) error {
 }
 
 // resolveDraftsScope decides the project_id filter for `mom drafts`,
-// mirroring `mom recall`'s policy. Returns "" when no scope should be
-// applied (i.e. show all projects).
+// mirroring `mom recall`'s policy via the shared project.ScopeForCwd.
 func resolveDraftsScope(p *ux.Printer) string {
-	if draftsAllProjects {
-		return ""
-	}
-	if draftsProject != "" {
-		return draftsProject
-	}
-	id, found := project.IdForCwd()
-	if !found {
-		p.Muted("cwd not in a MOM project — searching all. Run /mom-project to bind this directory.")
-		return ""
+	id, hint := project.ScopeForCwd(draftsAllProjects, draftsProject)
+	if hint != "" {
+		p.Muted(hint)
 	}
 	return id
 }
