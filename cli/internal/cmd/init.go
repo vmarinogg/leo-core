@@ -533,8 +533,12 @@ func installGlobalHarness(adapter harness.Adapter, rt string, runtimeCfg harness
 		}
 	}
 	if e, ok := adapter.(harness.GlobalExtensionInstaller); ok {
+		// Soft-fail per #255 Q7: extension install (e.g. `pi install
+		// npm:pi-mom`) is a best-effort step. If the harness CLI is
+		// missing or the marketplace install fails, mom init reports it
+		// and continues — the user can re-run the install manually.
 		if err := e.RegisterGlobalExtension(); err != nil {
-			return fmt.Errorf("registering extension: %w", err)
+			fmt.Fprintf(os.Stderr, "warning: %s extension install failed: %v\n", adapter.Name(), err)
 		}
 	}
 	return nil

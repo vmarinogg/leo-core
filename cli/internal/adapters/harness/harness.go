@@ -145,12 +145,6 @@ type HookInstaller interface {
 	RegisterHooks() error
 }
 
-// ExtensionInstaller is optionally implemented by adapters whose Harness
-// supports loadable extensions.
-type ExtensionInstaller interface {
-	RegisterExtension() error
-}
-
 // TranscriptSource is optionally implemented by adapters whose Harness
 // emits a transcript file or directory the watcher should tail.
 type TranscriptSource interface {
