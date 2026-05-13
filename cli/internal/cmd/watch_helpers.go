@@ -71,14 +71,28 @@ func ensureGlobalDaemon(projectRoot, momDir string, harnesses []string) error {
 	// Start global daemon if not already running.
 	h, err := daemon.StatusGlobal()
 	if err == nil && len(h.Services) > 0 && h.Services[0].DaemonRunning {
-		// Already running — cleanup legacy and return.
-		_ = daemon.CleanupLegacy(projectRoot)
-		return nil
+		// Daemon process is alive, but a running daemon executes the
+		// binary it was launched with — `brew upgrade mom` (or any
+		// rebuild) leaves the daemon serving the old code. The sentinel
+		// recorded at install time tells us whether the binary on disk
+		// has moved. Mismatch → unload so the install path below
+		// re-spawns against the current binary (ADR-pointer: #338).
+		match, _ := daemon.BinaryVersionMatches(bin)
+		if match {
+			_ = daemon.CleanupLegacy(projectRoot)
+			return nil
+		}
+		_ = daemon.UninstallGlobal()
 	}
 
 	if err := daemon.InstallGlobal(daemon.GlobalServiceConfig{MomBinary: bin}); err != nil {
 		return fmt.Errorf("installing global daemon: %w", err)
 	}
+	// Best-effort: record the binary identity so the next ensureGlobal
+	// call can detect a future upgrade. Failure to write the sentinel
+	// is non-fatal — at worst the next call treats the daemon as stale
+	// and reinstalls unnecessarily.
+	_ = daemon.RecordBinaryVersion(bin)
 
 	_ = daemon.CleanupLegacy(projectRoot)
 	return nil
