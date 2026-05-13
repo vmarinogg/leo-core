@@ -3,6 +3,7 @@ package finder_test
 import (
 	"errors"
 	"path/filepath"
+	"sort"
 	"strings"
 	"testing"
 
@@ -19,7 +20,7 @@ import (
 func openFinder(t *testing.T) (*finder.Finder, *librarian.Librarian) {
 	t.Helper()
 	dir := t.TempDir()
-	migs := append(librarian.Migrations(), logbook.Migrations()...)
+	migs := append(librarian.Migrations(), logbook.Migrations()...); sort.Slice(migs, func(i, j int) bool { return migs[i].Version < migs[j].Version })
 	v, err := vault.Open(filepath.Join(dir, "mom.db"), migs)
 	if err != nil {
 		t.Fatalf("vault.Open: %v", err)

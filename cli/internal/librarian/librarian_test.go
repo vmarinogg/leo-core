@@ -1,6 +1,7 @@
 package librarian_test
 
 import (
+	"database/sql"
 	"errors"
 	"path/filepath"
 	"reflect"
@@ -300,5 +301,154 @@ func TestSubstanceImmutability_RoundTripDoesNotMutateSubstance(t *testing.T) {
 		got2.ProvenanceSourceType != got1.ProvenanceSourceType ||
 		got2.ProvenanceTriggerEvent != got1.ProvenanceTriggerEvent {
 		t.Error("Provenance changed despite only operational update")
+	}
+}
+
+// TestInsert_StampsProjectId verifies project_id round-trips through the
+// memories table (per ADR 0016).
+func TestInsert_StampsProjectId(t *testing.T) {
+	l := openLib(t)
+	m := validInsert()
+	m.ProjectId = "pi-agents-cli"
+
+	id, err := l.Insert(m)
+	if err != nil {
+		t.Fatalf("Insert: %v", err)
+	}
+
+	got, err := l.Get(id)
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if got.ProjectId != "pi-agents-cli" {
+		t.Errorf("ProjectId = %q, want pi-agents-cli", got.ProjectId)
+	}
+}
+
+// TestSearchMemories_FiltersByProjectId verifies the project_id scope
+// filter (ADR 0016).
+func TestSearchMemories_FiltersByProjectId(t *testing.T) {
+	l := openLib(t)
+	a := validInsert(); a.ProjectId = "alpha"; a.SessionID = "s-a"
+	b := validInsert(); b.ProjectId = "beta"; b.SessionID = "s-b"
+	c := validInsert(); c.ProjectId = ""; c.SessionID = "s-c" // NULL
+	idA, _ := l.Insert(a)
+	idB, _ := l.Insert(b)
+	idC, _ := l.Insert(c)
+
+	got, err := l.SearchMemories(librarian.SearchFilter{ProjectId: "alpha"})
+	if err != nil {
+		t.Fatalf("SearchMemories: %v", err)
+	}
+	ids := map[string]bool{}
+	for _, m := range got {
+		ids[m.ID] = true
+	}
+	if !ids[idA] {
+		t.Errorf("expected alpha memory %s in results, got %v", idA, ids)
+	}
+	if ids[idB] {
+		t.Errorf("did NOT expect beta memory %s when scoped to alpha", idB)
+	}
+	// NULL row included by default — ADR 0016 "legacy memories remain findable".
+	if !ids[idC] {
+		t.Errorf("expected NULL-project memory %s to be included by default", idC)
+	}
+}
+
+// TestSearchMemories_StrictProjectExcludesNull confirms IncludeUnknownProject=false
+// drops NULL rows from a scoped query (ADR 0016 --strict-project semantics).
+func TestSearchMemories_StrictProjectExcludesNull(t *testing.T) {
+	l := openLib(t)
+	a := validInsert(); a.ProjectId = "alpha"; a.SessionID = "s-a"
+	c := validInsert(); c.ProjectId = ""; c.SessionID = "s-c"
+	idA, _ := l.Insert(a)
+	idC, _ := l.Insert(c)
+
+	got, err := l.SearchMemories(librarian.SearchFilter{
+		ProjectId:             "alpha",
+		StrictProject:        true,
+	})
+	if err != nil {
+		t.Fatalf("SearchMemories: %v", err)
+	}
+	ids := map[string]bool{}
+	for _, m := range got {
+		ids[m.ID] = true
+	}
+	if !ids[idA] {
+		t.Errorf("expected alpha memory %s in strict results", idA)
+	}
+	if ids[idC] {
+		t.Errorf("strict mode must exclude NULL memory %s", idC)
+	}
+}
+
+// TestMigration_BackwardSafe_PreExistingRowsHaveNullProjectId verifies
+// that memories inserted before the v6 migration survive it with
+// project_id IS NULL (per ADR 0016 — legacy memories remain findable).
+func TestMigration_BackwardSafe_PreExistingRowsHaveNullProjectId(t *testing.T) {
+	dir := t.TempDir()
+	dbPath := filepath.Join(dir, "mom.db")
+
+	// Step 1: open the vault with ONLY the v2 migration applied
+	// (pre-ADR-0016 schema; no project_id column).
+	all := librarian.Migrations()
+	var preV6 []librarian.Migration
+	for _, m := range all {
+		if m.Version < 6 {
+			preV6 = append(preV6, m)
+		}
+	}
+	v, err := vault.Open(dbPath, preV6)
+	if err != nil {
+		t.Fatalf("vault.Open (pre-v6): %v", err)
+	}
+	// Insert via raw SQL using the pre-v6 column list so we are not
+	// coupled to the current Librarian INSERT (which assumes v6+).
+	id := "11111111-2222-3333-4444-555555555555"
+	if err := v.Tx(func(tx *sql.Tx) error {
+		_, err := tx.Exec(
+			`INSERT INTO memories (id, type, content, created_at, session_id)
+			 VALUES (?, 'untyped', '{"text":"legacy memory"}', '2026-04-01T00:00:00.000000000Z', 's-legacy')`,
+			id,
+		)
+		return err
+	}); err != nil {
+		t.Fatalf("raw insert pre-v6: %v", err)
+	}
+	if err := v.Close(); err != nil {
+		t.Fatalf("close: %v", err)
+	}
+
+	// Step 2: reopen with the full migration set (includes v6).
+	v2, err := vault.Open(dbPath, librarian.Migrations())
+	if err != nil {
+		t.Fatalf("vault.Open (post-v6): %v", err)
+	}
+	t.Cleanup(func() { _ = v2.Close() })
+	l2 := librarian.New(v2)
+
+	got, err := l2.Get(id)
+	if err != nil {
+		t.Fatalf("Get post-migration: %v", err)
+	}
+	if got.ProjectId != "" {
+		t.Errorf("legacy memory must have empty ProjectId post-migration, got %q", got.ProjectId)
+	}
+	// And it should still be findable through scoped recall (NULL included by default).
+	results, err := l2.SearchMemories(librarian.SearchFilter{ProjectId: "any-project"})
+	if err != nil {
+		t.Fatalf("SearchMemories: %v", err)
+	}
+	found := false
+	for _, r := range results {
+		if r.ID == id {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("legacy memory %s should remain findable in scoped recall by default", id)
 	}
 }

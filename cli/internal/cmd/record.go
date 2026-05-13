@@ -10,6 +10,7 @@ import (
 	"github.com/momhq/mom/cli/internal/drafter"
 	"github.com/momhq/mom/cli/internal/explicitrecord"
 	"github.com/momhq/mom/cli/internal/herald"
+	"github.com/momhq/mom/cli/internal/project"
 	"github.com/spf13/cobra"
 )
 
@@ -89,12 +90,14 @@ func runRecord(cmd *cobra.Command, _ []string) error {
 	})
 	defer stopCapture()
 
+	projectId := resolveProjectIdForCwd()
 	result, err := explicitrecord.Publish(bus, explicitrecord.Request{
 		SessionID: recordSession,
 		Summary:   recordSummary,
 		Tags:      recordTags,
 		Content:   map[string]any{"text": text},
 		Actor:     recordActor,
+		ProjectId: projectId,
 	})
 	if err != nil {
 		return fmt.Errorf("mom record: %w", err)
@@ -106,4 +109,19 @@ func runRecord(cmd *cobra.Command, _ []string) error {
 	}
 	fmt.Fprintf(cmd.OutOrStdout(), "recorded: session=%s tags=%v\n", result.SessionID, result.Tags)
 	return nil
+}
+
+// resolveProjectIdForCwd resolves the declared project identity (ADR 0016)
+// from the current working directory. Returns "" on any error or when no
+// binding is found — the resulting memory will then carry NULL project_id.
+func resolveProjectIdForCwd() string {
+	cwd, err := os.Getwd()
+	if err != nil {
+		return ""
+	}
+	id, _, _, err := project.ResolveProject(cwd)
+	if err != nil {
+		return ""
+	}
+	return id
 }

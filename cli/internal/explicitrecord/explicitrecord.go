@@ -30,6 +30,11 @@ type Request struct {
 	Tags      []string
 	Content   map[string]any
 	Actor     string
+	// ProjectId is the declared project identity (ADR 0016). Empty
+	// when the caller could not resolve a binding (e.g. cwd is not in
+	// any .mom-project.yaml). The resulting memory will have NULL
+	// project_id in those cases.
+	ProjectId string
 }
 
 type Result struct {
@@ -59,17 +64,21 @@ func Publish(bus *herald.Bus, req Request) (Result, error) {
 		actor = "mcp"
 	}
 
+	payload := map[string]any{
+		"content":                  req.Content,
+		"summary":                  req.Summary,
+		"tags":                     tags,
+		"provenance_actor":         actor,
+		"provenance_source_type":   "manual-draft",
+		"provenance_trigger_event": "record",
+	}
+	if req.ProjectId != "" {
+		payload["project_id"] = req.ProjectId
+	}
 	bus.Publish(herald.Event{
 		Type:      herald.MemoryRecord,
 		SessionID: sessionID,
-		Payload: map[string]any{
-			"content":                  req.Content,
-			"summary":                  req.Summary,
-			"tags":                     tags,
-			"provenance_actor":         actor,
-			"provenance_source_type":   "manual-draft",
-			"provenance_trigger_event": "record",
-		},
+		Payload:   payload,
 	})
 
 	return Result{SessionID: sessionID, Summary: req.Summary, Tags: tags, Actor: actor}, nil

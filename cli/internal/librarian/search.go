@@ -25,6 +25,15 @@ type SearchFilter struct {
 	SessionID      string
 	PromotionState string
 	Limit          int
+
+	// ProjectId restricts results to the named project (per ADR 0016).
+	// Empty means no project filter — all projects are considered.
+	ProjectId string
+	// StrictProject controls handling of NULL project_id rows when
+	// ProjectId is set. Zero value (false) = NULL rows are INCLUDED (the
+	// ADR 0016 default; legacy memories remain findable). Setting true
+	// excludes NULL rows, used by `mom recall --strict-project`.
+	StrictProject bool
 }
 
 // SearchedMemory is a Memory plus the BM25 score from the matching
@@ -106,9 +115,22 @@ func (l *Librarian) SearchMemories(f SearchFilter) ([]SearchedMemory, error) {
 		wheres = append(wheres, "m.promotion_state = ?")
 		args = append(args, f.PromotionState)
 	}
+	if f.ProjectId != "" {
+		// ADR 0016: NULL project_id is "unknown / legacy". By default we
+		// include those rows in scoped queries so the foundation migration
+		// does not silently hide pre-existing memory. `StrictProject` flips
+		// to exclude.
+		if f.StrictProject {
+			wheres = append(wheres, "m.project_id = ?")
+			args = append(args, f.ProjectId)
+		} else {
+			wheres = append(wheres, "(m.project_id = ? OR m.project_id IS NULL)")
+			args = append(args, f.ProjectId)
+		}
+	}
 
 	sb.WriteString(`SELECT m.id, m.type, m.summary, m.content, m.created_at, m.session_id,
-		m.provenance_actor, m.provenance_source_type, m.provenance_trigger_event,
+		m.project_id, m.provenance_actor, m.provenance_source_type, m.provenance_trigger_event,
 		m.promotion_state, m.landmark, m.centrality_score`)
 	if hasFTS {
 		sb.WriteString(`, bm25(memories_fts, 0, 2, 10)`)
@@ -133,19 +155,20 @@ func (l *Librarian) SearchMemories(f SearchFilter) ([]SearchedMemory, error) {
 	err := l.v.Query(sb.String(), args, func(rs *sql.Rows) error {
 		for rs.Next() {
 			var (
-				sm                                       SearchedMemory
-				summary, actor, sourceType, triggerEvent sql.NullString
-				createdAtStr                             string
-				landmarkInt                              int64
+				sm                                                  SearchedMemory
+				summary, projectId, actor, sourceType, triggerEvent sql.NullString
+				createdAtStr                                        string
+				landmarkInt                                         int64
 			)
 			if err := rs.Scan(
 				&sm.ID, &sm.Type, &summary, &sm.Content, &createdAtStr, &sm.SessionID,
-				&actor, &sourceType, &triggerEvent,
+				&projectId, &actor, &sourceType, &triggerEvent,
 				&sm.PromotionState, &landmarkInt, &sm.CentralityScore, &sm.Score,
 			); err != nil {
 				return err
 			}
 			sm.Summary = summary.String
+			sm.ProjectId = projectId.String
 			sm.ProvenanceActor = actor.String
 			sm.ProvenanceSourceType = sourceType.String
 			sm.ProvenanceTriggerEvent = triggerEvent.String
