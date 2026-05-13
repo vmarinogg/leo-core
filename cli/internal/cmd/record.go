@@ -10,6 +10,7 @@ import (
 	"github.com/momhq/mom/cli/internal/drafter"
 	"github.com/momhq/mom/cli/internal/explicitrecord"
 	"github.com/momhq/mom/cli/internal/herald"
+	"github.com/momhq/mom/cli/internal/project"
 	"github.com/spf13/cobra"
 )
 
@@ -89,12 +90,14 @@ func runRecord(cmd *cobra.Command, _ []string) error {
 	})
 	defer stopCapture()
 
+	projectId, _ := project.IdForCwd()
 	result, err := explicitrecord.Publish(bus, explicitrecord.Request{
 		SessionID: recordSession,
 		Summary:   recordSummary,
 		Tags:      recordTags,
 		Content:   map[string]any{"text": text},
 		Actor:     recordActor,
+		ProjectId: projectId,
 	})
 	if err != nil {
 		return fmt.Errorf("mom record: %w", err)
@@ -107,3 +110,4 @@ func runRecord(cmd *cobra.Command, _ []string) error {
 	fmt.Fprintf(cmd.OutOrStdout(), "recorded: session=%s tags=%v\n", result.SessionID, result.Tags)
 	return nil
 }
+

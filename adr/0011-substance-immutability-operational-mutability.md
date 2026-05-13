@@ -4,7 +4,7 @@ A memory row carries two kinds of fields. Some describe *what was captured* — 
 
 The schema enforces a hard boundary.
 
-**Substance fields are immutable after creation.** On `memories`: `id`, `content`, `summary`, `created_at`, `session_id`, `provenance_actor`, `provenance_trigger_event`, `provenance_source_type`. Once written, no code path updates these. Any change to substance is a new memory, not an edit.
+**Substance fields are immutable after creation.** On `memories`: `id`, `content`, `summary`, `created_at`, `session_id`, `project_id` (added by ADR 0016), `provenance_actor`, `provenance_trigger_event`, `provenance_source_type`. Once written, no code path updates these. Any change to substance is a new memory, not an edit.
 
 **Operational metadata is mutable.** On `memories`: `type` (ADR 0012), `promotion_state`, `landmark`, `centrality_score`. Off the row: edges in `memory_tags` and `memory_entities`. These can be set, changed, added, or removed freely as curation evolves.
 

@@ -2,6 +2,7 @@ package logbook_test
 
 import (
 	"path/filepath"
+	"sort"
 	"strings"
 	"testing"
 	"time"
@@ -23,7 +24,7 @@ import (
 // audit substrate.
 func TestSubscribeTurnObserved_PersistsMetadataProjection(t *testing.T) {
 	dir := t.TempDir()
-	migs := append(librarian.Migrations(), logbook.Migrations()...)
+	migs := append(librarian.Migrations(), logbook.Migrations()...); sort.Slice(migs, func(i, j int) bool { return migs[i].Version < migs[j].Version })
 	v, err := vault.Open(filepath.Join(dir, "mom.db"), migs)
 	if err != nil {
 		t.Fatalf("vault.Open: %v", err)
@@ -198,7 +199,7 @@ func toString(v any) string {
 
 func TestSubscribeTurnObserved_DropsEventsWithoutSessionID(t *testing.T) {
 	dir := t.TempDir()
-	migs := append(librarian.Migrations(), logbook.Migrations()...)
+	migs := append(librarian.Migrations(), logbook.Migrations()...); sort.Slice(migs, func(i, j int) bool { return migs[i].Version < migs[j].Version })
 	v, _ := vault.Open(filepath.Join(dir, "mom.db"), migs)
 	t.Cleanup(func() { _ = v.Close() })
 	lib := librarian.New(v)

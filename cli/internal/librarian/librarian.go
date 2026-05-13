@@ -76,6 +76,7 @@ type Memory struct {
 	Content                string
 	CreatedAt              time.Time
 	SessionID              string
+	ProjectId              string // ADR 0016 — declared project identity ("" when unknown)
 	ProvenanceActor        string
 	ProvenanceSourceType   string
 	ProvenanceTriggerEvent string
@@ -94,6 +95,7 @@ type InsertMemory struct {
 	Content                string
 	CreatedAt              time.Time
 	SessionID              string
+	ProjectId              string // ADR 0016 — declared project identity ("" when unknown)
 	ProvenanceActor        string
 	ProvenanceSourceType   string
 	ProvenanceTriggerEvent string
@@ -194,10 +196,11 @@ func (l *Librarian) validateInsert(m *InsertMemory) (string, error) {
 func (l *Librarian) insertMemoryRow(tx *sql.Tx, id string, m InsertMemory) error {
 	_, err := tx.Exec(
 		`INSERT INTO memories
-		   (id, type, summary, content, created_at, session_id,
+		   (id, type, summary, content, created_at, session_id, project_id,
 		    provenance_actor, provenance_source_type, provenance_trigger_event)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		id, m.Type, m.Summary, m.Content, formatTime(m.CreatedAt), m.SessionID,
+		nullableStr(m.ProjectId),
 		nullableStr(m.ProvenanceActor),
 		nullableStr(m.ProvenanceSourceType),
 		nullableStr(m.ProvenanceTriggerEvent),
@@ -234,7 +237,7 @@ func (l *Librarian) Get(id string) (Memory, error) {
 	var scanErr error
 
 	err := l.v.Query(
-		`SELECT id, type, summary, content, created_at, session_id,
+		`SELECT id, type, summary, content, created_at, session_id, project_id,
 		        provenance_actor, provenance_source_type, provenance_trigger_event,
 		        promotion_state, landmark, centrality_score
 		 FROM memories WHERE id = ?`,
@@ -245,19 +248,20 @@ func (l *Librarian) Get(id string) (Memory, error) {
 			}
 			found = true
 			var (
-				summary, actor, sourceType, triggerEvent sql.NullString
-				createdAtStr                             string
-				landmarkInt                              int64
+				summary, projectId, actor, sourceType, triggerEvent sql.NullString
+				createdAtStr                                        string
+				landmarkInt                                         int64
 			)
 			if err := rs.Scan(
 				&m.ID, &m.Type, &summary, &m.Content, &createdAtStr, &m.SessionID,
-				&actor, &sourceType, &triggerEvent,
+				&projectId, &actor, &sourceType, &triggerEvent,
 				&m.PromotionState, &landmarkInt, &m.CentralityScore,
 			); err != nil {
 				scanErr = err
 				return err
 			}
 			m.Summary = summary.String
+			m.ProjectId = projectId.String
 			m.ProvenanceActor = actor.String
 			m.ProvenanceSourceType = sourceType.String
 			m.ProvenanceTriggerEvent = triggerEvent.String

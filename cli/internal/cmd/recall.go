@@ -11,12 +11,19 @@ import (
 
 	"github.com/momhq/mom/cli/internal/centralvault"
 	"github.com/momhq/mom/cli/internal/finder"
+	"github.com/momhq/mom/cli/internal/project"
 	"github.com/momhq/mom/cli/internal/ux"
 	"github.com/momhq/mom/cli/internal/vault"
 	"github.com/spf13/cobra"
 )
 
 const recallDefaultLimit = 10
+
+var (
+	recallAllProjects   bool
+	recallProject       string
+	recallStrictProject bool
+)
 
 var recallCmd = &cobra.Command{
 	Use:   "recall <query>",
@@ -26,11 +33,31 @@ var recallCmd = &cobra.Command{
 The query argument is required. It can be a natural-language search query
 or a read-only SQL SELECT/WITH query for power users.
 
+By default recall is scoped to the project that owns the current working
+directory (per ADR 0016 — the project is declared in .mom-project.yaml).
+Use --all to search across every project, --project to override the
+cwd-derived scope, or --strict-project to exclude legacy memories that
+have no project_id stamp.
+
 Examples:
   mom recall "aws deployment flow"
+  mom recall "aws deployment flow" --all
+  mom recall "aws deployment flow" --project pi-agents-cli
   mom recall "SELECT id, summary FROM memories WHERE promotion_state = 'curated'"`,
 	Args: cobra.ExactArgs(1),
 	RunE: runRecall,
+}
+
+func init() {
+	recallCmd.Flags().BoolVar(&recallAllProjects, "all", false, "Search across all projects (disables cwd-based scoping)")
+	recallCmd.Flags().StringVar(&recallProject, "project", "", "Override scope to the named project_id")
+	recallCmd.Flags().BoolVar(&recallStrictProject, "strict-project", false, "Exclude memories with no project_id (legacy / unbound captures)")
+}
+
+func resetRecallFlags() {
+	recallAllProjects = false
+	recallProject = ""
+	recallStrictProject = false
 }
 
 func runRecall(cmd *cobra.Command, args []string) error {
@@ -51,7 +78,13 @@ func runRecall(cmd *cobra.Command, args []string) error {
 	}
 	defer func() { _ = closeFn() }()
 
-	results, err := finder.New(lib).Recall(finder.Options{Query: query, Limit: recallDefaultLimit})
+	scopedProjectId := resolveRecallScope(p)
+	results, err := finder.New(lib).Recall(finder.Options{
+		Query:         query,
+		Limit:         recallDefaultLimit,
+		ProjectId:     scopedProjectId,
+		StrictProject: recallStrictProject,
+	})
 	if err != nil {
 		if errors.Is(err, finder.ErrEmptyQuery) {
 			return fmt.Errorf("query is required")
@@ -82,6 +115,29 @@ func runRecall(cmd *cobra.Command, args []string) error {
 		)
 	}
 	return nil
+}
+
+// resolveRecallScope decides the project_id filter for a recall, per
+// ADR 0016. Returns "" to mean "no project filter — all projects".
+//
+// Resolution order:
+//  1. --all  → no filter
+//  2. --project=<id>  → explicit override
+//  3. cwd-resolved via .mom-project.yaml  → scope to that project
+//  4. cwd unbound  → no filter + emit a one-line hint pointing at /mom-project
+func resolveRecallScope(p *ux.Printer) string {
+	if recallAllProjects {
+		return ""
+	}
+	if recallProject != "" {
+		return recallProject
+	}
+	id, found := project.IdForCwd()
+	if !found {
+		p.Muted("cwd not in a MOM project — searching all. Run /mom-project to bind this directory.")
+		return ""
+	}
+	return id
 }
 
 func runRecallSQL(cmd *cobra.Command, query string) error {

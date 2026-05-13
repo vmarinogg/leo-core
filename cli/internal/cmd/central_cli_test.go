@@ -3,6 +3,7 @@ package cmd
 import (
 	"bytes"
 	"encoding/json"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -338,5 +339,153 @@ func TestCurateCmd_AlreadyCuratedErrors(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "already curated") {
 		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+// ── ADR 0016: project-scoped recall ──────────────────────────────────────────
+
+// insertProjectMemory mints a curated memory with the given project_id.
+func insertProjectMemory(t *testing.T, lib *librarian.Librarian, summary, text, projectId string) string {
+	t.Helper()
+	content, _ := json.Marshal(map[string]any{"text": text})
+	id, err := lib.InsertMemoryWithTags(librarian.InsertMemory{
+		Type:                   "semantic",
+		Summary:                summary,
+		Content:                string(content),
+		SessionID:              "s-cli-test",
+		ProjectId:              projectId,
+		ProvenanceActor:        "test",
+		ProvenanceSourceType:   "test",
+		ProvenanceTriggerEvent: "test",
+	}, []string{"cli"})
+	if err != nil {
+		t.Fatalf("InsertMemoryWithTags: %v", err)
+	}
+	curated := "curated"
+	if err := lib.UpdateOperational(id, librarian.OperationalUpdate{PromotionState: &curated}); err != nil {
+		t.Fatalf("UpdateOperational: %v", err)
+	}
+	return id
+}
+
+// chdirToBoundDir creates a tempdir with .mom-project.yaml (id=projectId)
+// and chdirs into it for the duration of the test.
+func chdirToBoundDir(t *testing.T, projectId string) string {
+	t.Helper()
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, ".mom-project.yaml"),
+		[]byte("version: \"1\"\nid: "+projectId+"\n"), 0o644); err != nil {
+		t.Fatalf("write bind file: %v", err)
+	}
+	orig, _ := os.Getwd()
+	if err := os.Chdir(dir); err != nil {
+		t.Fatalf("chdir: %v", err)
+	}
+	t.Cleanup(func() { _ = os.Chdir(orig) })
+	return dir
+}
+
+func runRecallTest(t *testing.T, query string) string {
+	t.Helper()
+	buf := new(bytes.Buffer)
+	recallCmd.SetOut(buf)
+	recallCmd.SetErr(buf)
+	if err := runRecall(recallCmd, []string{query}); err != nil {
+		t.Fatalf("runRecall: %v\noutput:\n%s", err, buf.String())
+	}
+	return buf.String()
+}
+
+// Default scope: cwd's project_id filters; other project's memories absent.
+func TestRecallCmd_DefaultScopesToCwdProject(t *testing.T) {
+	resetRecallFlags()
+	lib := openCentralTestLib(t)
+	alphaID := insertProjectMemory(t, lib, "alpha memory", "deploy alpha service", "alpha")
+	betaID := insertProjectMemory(t, lib, "beta memory", "deploy beta service", "beta")
+	chdirToBoundDir(t, "alpha")
+
+	out := runRecallTest(t, "deploy")
+	if !strings.Contains(out, alphaID) {
+		t.Errorf("expected alpha memory %s in output, got:\n%s", alphaID, out)
+	}
+	if strings.Contains(out, betaID) {
+		t.Errorf("beta memory %s should be scoped out, got:\n%s", betaID, out)
+	}
+}
+
+// --all disables scoping; both projects appear.
+func TestRecallCmd_AllFlagDisablesScope(t *testing.T) {
+	resetRecallFlags()
+	lib := openCentralTestLib(t)
+	alphaID := insertProjectMemory(t, lib, "alpha memory", "deploy alpha service", "alpha")
+	betaID := insertProjectMemory(t, lib, "beta memory", "deploy beta service", "beta")
+	chdirToBoundDir(t, "alpha")
+	recallAllProjects = true
+
+	out := runRecallTest(t, "deploy")
+	if !strings.Contains(out, alphaID) {
+		t.Errorf("--all should include alpha memory %s, got:\n%s", alphaID, out)
+	}
+	if !strings.Contains(out, betaID) {
+		t.Errorf("--all should include beta memory %s, got:\n%s", betaID, out)
+	}
+}
+
+// --project=foo overrides cwd resolution.
+func TestRecallCmd_ProjectFlagOverridesCwd(t *testing.T) {
+	resetRecallFlags()
+	lib := openCentralTestLib(t)
+	alphaID := insertProjectMemory(t, lib, "alpha memory", "deploy alpha service", "alpha")
+	betaID := insertProjectMemory(t, lib, "beta memory", "deploy beta service", "beta")
+	chdirToBoundDir(t, "alpha") // cwd says alpha
+	recallProject = "beta"      // but the flag wins
+
+	out := runRecallTest(t, "deploy")
+	if strings.Contains(out, alphaID) {
+		t.Errorf("--project=beta should exclude alpha %s, got:\n%s", alphaID, out)
+	}
+	if !strings.Contains(out, betaID) {
+		t.Errorf("--project=beta should include beta %s, got:\n%s", betaID, out)
+	}
+}
+
+// Unbound cwd → falls through to all-projects + prints stderr hint
+// mentioning /mom-project.
+func TestRecallCmd_UnboundCwdFallsThroughWithHint(t *testing.T) {
+	resetRecallFlags()
+	lib := openCentralTestLib(t)
+	alphaID := insertProjectMemory(t, lib, "alpha memory", "deploy alpha", "alpha")
+
+	dir := t.TempDir() // no bind file
+	orig, _ := os.Getwd()
+	if err := os.Chdir(dir); err != nil {
+		t.Fatalf("chdir: %v", err)
+	}
+	t.Cleanup(func() { _ = os.Chdir(orig) })
+
+	out := runRecallTest(t, "deploy")
+	if !strings.Contains(out, alphaID) {
+		t.Errorf("unbound cwd should fall through and include alpha %s, got:\n%s", alphaID, out)
+	}
+	if !strings.Contains(out, "/mom-project") {
+		t.Errorf("expected stderr hint mentioning /mom-project, got:\n%s", out)
+	}
+}
+
+// --strict-project excludes NULL project_id rows.
+func TestRecallCmd_StrictProjectExcludesNull(t *testing.T) {
+	resetRecallFlags()
+	lib := openCentralTestLib(t)
+	alphaID := insertProjectMemory(t, lib, "alpha memory", "deploy alpha", "alpha")
+	legacyID := insertProjectMemory(t, lib, "legacy memory", "deploy legacy", "")
+	chdirToBoundDir(t, "alpha")
+	recallStrictProject = true
+
+	out := runRecallTest(t, "deploy")
+	if !strings.Contains(out, alphaID) {
+		t.Errorf("strict should include alpha %s, got:\n%s", alphaID, out)
+	}
+	if strings.Contains(out, legacyID) {
+		t.Errorf("strict should exclude NULL %s, got:\n%s", legacyID, out)
 	}
 }

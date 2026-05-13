@@ -13,6 +13,7 @@ import (
 	"github.com/fsnotify/fsnotify"
 	"github.com/momhq/mom/cli/internal/herald"
 	"github.com/momhq/mom/cli/internal/pathutil"
+	"github.com/momhq/mom/cli/internal/project"
 	"github.com/momhq/mom/cli/internal/ux"
 )
 
@@ -69,6 +70,12 @@ type resolvedSource struct {
 	adapter Adapter
 }
 
+// projectIdCacheTTL bounds how stale the resolved project_id may be.
+// Per ADR 0016: resolution happens at publish-time with a short cache
+// so mid-session bindings (the user running /mom-project while a
+// session is active) take effect within a few captures.
+const projectIdCacheTTL = 5 * time.Second
+
 // Watcher tails Harness transcript directories with cursor-based
 // incremental reads and emits one turn.observed event per parsed
 // turn on the Herald bus.
@@ -82,6 +89,13 @@ type Watcher struct {
 	logFile    string
 	p          *ux.Printer
 	catchingUp bool // true during catchUp phase — suppresses per-file output
+
+	// projectIdCache stamps captured Turns with the resolved project
+	// identity. Cached briefly to keep the per-publish stat cost low
+	// while still picking up new bindings without a session restart.
+	projectIdMu    sync.Mutex
+	projectIdValue string
+	projectIdExp   time.Time
 }
 
 // New creates a Watcher. Call Run to start watching.
@@ -427,7 +441,11 @@ func (w *Watcher) ingestFile(path string) int {
 	// these for the filter + cluster + persist pipeline; Logbook
 	// projects to a privacy-safe metadata row.
 	if w.cfg.Bus != nil {
+		projectId := w.resolveProjectId()
 		for _, t := range turns {
+			if projectId != "" {
+				t.ProjectId = projectId
+			}
 			w.cfg.Bus.Publish(herald.Event{
 				Type:      herald.TurnObserved,
 				SessionID: t.SessionID,
@@ -437,6 +455,30 @@ func (w *Watcher) ingestFile(path string) int {
 	}
 
 	return len(turns)
+}
+
+// resolveProjectId returns the project_id for cfg.ProjectDir using a
+// short cache (ADR 0016 — mid-session bindings take effect on the next
+// re-resolve, without requiring a watcher restart). Returns "" when
+// no .mom-project.yaml is found or on resolution error.
+func (w *Watcher) resolveProjectId() string {
+	if w.cfg.ProjectDir == "" {
+		return ""
+	}
+	w.projectIdMu.Lock()
+	defer w.projectIdMu.Unlock()
+	if time.Now().Before(w.projectIdExp) {
+		return w.projectIdValue
+	}
+	id, _, _, err := project.ResolveProject(w.cfg.ProjectDir)
+	if err != nil {
+		// Malformed file: treat as unbound (best-effort). The CLI/skill
+		// surfaces the error to the user.
+		id = ""
+	}
+	w.projectIdValue = id
+	w.projectIdExp = time.Now().Add(projectIdCacheTTL)
+	return id
 }
 
 // addDir adds a directory and all its subdirectories to the fsnotify watcher.

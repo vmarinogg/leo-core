@@ -26,6 +26,10 @@ type Turn struct {
 	Model    string // "the model": e.g. "claude-sonnet-4-6", "gpt-4o"
 	Provider string // "provided by whom": model vendor — "anthropic", "openai", …
 	Harness  string // "used in which client": "claude-code", "codex", "windsurf", "pi"
+
+	// ProjectId carries the resolved project identity (ADR 0016).
+	// Empty means "unknown" — the resolver found no .mom-project.yaml.
+	ProjectId string
 }
 
 // ToolCall is one tool invocation observed in an assistant turn.
@@ -99,6 +103,9 @@ func (t Turn) ToPayload() map[string]any {
 	}
 	if t.Provider != "" {
 		out["provider"] = t.Provider
+	}
+	if t.ProjectId != "" {
+		out["project_id"] = t.ProjectId
 	}
 	return out
 }

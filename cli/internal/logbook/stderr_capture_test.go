@@ -5,6 +5,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"testing"
 
@@ -71,7 +72,7 @@ func TestWorker_Subscribe_LogsToStderr_OnEmptySessionID(t *testing.T) {
 // Librarian whose underlying vault was closed BEFORE the publish.
 func TestWorker_Subscribe_LogsToStderr_OnPersistFailure(t *testing.T) {
 	dir := t.TempDir()
-	migs := append(librarian.Migrations(), logbook.Migrations()...)
+	migs := append(librarian.Migrations(), logbook.Migrations()...); sort.Slice(migs, func(i, j int) bool { return migs[i].Version < migs[j].Version })
 	v, err := vault.Open(filepath.Join(dir, "mom.db"), migs)
 	if err != nil {
 		t.Fatalf("vault.Open: %v", err)

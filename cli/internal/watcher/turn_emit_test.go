@@ -169,3 +169,125 @@ func TestIngestFile_PublishesOneEventPerTurn(t *testing.T) {
 		t.Errorf("turn.observed fired %d times, want 3 (one per turn)", got)
 	}
 }
+
+// TestTurn_ToPayload_EmitsProjectId verifies ProjectId rides on the
+// Herald payload when set (per ADR 0016).
+func TestTurn_ToPayload_EmitsProjectId(t *testing.T) {
+	turn := Turn{
+		SessionID: "s",
+		Role:      "user",
+		Text:      "hi",
+		ProjectId: "alpha",
+	}
+	p := turn.ToPayload()
+	if p["project_id"] != "alpha" {
+		t.Errorf("payload[project_id] = %v, want alpha", p["project_id"])
+	}
+}
+
+// When ProjectId is empty, the payload omits the key entirely (so
+// downstream consumers can tell "stamped as alpha" from "no stamp").
+func TestTurn_ToPayload_OmitsProjectIdWhenEmpty(t *testing.T) {
+	turn := Turn{SessionID: "s", Role: "user", Text: "hi"}
+	p := turn.ToPayload()
+	if _, ok := p["project_id"]; ok {
+		t.Errorf("payload should omit project_id when empty, got %v", p["project_id"])
+	}
+}
+
+// TestIngestFile_StampsProjectIdFromBindFile verifies that when the
+// watcher's ProjectDir contains a .mom-project.yaml, every published
+// Turn carries the resolved project_id (per ADR 0016).
+func TestIngestFile_StampsProjectIdFromBindFile(t *testing.T) {
+	transcriptDir := t.TempDir()
+	momDir := t.TempDir()
+	projectDir := t.TempDir()
+	// Write .mom-project.yaml at project root.
+	if err := os.WriteFile(filepath.Join(projectDir, ".mom-project.yaml"),
+		[]byte("version: \"1\"\nid: alpha\n"), 0o644); err != nil {
+		t.Fatalf("write bind file: %v", err)
+	}
+
+	bus := herald.NewBus()
+	var mu sync.Mutex
+	var captured []herald.Event
+	bus.Subscribe(herald.TurnObserved, func(e herald.Event) {
+		mu.Lock()
+		captured = append(captured, e)
+		mu.Unlock()
+	})
+
+	w := &Watcher{
+		cfg: Config{
+			TranscriptDir: transcriptDir,
+			ProjectDir:    projectDir,
+			MomDir:        momDir,
+			Adapter:       NewClaudeAdapter(),
+			Bus:           bus,
+		},
+		timers:    make(map[string]*time.Timer),
+		cursorDir: filepath.Join(momDir, "cache"),
+		logFile:   filepath.Join(momDir, "watch.log"),
+	}
+	_ = os.MkdirAll(w.cursorDir, 0755)
+
+	transcriptPath := filepath.Join(transcriptDir, "s-pid.jsonl")
+	if err := os.WriteFile(transcriptPath, []byte(claudeUserTurn+"\n"), 0o644); err != nil {
+		t.Fatalf("write transcript: %v", err)
+	}
+	w.ingestFile(transcriptPath)
+
+	mu.Lock()
+	defer mu.Unlock()
+	if len(captured) != 1 {
+		t.Fatalf("got %d events, want 1", len(captured))
+	}
+	got, _ := captured[0].Payload["project_id"].(string)
+	if got != "alpha" {
+		t.Errorf("payload project_id = %q, want alpha", got)
+	}
+}
+
+// When the watcher's ProjectDir has no bind file, payloads omit
+// project_id (NULL stamps downstream).
+func TestIngestFile_OmitsProjectIdWhenUnbound(t *testing.T) {
+	transcriptDir := t.TempDir()
+	momDir := t.TempDir()
+	projectDir := t.TempDir() // no .mom-project.yaml
+
+	bus := herald.NewBus()
+	var mu sync.Mutex
+	var captured []herald.Event
+	bus.Subscribe(herald.TurnObserved, func(e herald.Event) {
+		mu.Lock()
+		captured = append(captured, e)
+		mu.Unlock()
+	})
+
+	w := &Watcher{
+		cfg: Config{
+			TranscriptDir: transcriptDir,
+			ProjectDir:    projectDir,
+			MomDir:        momDir,
+			Adapter:       NewClaudeAdapter(),
+			Bus:           bus,
+		},
+		timers:    make(map[string]*time.Timer),
+		cursorDir: filepath.Join(momDir, "cache"),
+		logFile:   filepath.Join(momDir, "watch.log"),
+	}
+	_ = os.MkdirAll(w.cursorDir, 0755)
+
+	transcriptPath := filepath.Join(transcriptDir, "s-unbound.jsonl")
+	_ = os.WriteFile(transcriptPath, []byte(claudeUserTurn+"\n"), 0o644)
+	w.ingestFile(transcriptPath)
+
+	mu.Lock()
+	defer mu.Unlock()
+	if len(captured) != 1 {
+		t.Fatalf("got %d events, want 1", len(captured))
+	}
+	if _, ok := captured[0].Payload["project_id"]; ok {
+		t.Errorf("payload should omit project_id when unbound, got %v", captured[0].Payload["project_id"])
+	}
+}
