@@ -328,12 +328,12 @@ func runInitWithConfig(cmd *cobra.Command, cwd string, force bool, result Onboar
 	emitter.EmitSessionEvent(herald.SessionEvent{
 		SessionID: "s-init",
 		RepoID:    filepath.Base(cwd),
-		Runtime:   cfg.PrimaryRuntime(),
+		Harness:   cfg.PrimaryHarness(),
 		StartedAt: startedAt,
 		Trigger:   "normal",
 	})
-	emitter.EmitRuntimeHealth(herald.RuntimeHealth{
-		Runtime:       cfg.PrimaryRuntime(),
+	emitter.EmitHarnessHealth(herald.HarnessHealth{
+		Harness:       cfg.PrimaryHarness(),
 		TS:            time.Now().UTC().Format(time.RFC3339),
 		WrapUpSuccess: true,
 		LatencyMS:     0,

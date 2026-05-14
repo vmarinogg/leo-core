@@ -97,10 +97,10 @@ func (e *Emitter) EmitConsumptionEvent(ev ConsumptionEvent) {
 	}
 }
 
-// EmitRuntimeHealth emits a RuntimeHealth event, stamping the Kind field.
-func (e *Emitter) EmitRuntimeHealth(ev RuntimeHealth) {
-	ev.Kind = "RuntimeHealth"
+// EmitHarnessHealth emits a HarnessHealth event, stamping the Kind field.
+func (e *Emitter) EmitHarnessHealth(ev HarnessHealth) {
+	ev.Kind = "HarnessHealth"
 	if err := e.Emit(ev); err != nil {
-		log.Printf("[herald] warn: EmitRuntimeHealth: %v", err)
+		log.Printf("[herald] warn: EmitHarnessHealth: %v", err)
 	}
 }

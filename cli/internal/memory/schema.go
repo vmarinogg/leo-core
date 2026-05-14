@@ -38,7 +38,7 @@ var validClassification = map[string]bool{
 
 // Provenance captures the origin of a memory document.
 type Provenance struct {
-	Runtime       string `json:"runtime,omitempty"`
+	Harness       string `json:"harness,omitempty"`
 	TriggerEvent  string `json:"trigger_event,omitempty"`
 	CommitSHA     string `json:"commit_sha,omitempty"`
 	RawExhaustRef string `json:"raw_exhaust_ref,omitempty"`
