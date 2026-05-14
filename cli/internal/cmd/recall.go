@@ -119,23 +119,12 @@ func runRecall(cmd *cobra.Command, args []string) error {
 
 // resolveRecallScope decides the project_id filter for a recall, per
 // ADR 0016. Returns "" to mean "no project filter — all projects".
-//
-// Resolution order:
-//  1. --all  → no filter
-//  2. --project=<id>  → explicit override
-//  3. cwd-resolved via .mom-project.yaml  → scope to that project
-//  4. cwd unbound  → no filter + emit a one-line hint pointing at /mom-project
+// Policy lives in project.ScopeForCwd; this is a thin adapter that
+// emits the standard hint when cwd is unbound.
 func resolveRecallScope(p *ux.Printer) string {
-	if recallAllProjects {
-		return ""
-	}
-	if recallProject != "" {
-		return recallProject
-	}
-	id, found := project.IdForCwd()
-	if !found {
-		p.Muted("cwd not in a MOM project — searching all. Run /mom-project to bind this directory.")
-		return ""
+	id, hint := project.ScopeForCwd(recallAllProjects, recallProject)
+	if hint != "" {
+		p.Muted(hint)
 	}
 	return id
 }

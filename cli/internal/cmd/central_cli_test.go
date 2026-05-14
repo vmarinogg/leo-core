@@ -544,3 +544,166 @@ func TestStatusCmd_ShowsProjectWhenBound(t *testing.T) {
 		t.Errorf("bound cwd should NOT trigger the nudge, got:\n%s", out)
 	}
 }
+
+// ── #345 drafts filters (project / harness / session) ──
+
+// insertDraftFull inserts a draft with full provenance + project_id
+// control for the drafts-filter tests.
+func insertDraftFull(t *testing.T, lib *librarian.Librarian, summary, harness, sessionID, projectID string) string {
+	t.Helper()
+	content, _ := json.Marshal(map[string]any{"text": "draft body for " + summary})
+	id, err := lib.InsertMemoryWithTags(librarian.InsertMemory{
+		Type:                   "untyped",
+		Summary:                summary,
+		Content:                string(content),
+		SessionID:              sessionID,
+		ProjectId:              projectID,
+		ProvenanceActor:        harness,
+		ProvenanceSourceType:   "transcript-extraction",
+		ProvenanceTriggerEvent: "watcher",
+	}, []string{"cli"})
+	if err != nil {
+		t.Fatalf("InsertMemoryWithTags: %v", err)
+	}
+	return id
+}
+
+func runDraftsTest(t *testing.T) string {
+	t.Helper()
+	buf := new(bytes.Buffer)
+	draftsCmd.SetOut(buf)
+	draftsCmd.SetErr(buf)
+	if err := runDrafts(draftsCmd, nil); err != nil {
+		t.Fatalf("runDrafts: %v\noutput:\n%s", err, buf.String())
+	}
+	return buf.String()
+}
+
+// Cycle 5: --project foo scopes to the named project.
+func TestDraftsCmd_ProjectFlagScopes(t *testing.T) {
+	resetDraftsFlags()
+	lib := openCentralTestLib(t)
+	alphaID := insertDraftFull(t, lib, "alpha draft", "claude-code", "s-1", "alpha")
+	betaID := insertDraftFull(t, lib, "beta draft", "claude-code", "s-2", "beta")
+	draftsProject = "alpha"
+
+	out := runDraftsTest(t)
+	if !strings.Contains(out, alphaID) {
+		t.Errorf("expected alpha %s in output, got:\n%s", alphaID, out)
+	}
+	if strings.Contains(out, betaID) {
+		t.Errorf("beta %s should be excluded, got:\n%s", betaID, out)
+	}
+}
+
+// Cycle 6: --all-projects returns everything regardless of cwd.
+func TestDraftsCmd_AllProjectsFlag(t *testing.T) {
+	resetDraftsFlags()
+	lib := openCentralTestLib(t)
+	alphaID := insertDraftFull(t, lib, "alpha draft", "claude-code", "s-1", "alpha")
+	betaID := insertDraftFull(t, lib, "beta draft", "claude-code", "s-2", "beta")
+	chdirToBoundDir(t, "alpha")
+	draftsAllProjects = true
+
+	out := runDraftsTest(t)
+	if !strings.Contains(out, alphaID) || !strings.Contains(out, betaID) {
+		t.Errorf("--all-projects should include both, got:\n%s", out)
+	}
+}
+
+// Cycle 7: --harness codex filters by provenance_actor.
+func TestDraftsCmd_HarnessFlag(t *testing.T) {
+	resetDraftsFlags()
+	lib := openCentralTestLib(t)
+	codexID := insertDraftFull(t, lib, "codex draft", "codex", "s-c", "alpha")
+	claudeID := insertDraftFull(t, lib, "claude draft", "claude-code", "s-cl", "alpha")
+	draftsAllProjects = true // skip project filter
+	draftsHarness = "codex"
+
+	out := runDraftsTest(t)
+	if !strings.Contains(out, codexID) {
+		t.Errorf("expected codex draft %s", codexID)
+	}
+	if strings.Contains(out, claudeID) {
+		t.Errorf("claude draft %s should be excluded when --harness=codex", claudeID)
+	}
+}
+
+// Cycle 8: --session filters by exact session id.
+func TestDraftsCmd_SessionFlag(t *testing.T) {
+	resetDraftsFlags()
+	lib := openCentralTestLib(t)
+	wantID := insertDraftFull(t, lib, "target session", "claude-code", "s-target", "alpha")
+	otherID := insertDraftFull(t, lib, "other session", "claude-code", "s-other", "alpha")
+	draftsAllProjects = true
+	draftsSession = "s-target"
+
+	out := runDraftsTest(t)
+	if !strings.Contains(out, wantID) {
+		t.Errorf("expected target draft %s", wantID)
+	}
+	if strings.Contains(out, otherID) {
+		t.Errorf("other-session draft %s should be excluded", otherID)
+	}
+}
+
+// Cycle 9: default behaviour scopes to cwd-resolved project.
+func TestDraftsCmd_DefaultScopesToCwdProject(t *testing.T) {
+	resetDraftsFlags()
+	lib := openCentralTestLib(t)
+	alphaID := insertDraftFull(t, lib, "alpha draft", "claude-code", "s-1", "alpha")
+	betaID := insertDraftFull(t, lib, "beta draft", "claude-code", "s-2", "beta")
+	chdirToBoundDir(t, "alpha")
+
+	out := runDraftsTest(t)
+	if !strings.Contains(out, alphaID) {
+		t.Errorf("expected alpha %s in cwd-scoped output", alphaID)
+	}
+	if strings.Contains(out, betaID) {
+		t.Errorf("beta %s should be excluded when cwd is bound to alpha", betaID)
+	}
+}
+
+// Cycle 10: unbound cwd → falls through to all + stderr hint.
+func TestDraftsCmd_UnboundCwdFallsThroughWithHint(t *testing.T) {
+	resetDraftsFlags()
+	lib := openCentralTestLib(t)
+	alphaID := insertDraftFull(t, lib, "alpha draft", "claude-code", "s-1", "alpha")
+
+	unbound := t.TempDir()
+	orig, _ := os.Getwd()
+	if err := os.Chdir(unbound); err != nil {
+		t.Fatalf("chdir: %v", err)
+	}
+	t.Cleanup(func() { _ = os.Chdir(orig) })
+
+	out := runDraftsTest(t)
+	if !strings.Contains(out, alphaID) {
+		t.Errorf("unbound cwd should fall through and include alpha %s, got:\n%s", alphaID, out)
+	}
+	if !strings.Contains(out, "/mom-project") {
+		t.Errorf("expected stderr hint mentioning /mom-project, got:\n%s", out)
+	}
+}
+
+// Cycle 11: output shows Harness + Project columns.
+func TestDraftsCmd_OutputColumns(t *testing.T) {
+	resetDraftsFlags()
+	lib := openCentralTestLib(t)
+	insertDraftFull(t, lib, "alpha draft", "codex", "s-1", "alpha")
+	draftsAllProjects = true
+
+	out := runDraftsTest(t)
+	if !strings.Contains(out, "Harness") {
+		t.Errorf("expected Harness column header, got:\n%s", out)
+	}
+	if !strings.Contains(out, "Project") {
+		t.Errorf("expected Project column header, got:\n%s", out)
+	}
+	if !strings.Contains(out, "codex") {
+		t.Errorf("expected codex value in row, got:\n%s", out)
+	}
+	if !strings.Contains(out, "alpha") {
+		t.Errorf("expected alpha value in row, got:\n%s", out)
+	}
+}
