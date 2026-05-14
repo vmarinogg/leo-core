@@ -277,11 +277,11 @@ func runInitWithConfig(cmd *cobra.Command, cwd string, force bool, result Onboar
 	// ── Phase 3: Generate harness context files ────────────────────────────
 	var genErr error
 	doGenerate := func() {
-		runtimeCfg := buildRuntimeConfig(cfg)
+		harnessCfg := buildHarnessConfig(cfg)
 
-		runtimeConstraints := buildRuntimeConstraints()
-		runtimeSkills := buildRuntimeSkills()
-		runtimeIdentity := buildRuntimeIdentity()
+		harnessConstraints := buildHarnessConstraints()
+		harnessSkills := buildHarnessSkills()
+		harnessIdentity := buildHarnessIdentity()
 
 		// Install global context/tool integration for all selected harnesses.
 		for _, rt := range result.Harnesses {
@@ -289,7 +289,7 @@ func runInitWithConfig(cmd *cobra.Command, cwd string, force bool, result Onboar
 			if !ok {
 				continue
 			}
-			if err := installGlobalHarness(adapter, rt, runtimeCfg, runtimeConstraints, runtimeSkills, runtimeIdentity); err != nil {
+			if err := installGlobalHarness(adapter, rt, harnessCfg, harnessConstraints, harnessSkills, harnessIdentity); err != nil {
 				genErr = err
 				return
 			}
@@ -328,12 +328,12 @@ func runInitWithConfig(cmd *cobra.Command, cwd string, force bool, result Onboar
 	emitter.EmitSessionEvent(herald.SessionEvent{
 		SessionID: "s-init",
 		RepoID:    filepath.Base(cwd),
-		Runtime:   cfg.PrimaryRuntime(),
+		Harness:   cfg.PrimaryHarness(),
 		StartedAt: startedAt,
 		Trigger:   "normal",
 	})
-	emitter.EmitRuntimeHealth(herald.RuntimeHealth{
-		Runtime:       cfg.PrimaryRuntime(),
+	emitter.EmitHarnessHealth(herald.HarnessHealth{
+		Harness:       cfg.PrimaryHarness(),
 		TS:            time.Now().UTC().Format(time.RFC3339),
 		WrapUpSuccess: true,
 		LatencyMS:     0,
@@ -393,10 +393,10 @@ func runReinit(cmd *cobra.Command, cwd, momDir string, result OnboardingResult, 
 	// Refresh global context/tool integration for all enabled harnesses. This
 	// doubles as a repair path when a user deletes one global file and reruns init.
 	registry := harness.NewRegistry(cwd)
-	runtimeCfg := buildRuntimeConfig(cfg)
-	runtimeConstraints := buildRuntimeConstraints()
-	runtimeSkills := buildRuntimeSkills()
-	runtimeIdentity := buildRuntimeIdentity()
+	harnessCfg := buildHarnessConfig(cfg)
+	harnessConstraints := buildHarnessConstraints()
+	harnessSkills := buildHarnessSkills()
+	harnessIdentity := buildHarnessIdentity()
 	installed := make([]string, 0, len(cfg.EnabledHarnesses()))
 
 	for _, rt := range cfg.EnabledHarnesses() {
@@ -404,7 +404,7 @@ func runReinit(cmd *cobra.Command, cwd, momDir string, result OnboardingResult, 
 		if !ok {
 			continue
 		}
-		if err := installGlobalHarness(adapter, rt, runtimeCfg, runtimeConstraints, runtimeSkills, runtimeIdentity); err != nil {
+		if err := installGlobalHarness(adapter, rt, harnessCfg, harnessConstraints, harnessSkills, harnessIdentity); err != nil {
 			p.Warnf("%s global integration: %v", rt, err)
 			continue
 		}
@@ -432,10 +432,10 @@ func runReinit(cmd *cobra.Command, cwd, momDir string, result OnboardingResult, 
 	return nil
 }
 
-// buildRuntimeConfig converts a config.Config to a harness.Config.
+// buildHarnessConfig converts a config.Config to a harness.Config.
 // Autonomy was retired from the persisted config; generated context files still
 // include the balanced default so the harness retains the behavioral directive.
-func buildRuntimeConfig(cfg *config.Config) harness.Config {
+func buildHarnessConfig(cfg *config.Config) harness.Config {
 	commMode := cfg.Communication.Mode
 	if commMode == "" {
 		commMode = "concise"
@@ -455,20 +455,20 @@ func buildRuntimeConfig(cfg *config.Config) harness.Config {
 	}
 }
 
-// buildRuntimeConstraints returns no generated central constraints. Agent behavior
+// buildHarnessConstraints returns no generated central constraints. Agent behavior
 // is delivered through installed skills and compact context files.
-func buildRuntimeConstraints() []harness.Constraint {
+func buildHarnessConstraints() []harness.Constraint {
 	return nil
 }
 
-// buildRuntimeSkills returns no generated central skills. Slash skills are
+// buildHarnessSkills returns no generated central skills. Slash skills are
 // installed through the skills package manager instead.
-func buildRuntimeSkills() []harness.Skill {
+func buildHarnessSkills() []harness.Skill {
 	return nil
 }
 
-// buildRuntimeIdentity parses the identity JSON into a harness.Identity.
-func buildRuntimeIdentity() *harness.Identity {
+// buildHarnessIdentity parses the identity JSON into a harness.Identity.
+func buildHarnessIdentity() *harness.Identity {
 	var identityData struct {
 		What        string   `json:"what"`
 		Philosophy  string   `json:"philosophy"`
@@ -517,12 +517,12 @@ func skillsAgentForHarness(h string) (string, bool) {
 	}
 }
 
-func installGlobalHarness(adapter harness.Adapter, rt string, runtimeCfg harness.Config, constraints []harness.Constraint, skills []harness.Skill, identity *harness.Identity) error {
+func installGlobalHarness(adapter harness.Adapter, rt string, harnessCfg harness.Config, constraints []harness.Constraint, skills []harness.Skill, identity *harness.Identity) error {
 	global, ok := adapter.(harness.GlobalAdapter)
 	if !ok {
 		return fmt.Errorf("%s does not support global install", rt)
 	}
-	if err := global.GenerateGlobalContextFile(runtimeCfg, constraints, skills, identity); err != nil {
+	if err := global.GenerateGlobalContextFile(harnessCfg, constraints, skills, identity); err != nil {
 		return fmt.Errorf("generating context: %w", err)
 	}
 	if err := global.RegisterGlobalMCP(); err != nil {

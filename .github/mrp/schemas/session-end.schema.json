@@ -3,7 +3,7 @@
   "$id": "https://github.com/momhq/mom/mrp/v0/session-end",
   "title": "MRP v0 — session.end event",
   "type": "object",
-  "required": ["mrp_version", "event", "session_id", "runtime", "timestamp", "started_at", "ended_at"],
+  "required": ["mrp_version", "event", "session_id", "harness", "timestamp", "started_at", "ended_at"],
   "additionalProperties": false,
   "properties": {
     "mrp_version": {
@@ -21,7 +21,7 @@
       "minLength": 1,
       "description": "Unique session identifier"
     },
-    "runtime": {
+    "harness": {
       "type": "string",
       "minLength": 1,
       "description": "Adapter name"
@@ -48,7 +48,7 @@
     },
     "exit_reason": {
       "type": "string",
-      "enum": ["user_ended", "runtime_ended", "timeout", "error"],
+      "enum": ["user_ended", "harness_ended", "timeout", "error"],
       "description": "Why the session ended"
     }
   }

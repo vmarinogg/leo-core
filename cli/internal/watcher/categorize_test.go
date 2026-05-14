@@ -15,6 +15,13 @@ func TestCategorizeToolCall(t *testing.T) {
 		{"mom_status", "mom_memory"},
 		{"mcp__mom__mom_recall", "mom_memory"},
 		{"mcp__mom__mom_record", "mom_memory"},
+		// Retired MCP tool names (#349) — no longer recognised as memory
+		// tools; they fall through to the system catch-all.
+		{"create_memory_draft", "system"}, // renamed to mom_record
+		{"mom_record_turn", "system"},     // folded into mom_record
+		{"list_landmarks", "system"},      // renamed to mom_landmarks
+		{"get_memory", "system"},          // renamed to mom_get
+		{"search_memories", "system"},     // pre-v0.30 name; replaced by mom_recall
 		// Codebase reads.
 		{"Read", "codebase_read"},
 		{"Grep", "codebase_read"},

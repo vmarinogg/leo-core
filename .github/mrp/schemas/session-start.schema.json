@@ -3,7 +3,7 @@
   "$id": "https://github.com/momhq/mom/mrp/v0/session-start",
   "title": "MRP v0 — session.start event",
   "type": "object",
-  "required": ["mrp_version", "event", "session_id", "runtime", "timestamp", "started_at"],
+  "required": ["mrp_version", "event", "session_id", "harness", "timestamp", "started_at"],
   "additionalProperties": false,
   "properties": {
     "mrp_version": {
@@ -21,7 +21,7 @@
       "minLength": 1,
       "description": "Unique session identifier (UUID recommended)"
     },
-    "runtime": {
+    "harness": {
       "type": "string",
       "minLength": 1,
       "description": "Adapter name (e.g. claude-code, codex, windsurf)"

@@ -261,7 +261,7 @@ func (w *Watcher) TranscriptDir() string {
 	return w.cfg.TranscriptDir
 }
 
-// TranscriptDirs returns all resolved transcript directories with their runtime names.
+// TranscriptDirs returns all resolved transcript directories with their harness names.
 func (w *Watcher) TranscriptDirs() map[string]string {
 	dirs := make(map[string]string, len(w.sources))
 	for _, src := range w.sources {

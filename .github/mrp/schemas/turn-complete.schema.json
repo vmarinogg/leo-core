@@ -2,9 +2,9 @@
   "$schema": "http://json-schema.org/draft-07/schema#",
   "$id": "https://github.com/momhq/mom/mrp/v0/turn-complete",
   "title": "MRP v0 — turn.complete event",
-  "description": "Emitted when one full turn finishes (user prompt + runtime response). Opt-in — adapters that cannot track turn boundaries must not synthesize this event.",
+  "description": "Emitted when one full turn finishes (user prompt + harness response). Opt-in — adapters that cannot track turn boundaries must not synthesize this event.",
   "type": "object",
-  "required": ["mrp_version", "event", "session_id", "runtime", "timestamp", "turn_index"],
+  "required": ["mrp_version", "event", "session_id", "harness", "timestamp", "turn_index"],
   "additionalProperties": false,
   "properties": {
     "mrp_version": {
@@ -22,7 +22,7 @@
       "minLength": 1,
       "description": "Unique session identifier"
     },
-    "runtime": {
+    "harness": {
       "type": "string",
       "minLength": 1,
       "description": "Adapter name"
@@ -45,7 +45,7 @@
     "completion_tokens": {
       "type": "integer",
       "minimum": 0,
-      "description": "Token count for the runtime response (optional)"
+      "description": "Token count for the harness response (optional)"
     }
   }
 }

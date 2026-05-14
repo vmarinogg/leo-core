@@ -2,7 +2,7 @@
   "$schema": "http://json-schema.org/draft-07/schema#",
   "$id": "https://github.com/momhq/mom/mrp/v0/capture-payload",
   "title": "MRP v0 — Capture dual-output payload",
-  "description": "Returned by the runtime adapter when a capture event fires (session.end, compact.triggered, clear.triggered). Both fields land: raw for future re-processing, drafts for immediate use.",
+  "description": "Returned by the harness adapter when a capture event fires (session.end, compact.triggered, clear.triggered). Both fields land: raw for future re-processing, drafts for immediate use.",
   "type": "object",
   "required": ["raw_exhaust", "classified_drafts"],
   "additionalProperties": false,
@@ -13,7 +13,7 @@
     },
     "classified_drafts": {
       "type": "array",
-      "description": "Runtime's inline attempt at structured memory drafts. May be empty if runtime does not support inline classification.",
+      "description": "Harness's inline attempt at structured memory drafts. May be empty if harness does not support inline classification.",
       "items": {
         "type": "object",
         "required": ["type", "summary", "confidence"],
@@ -40,7 +40,7 @@
           "confidence": {
             "type": "string",
             "enum": ["EXTRACTED", "INFERRED", "AMBIGUOUS"],
-            "description": "How confident the runtime is in this classification"
+            "description": "How confident the harness is in this classification"
           }
         }
       }

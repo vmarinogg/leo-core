@@ -72,7 +72,7 @@ func TestMRPSessionStart_ValidMinimal(t *testing.T) {
 		MRPVersion: "v0",
 		Event:      "session.start",
 		SessionID:  "sess-001",
-		Runtime:    "claude-code",
+		Harness:    "claude-code",
 		Timestamp:  "2026-04-18T10:00:00Z",
 		StartedAt:  "2026-04-18T10:00:00Z",
 	})
@@ -83,7 +83,7 @@ func TestMRPSessionStart_ValidWithOptionals(t *testing.T) {
 		MRPVersion:  "v0",
 		Event:       "session.start",
 		SessionID:   "sess-002",
-		Runtime:     "codex",
+		Harness:     "codex",
 		Timestamp:   "2026-04-18T10:00:00Z",
 		StartedAt:   "2026-04-18T10:00:00Z",
 		ProjectRoot: "/home/user/project",
@@ -99,14 +99,14 @@ func TestMRPSessionStart_MissingRequired(t *testing.T) {
 		{
 			name: "missing mrp_version",
 			ev: MRPSessionStart{
-				Event: "session.start", SessionID: "s", Runtime: "r",
+				Event: "session.start", SessionID: "s", Harness: "r",
 				Timestamp: "2026-04-18T10:00:00Z", StartedAt: "2026-04-18T10:00:00Z",
 			},
 		},
 		{
 			name: "missing session_id",
 			ev: MRPSessionStart{
-				MRPVersion: "v0", Event: "session.start", Runtime: "r",
+				MRPVersion: "v0", Event: "session.start", Harness: "r",
 				Timestamp: "2026-04-18T10:00:00Z", StartedAt: "2026-04-18T10:00:00Z",
 			},
 		},
@@ -114,7 +114,7 @@ func TestMRPSessionStart_MissingRequired(t *testing.T) {
 			name: "missing started_at",
 			ev: MRPSessionStart{
 				MRPVersion: "v0", Event: "session.start", SessionID: "s",
-				Runtime: "r", Timestamp: "2026-04-18T10:00:00Z",
+				Harness: "r", Timestamp: "2026-04-18T10:00:00Z",
 			},
 		},
 	}
@@ -130,7 +130,7 @@ func TestMRPSessionStart_WrongEventConst(t *testing.T) {
 		MRPVersion: "v0",
 		Event:      "session.end", // wrong const
 		SessionID:  "s",
-		Runtime:    "r",
+		Harness:    "r",
 		Timestamp:  "2026-04-18T10:00:00Z",
 		StartedAt:  "2026-04-18T10:00:00Z",
 	})
@@ -143,7 +143,7 @@ func TestMRPSessionEnd_ValidMinimal(t *testing.T) {
 		MRPVersion: "v0",
 		Event:      "session.end",
 		SessionID:  "sess-001",
-		Runtime:    "claude-code",
+		Harness:    "claude-code",
 		Timestamp:  "2026-04-18T11:00:00Z",
 		StartedAt:  "2026-04-18T10:00:00Z",
 		EndedAt:    "2026-04-18T11:00:00Z",
@@ -157,7 +157,7 @@ func TestMRPSessionEnd_ValidWithOptionals(t *testing.T) {
 		MRPVersion: "v0",
 		Event:      "session.end",
 		SessionID:  "sess-002",
-		Runtime:    "claude-code",
+		Harness:    "claude-code",
 		Timestamp:  "2026-04-18T11:00:00Z",
 		StartedAt:  "2026-04-18T10:00:00Z",
 		EndedAt:    "2026-04-18T11:00:00Z",
@@ -171,7 +171,7 @@ func TestMRPSessionEnd_MissingEndedAt(t *testing.T) {
 		MRPVersion: "v0",
 		Event:      "session.end",
 		SessionID:  "s",
-		Runtime:    "r",
+		Harness:    "r",
 		Timestamp:  "2026-04-18T11:00:00Z",
 		StartedAt:  "2026-04-18T10:00:00Z",
 		// EndedAt missing
@@ -184,7 +184,7 @@ func TestMRPSessionEnd_InvalidExitReason(t *testing.T) {
 		MRPVersion: "v0",
 		Event:      "session.end",
 		SessionID:  "s",
-		Runtime:    "r",
+		Harness:    "r",
 		Timestamp:  "2026-04-18T11:00:00Z",
 		StartedAt:  "2026-04-18T10:00:00Z",
 		EndedAt:    "2026-04-18T11:00:00Z",
@@ -193,14 +193,14 @@ func TestMRPSessionEnd_InvalidExitReason(t *testing.T) {
 }
 
 func TestMRPSessionEnd_AllExitReasons(t *testing.T) {
-	for _, reason := range []string{"user_ended", "runtime_ended", "timeout", "error"} {
+	for _, reason := range []string{"user_ended", "harness_ended", "timeout", "error"} {
 		r := reason
 		t.Run(reason, func(t *testing.T) {
 			mustPass(t, "session-end.schema.json", MRPSessionEnd{
 				MRPVersion: "v0",
 				Event:      "session.end",
 				SessionID:  "s",
-				Runtime:    "r",
+				Harness:    "r",
 				Timestamp:  "2026-04-18T11:00:00Z",
 				StartedAt:  "2026-04-18T10:00:00Z",
 				EndedAt:    "2026-04-18T11:00:00Z",
@@ -217,7 +217,7 @@ func TestMRPTurnComplete_ValidMinimal(t *testing.T) {
 		MRPVersion: "v0",
 		Event:      "turn.complete",
 		SessionID:  "sess-001",
-		Runtime:    "claude-code",
+		Harness:    "claude-code",
 		Timestamp:  "2026-04-18T10:05:00Z",
 		TurnIndex:  0,
 	})
@@ -230,7 +230,7 @@ func TestMRPTurnComplete_ValidWithTokens(t *testing.T) {
 		MRPVersion:       "v0",
 		Event:            "turn.complete",
 		SessionID:        "sess-001",
-		Runtime:          "claude-code",
+		Harness:          "claude-code",
 		Timestamp:        "2026-04-18T10:05:00Z",
 		TurnIndex:        1,
 		PromptTokens:     &prompt,
@@ -244,7 +244,7 @@ func TestMRPTurnComplete_MissingTurnIndex(t *testing.T) {
 		MRPVersion: "v0",
 		Event:      "turn.complete",
 		// SessionID missing — required field
-		Runtime:   "claude-code",
+		Harness:   "claude-code",
 		Timestamp: "2026-04-18T10:05:00Z",
 		TurnIndex: 1,
 	})
@@ -257,20 +257,20 @@ func TestMRPCompactTriggered_ValidMinimal(t *testing.T) {
 		MRPVersion: "v0",
 		Event:      "compact.triggered",
 		SessionID:  "sess-001",
-		Runtime:    "claude-code",
+		Harness:    "claude-code",
 		Timestamp:  "2026-04-18T10:30:00Z",
 	})
 }
 
 func TestMRPCompactTriggered_ValidTriggerSources(t *testing.T) {
-	for _, src := range []string{"user", "runtime"} {
+	for _, src := range []string{"user", "harness"} {
 		s := src
 		t.Run(src, func(t *testing.T) {
 			mustPass(t, "compact-triggered.schema.json", MRPCompactTriggered{
 				MRPVersion:    "v0",
 				Event:         "compact.triggered",
 				SessionID:     "s",
-				Runtime:       "r",
+				Harness:       "r",
 				Timestamp:     "2026-04-18T10:30:00Z",
 				TriggerSource: &s,
 			})
@@ -284,7 +284,7 @@ func TestMRPCompactTriggered_InvalidTriggerSource(t *testing.T) {
 		MRPVersion:    "v0",
 		Event:         "compact.triggered",
 		SessionID:     "s",
-		Runtime:       "r",
+		Harness:       "r",
 		Timestamp:     "2026-04-18T10:30:00Z",
 		TriggerSource: &src,
 	})
@@ -297,20 +297,20 @@ func TestMRPClearTriggered_ValidMinimal(t *testing.T) {
 		MRPVersion: "v0",
 		Event:      "clear.triggered",
 		SessionID:  "sess-001",
-		Runtime:    "claude-code",
+		Harness:    "claude-code",
 		Timestamp:  "2026-04-18T10:45:00Z",
 	})
 }
 
 func TestMRPClearTriggered_ValidTriggerSources(t *testing.T) {
-	for _, src := range []string{"user", "runtime"} {
+	for _, src := range []string{"user", "harness"} {
 		s := src
 		t.Run(src, func(t *testing.T) {
 			mustPass(t, "clear-triggered.schema.json", MRPClearTriggered{
 				MRPVersion:    "v0",
 				Event:         "clear.triggered",
 				SessionID:     "s",
-				Runtime:       "r",
+				Harness:       "r",
 				Timestamp:     "2026-04-18T10:45:00Z",
 				TriggerSource: &s,
 			})
@@ -324,7 +324,7 @@ func TestMRPClearTriggered_InvalidTriggerSource(t *testing.T) {
 		MRPVersion:    "v0",
 		Event:         "clear.triggered",
 		SessionID:     "s",
-		Runtime:       "r",
+		Harness:       "r",
 		Timestamp:     "2026-04-18T10:45:00Z",
 		TriggerSource: &src,
 	})

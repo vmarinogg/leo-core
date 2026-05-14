@@ -13,17 +13,25 @@ import (
 
 var ErrMissingSessionID = errors.New("session_id is required; do not invent one")
 
+// sessionEnvKeys is the ordered list of env vars consulted when no
+// explicit session id is supplied. MOM_SESSION_ID is the neutral name
+// every harness should export going forward; the harness-specific
+// names remain for backwards compatibility with harnesses that have
+// not yet adopted MOM_SESSION_ID. First non-empty value wins.
 var sessionEnvKeys = []string{
+	"MOM_SESSION_ID",
 	"CLAUDE_CODE_SESSION_ID",
 	"CLAUDE_SESSION_ID",
 	"CODEX_THREAD_ID",
 	"CODEX_SESSION_ID",
-	"WINDSURF_TRAJECTORY_ID",
+	// WINDSURF_TRAJECTORY_ID was retired alongside the Windsurf harness
+	// in #342/#343 and removed from this list in v0.40 cleanup.
 }
 
 // Request is the shared explicit-write contract for `mom record` and
-// `mom_record`. The caller may provide SessionID when it is a real runtime ID;
-// otherwise ResolveSessionID checks known harness environment variables.
+// `mom_record`. The caller may provide SessionID when it is a real harness
+// session id; otherwise ResolveSessionID checks known harness environment
+// variables.
 type Request struct {
 	SessionID string
 	Summary   string
@@ -84,7 +92,11 @@ func Publish(bus *herald.Bus, req Request) (Result, error) {
 	return Result{SessionID: sessionID, Summary: req.Summary, Tags: tags, Actor: actor}, nil
 }
 
-func LooksLikeRuntimeSessionID(sessionID string) bool {
+// LooksLikeHarnessSessionID reports whether the given string has the shape
+// of a real harness-issued session identifier (UUID, or a timestamped
+// UUID-suffixed cursor filename). Used to reject invented or human-friendly
+// strings before they reach the persistence layer.
+func LooksLikeHarnessSessionID(sessionID string) bool {
 	s := strings.TrimSpace(sessionID)
 	if s == "" {
 		return false
@@ -115,8 +127,8 @@ func LooksLikeRuntimeSessionID(sessionID string) bool {
 
 func ResolveSessionID(explicit string) (string, error) {
 	if s := strings.TrimSpace(explicit); s != "" {
-		if !LooksLikeRuntimeSessionID(s) {
-			return "", fmt.Errorf("session_id %q does not look like a runtime session ID; do not invent one", s)
+		if !LooksLikeHarnessSessionID(s) {
+			return "", fmt.Errorf("session_id %q does not look like a harness session ID; do not invent one", s)
 		}
 		return s, nil
 	}

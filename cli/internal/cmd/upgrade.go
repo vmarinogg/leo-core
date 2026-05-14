@@ -429,6 +429,10 @@ func removeKnownGeneratedCentralDocs(momDir string, dryRun bool) ([]upgradeActio
 }
 
 func removeDeadHookCommands(projectRoot string, dryRun bool) ([]upgradeAction, error) {
+	// Windsurf paths remain here purely for legacy upgrade cleanup —
+	// users who installed MOM hooks before Windsurf retirement
+	// (#342/#343) still have stale hook entries that need pruning. The
+	// harness itself is no longer supported (see harness_retirement.go).
 	paths := []string{
 		filepath.Join(projectRoot, ".claude", "settings.json"),
 		filepath.Join(projectRoot, ".codex", "hooks.json"),
@@ -842,17 +846,17 @@ func kebabOnly(s string) string {
 func regenerateHarnessFiles(projectRoot, momDir string, cfg *config.Config) error {
 	registry := harness.NewRegistry(projectRoot)
 
-	runtimeCfg := buildRuntimeConfig(cfg)
-	runtimeConstraints := buildRuntimeConstraints()
-	runtimeSkills := buildRuntimeSkills()
-	runtimeIdentity := buildRuntimeIdentity()
+	harnessCfg := buildHarnessConfig(cfg)
+	harnessConstraints := buildHarnessConstraints()
+	harnessSkills := buildHarnessSkills()
+	harnessIdentity := buildHarnessIdentity()
 
 	for _, rt := range cfg.EnabledHarnesses() {
 		adapter, ok := registry.Get(rt)
 		if !ok {
 			continue
 		}
-		if err := adapter.GenerateContextFile(runtimeCfg, runtimeConstraints, runtimeSkills, runtimeIdentity); err != nil {
+		if err := adapter.GenerateContextFile(harnessCfg, harnessConstraints, harnessSkills, harnessIdentity); err != nil {
 			return fmt.Errorf("generating %s context: %w", rt, err)
 		}
 
