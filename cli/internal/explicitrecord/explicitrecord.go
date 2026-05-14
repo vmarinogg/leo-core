@@ -29,8 +29,9 @@ var sessionEnvKeys = []string{
 }
 
 // Request is the shared explicit-write contract for `mom record` and
-// `mom_record`. The caller may provide SessionID when it is a real runtime ID;
-// otherwise ResolveSessionID checks known harness environment variables.
+// `mom_record`. The caller may provide SessionID when it is a real harness
+// session id; otherwise ResolveSessionID checks known harness environment
+// variables.
 type Request struct {
 	SessionID string
 	Summary   string
@@ -91,7 +92,11 @@ func Publish(bus *herald.Bus, req Request) (Result, error) {
 	return Result{SessionID: sessionID, Summary: req.Summary, Tags: tags, Actor: actor}, nil
 }
 
-func LooksLikeRuntimeSessionID(sessionID string) bool {
+// LooksLikeHarnessSessionID reports whether the given string has the shape
+// of a real harness-issued session identifier (UUID, or a timestamped
+// UUID-suffixed cursor filename). Used to reject invented or human-friendly
+// strings before they reach the persistence layer.
+func LooksLikeHarnessSessionID(sessionID string) bool {
 	s := strings.TrimSpace(sessionID)
 	if s == "" {
 		return false
@@ -122,8 +127,8 @@ func LooksLikeRuntimeSessionID(sessionID string) bool {
 
 func ResolveSessionID(explicit string) (string, error) {
 	if s := strings.TrimSpace(explicit); s != "" {
-		if !LooksLikeRuntimeSessionID(s) {
-			return "", fmt.Errorf("session_id %q does not look like a runtime session ID; do not invent one", s)
+		if !LooksLikeHarnessSessionID(s) {
+			return "", fmt.Errorf("session_id %q does not look like a harness session ID; do not invent one", s)
 		}
 		return s, nil
 	}

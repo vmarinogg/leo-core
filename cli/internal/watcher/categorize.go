@@ -35,7 +35,7 @@ func CategorizeToolCall(toolName string) string {
 	}
 }
 
-// NormalizeToolName strips runtime-specific prefixes from tool names.
+// NormalizeToolName strips harness-specific prefixes from tool names.
 // Claude Code namespaces MCP tools as "mcp__<server>__<tool>"; this
 // returns the bare tool name so categorisation is harness-agnostic.
 func NormalizeToolName(toolName string) string {

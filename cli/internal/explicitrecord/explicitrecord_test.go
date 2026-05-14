@@ -7,7 +7,7 @@ import (
 	"github.com/momhq/mom/cli/internal/herald"
 )
 
-func TestLooksLikeRuntimeSessionID(t *testing.T) {
+func TestLooksLikeHarnessSessionID(t *testing.T) {
 	cases := []struct {
 		id   string
 		want bool
@@ -19,8 +19,8 @@ func TestLooksLikeRuntimeSessionID(t *testing.T) {
 		{"", false},
 	}
 	for _, tc := range cases {
-		if got := LooksLikeRuntimeSessionID(tc.id); got != tc.want {
-			t.Fatalf("LooksLikeRuntimeSessionID(%q) = %v, want %v", tc.id, got, tc.want)
+		if got := LooksLikeHarnessSessionID(tc.id); got != tc.want {
+			t.Fatalf("LooksLikeHarnessSessionID(%q) = %v, want %v", tc.id, got, tc.want)
 		}
 	}
 }
@@ -32,7 +32,7 @@ func TestResolveSessionIDPrefersExplicit(t *testing.T) {
 		t.Fatalf("ResolveSessionID: %v", err)
 	}
 	if got != "11111111-1111-4111-8111-111111111111" {
-		t.Fatalf("got %q, want explicit runtime session", got)
+		t.Fatalf("got %q, want explicit harness session", got)
 	}
 }
 
