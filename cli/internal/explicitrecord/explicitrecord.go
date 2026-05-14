@@ -13,12 +13,19 @@ import (
 
 var ErrMissingSessionID = errors.New("session_id is required; do not invent one")
 
+// sessionEnvKeys is the ordered list of env vars consulted when no
+// explicit session id is supplied. MOM_SESSION_ID is the neutral name
+// every harness should export going forward; the harness-specific
+// names remain for backwards compatibility with harnesses that have
+// not yet adopted MOM_SESSION_ID. First non-empty value wins.
 var sessionEnvKeys = []string{
+	"MOM_SESSION_ID",
 	"CLAUDE_CODE_SESSION_ID",
 	"CLAUDE_SESSION_ID",
 	"CODEX_THREAD_ID",
 	"CODEX_SESSION_ID",
-	"WINDSURF_TRAJECTORY_ID",
+	// WINDSURF_TRAJECTORY_ID was retired alongside the Windsurf harness
+	// in #342/#343 and removed from this list in v0.40 cleanup.
 }
 
 // Request is the shared explicit-write contract for `mom record` and

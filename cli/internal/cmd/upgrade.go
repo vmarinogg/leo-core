@@ -429,6 +429,10 @@ func removeKnownGeneratedCentralDocs(momDir string, dryRun bool) ([]upgradeActio
 }
 
 func removeDeadHookCommands(projectRoot string, dryRun bool) ([]upgradeAction, error) {
+	// Windsurf paths remain here purely for legacy upgrade cleanup —
+	// users who installed MOM hooks before Windsurf retirement
+	// (#342/#343) still have stale hook entries that need pruning. The
+	// harness itself is no longer supported (see harness_retirement.go).
 	paths := []string{
 		filepath.Join(projectRoot, ".claude", "settings.json"),
 		filepath.Join(projectRoot, ".codex", "hooks.json"),
