@@ -47,11 +47,17 @@ func NormalizeToolName(toolName string) string {
 	return toolName
 }
 
+// isMemoryTool recognises the v0.30 live MCP memory tool surface.
+// Retired names (create_memory_draft, mom_record_turn, list_landmarks,
+// get_memory, search_memories) are intentionally absent — they no
+// longer ship and are dropped from categorisation in v0.40 cleanup
+// (#349). The canonical live set lives in mcp/tools.go.
 func isMemoryTool(name string) bool {
-	return name == "mom_recall" || name == "search_memories" || name == "get_memory" ||
-		name == "create_memory_draft" || name == "list_landmarks" ||
-		name == "mom_record_turn" || name == "mom_record" ||
-		name == "mom_get" || name == "mom_landmarks" || name == "mom_status"
+	return name == "mom_recall" ||
+		name == "mom_record" ||
+		name == "mom_get" ||
+		name == "mom_landmarks" ||
+		name == "mom_status"
 }
 
 // CategorizeObservedToolCall returns the Lens category and privacy-safe name

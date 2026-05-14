@@ -61,10 +61,7 @@ func ComputeReport(sessions []SessionLog) *Report {
 			if recall, ok := mem.Detail["mom_recall"]; ok {
 				totalRecall += recall
 			}
-			if recall, ok := mem.Detail["search_memories"]; ok {
-				totalRecall += recall
-			}
-			if draft, ok := mem.Detail["create_memory_draft"]; ok {
+			if draft, ok := mem.Detail["mom_record"]; ok {
 				totalDraftCreated += draft
 			}
 		}
@@ -119,7 +116,7 @@ func ComputeReport(sessions []SessionLog) *Report {
 		r.ContextRediscovery = float64(totalGitGrep) / float64(totalToolCalls)
 	}
 
-	// Write-back rate: create_memory_draft / interactions.
+	// Write-back rate: mom_record / interactions.
 	if totalInteractions > 0 {
 		r.WriteBackRate = float64(totalDraftCreated) / float64(totalInteractions)
 	}
