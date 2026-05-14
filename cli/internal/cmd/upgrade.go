@@ -846,17 +846,17 @@ func kebabOnly(s string) string {
 func regenerateHarnessFiles(projectRoot, momDir string, cfg *config.Config) error {
 	registry := harness.NewRegistry(projectRoot)
 
-	runtimeCfg := buildRuntimeConfig(cfg)
-	runtimeConstraints := buildRuntimeConstraints()
-	runtimeSkills := buildRuntimeSkills()
-	runtimeIdentity := buildRuntimeIdentity()
+	harnessCfg := buildHarnessConfig(cfg)
+	harnessConstraints := buildHarnessConstraints()
+	harnessSkills := buildHarnessSkills()
+	harnessIdentity := buildHarnessIdentity()
 
 	for _, rt := range cfg.EnabledHarnesses() {
 		adapter, ok := registry.Get(rt)
 		if !ok {
 			continue
 		}
-		if err := adapter.GenerateContextFile(runtimeCfg, runtimeConstraints, runtimeSkills, runtimeIdentity); err != nil {
+		if err := adapter.GenerateContextFile(harnessCfg, harnessConstraints, harnessSkills, harnessIdentity); err != nil {
 			return fmt.Errorf("generating %s context: %w", rt, err)
 		}
 
