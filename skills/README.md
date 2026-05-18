@@ -8,10 +8,11 @@ User-invocable skills that expose MOM’s CLI-first memory workflows.
 
 ## What’s included
 
-This plugin provides 3 skills:
+This plugin provides 4 skills:
 
 - `/mom:mom-status` — check MOM health and vault state (sanitized summary)
 - `/mom:mom-recall <query>` — search persistent memory
+- `/mom:mom-project` — bind the current directory to a MOM project id for scoped memory
 - `/mom:mom-wrap-up` — review and curate draft memories
 
 
@@ -41,6 +42,7 @@ Then reload plugins in Claude Code:
 ```text
 /mom:mom-status
 /mom:mom-recall decision about auth boundary
+/mom:mom-project
 /mom:mom-wrap-up
 ```
 
@@ -51,6 +53,7 @@ skills/
 ├── .claude-plugin/plugin.json
 ├── mom-status/SKILL.md
 ├── mom-recall/SKILL.md
+├── mom-project/SKILL.md
 └── mom-wrap-up/SKILL.md
 ```
 
@@ -58,4 +61,5 @@ skills/
 
 - `mom-status` returns a concise parsed summary and avoids raw verbatim dumps
 - Sensitive fields should be redacted if ever present (`[REDACTED]`)
+- `mom-project` requires explicit user approval before writing `.mom-project.yaml`
 - `mom-wrap-up` requires explicit user approval before running `mom curate`
