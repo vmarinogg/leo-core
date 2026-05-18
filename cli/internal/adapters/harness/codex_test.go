@@ -219,6 +219,48 @@ func TestCodexAdapter_RegisterMCP_Idempotent(t *testing.T) {
 	}
 }
 
+func TestCodexAdapter_RegisterMCP_NormalizesDuplicateFeaturesBlocks(t *testing.T) {
+	dir := t.TempDir()
+	codexDir := filepath.Join(dir, ".codex")
+	if err := os.MkdirAll(codexDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	existing := `[projects."/some/path"]
+trust_level = "trusted"
+
+[features]
+codex_hooks = true
+
+[hooks.state]
+
+[features]
+hooks = true
+`
+	if err := os.WriteFile(filepath.Join(codexDir, "config.toml"), []byte(existing), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	a := NewCodexAdapter(dir)
+	if err := a.RegisterMCP(); err != nil {
+		t.Fatalf("RegisterMCP failed: %v", err)
+	}
+
+	data, _ := os.ReadFile(filepath.Join(codexDir, "config.toml"))
+	content := string(data)
+	if count := strings.Count(content, "[features]"); count != 1 {
+		t.Fatalf("expected one [features] block, got %d:\n%s", count, content)
+	}
+	if count := strings.Count(content, "hooks = true"); count != 1 {
+		t.Fatalf("expected one hooks flag, got %d:\n%s", count, content)
+	}
+	if strings.Contains(content, "codex_hooks") {
+		t.Fatalf("deprecated codex_hooks should be removed:\n%s", content)
+	}
+	if !strings.Contains(content, "[hooks.state]") {
+		t.Fatalf("unrelated TOML sections should be preserved:\n%s", content)
+	}
+}
+
 func TestCodexAdapter_RegisterMCP_PreservesExisting(t *testing.T) {
 	dir := t.TempDir()
 	os.MkdirAll(filepath.Join(dir, ".codex"), 0755)
