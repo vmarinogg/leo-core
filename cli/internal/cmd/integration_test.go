@@ -235,7 +235,7 @@ func TestIntegration_UpgradeRegistersAllHarnesses(t *testing.T) {
 
 	assertFileExists(t, filepath.Join(dir, "AGENTS.md"))
 	assertFileExists(t, filepath.Join(dir, ".codex", "hooks.json"))
-	assertFileContains(t, filepath.Join(dir, ".codex", "hooks.json"), "mom watch --sweep")
+	assertFileContains(t, filepath.Join(dir, ".codex", "hooks.json"), "watch --sweep --global")
 
 	// Pi extension is no longer embedded — it's installed via the Pi
 	// marketplace at session level (`pi install npm:pi-mom`), not by

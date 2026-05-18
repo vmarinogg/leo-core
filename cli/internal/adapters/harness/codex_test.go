@@ -153,8 +153,9 @@ func TestCodexAdapter_RegisterHooks(t *testing.T) {
 	if hookEntry["type"] != "command" {
 		t.Errorf("expected type 'command', got %v", hookEntry["type"])
 	}
-	if hookEntry["command"] != "mom watch --sweep" {
-		t.Errorf("expected command 'mom watch --sweep', got %v", hookEntry["command"])
+	command, _ := hookEntry["command"].(string)
+	if !strings.Contains(command, "watch --sweep --global") {
+		t.Errorf("expected command to run global sweep, got %v", hookEntry["command"])
 	}
 }
 
@@ -325,7 +326,7 @@ func TestCodexAdapter_NoIdentity(t *testing.T) {
 
 // TestCodexAdapter_RegisterGlobalHooks_WritesToHomeCodexDir locks the
 // global-install contract: mom init --harnesses codex must drop
-// hooks.json at ~/.codex/ so Codex Desktop fires `mom watch --sweep`
+// hooks.json at ~/.codex/ so Codex Desktop fires `mom watch --sweep --global`
 // after each Cascade response. Without this, only project-local
 // inits get the hook wired.
 func TestCodexAdapter_RegisterGlobalHooks_WritesToHomeCodexDir(t *testing.T) {
@@ -358,8 +359,9 @@ func TestCodexAdapter_RegisterGlobalHooks_WritesToHomeCodexDir(t *testing.T) {
 	group := stop[0].(map[string]any)
 	inner := group["hooks"].([]any)
 	entry := inner[0].(map[string]any)
-	if entry["command"] != "mom watch --sweep" {
-		t.Errorf("Stop hook command = %v, want 'mom watch --sweep'", entry["command"])
+	command, _ := entry["command"].(string)
+	if !strings.Contains(command, "watch --sweep --global") {
+		t.Errorf("Stop hook command = %v, want global sweep", entry["command"])
 	}
 }
 

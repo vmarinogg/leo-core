@@ -79,12 +79,12 @@ func (a *CodexAdapter) RegisterGlobalHooks() error {
 
 // writeCodexHooks renders Codex's hooks.json format at the given path,
 // creating parent dirs as needed. The hook set is intentionally small:
-// one Stop hook running `mom watch --sweep`. Auxiliary signal — the
+// one Stop hook running the resolved MOM binary. Auxiliary signal — the
 // daemon's fsnotify watcher catches new transcripts even when this
 // hook never fires.
 func writeCodexHooks(hooksPath string) error {
 	hooks := []HookDef{
-		{Event: "Stop", Command: "mom watch --sweep"},
+		{Event: "Stop", Command: fmt.Sprintf("%q watch --sweep --global", resolveCommand())},
 	}
 	if err := os.MkdirAll(filepath.Dir(hooksPath), 0755); err != nil {
 		return fmt.Errorf("creating %s: %w", filepath.Dir(hooksPath), err)

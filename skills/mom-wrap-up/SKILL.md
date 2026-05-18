@@ -7,16 +7,16 @@ allowed-tools: Bash(mom drafts*), Bash(mom curate*)
 
 Run only after explicit user request.
 
-1. Surface recent drafts. By default `mom drafts` is scoped to the project that owns the current working directory (per ADR 0016 — the `.mom-project.yaml` binding) — concurrent sessions in other projects do not leak into the list.
+1. Surface recent drafts with strict cwd project scoping. Always pass `--strict-project` so legacy/unbound drafts and concurrent sessions from other projects do not leak into the wrap-up plan.
 
 ```bash
-mom drafts
+mom drafts --strict-project
 ```
 
 If user gives a Go duration window, use it:
 
 ```bash
-mom drafts --since 1h
+mom drafts --strict-project --since 1h
 ```
 
 Narrow further if context calls for it:
