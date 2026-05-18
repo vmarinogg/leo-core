@@ -188,8 +188,11 @@ func TestCodexAdapter_RegisterMCP(t *testing.T) {
 	if !strings.Contains(toml, "command = ") {
 		t.Error("config.toml missing command entry for mom")
 	}
-	if !strings.Contains(toml, "codex_hooks = true") {
-		t.Error("config.toml missing codex_hooks feature flag")
+	if !strings.Contains(toml, "hooks = true") {
+		t.Error("config.toml missing hooks feature flag")
+	}
+	if strings.Contains(toml, "codex_hooks") {
+		t.Error("config.toml should not use deprecated codex_hooks feature flag")
 	}
 }
 
@@ -207,9 +210,12 @@ func TestCodexAdapter_RegisterMCP_Idempotent(t *testing.T) {
 	if count != 1 {
 		t.Errorf("expected 1 [mcp_servers.mom] section, got %d", count)
 	}
-	count = strings.Count(content, "codex_hooks")
+	count = strings.Count(content, "hooks = true")
 	if count != 1 {
-		t.Errorf("expected 1 codex_hooks entry, got %d", count)
+		t.Errorf("expected 1 hooks entry, got %d", count)
+	}
+	if strings.Contains(content, "codex_hooks") {
+		t.Error("config.toml should not use deprecated codex_hooks feature flag")
 	}
 }
 

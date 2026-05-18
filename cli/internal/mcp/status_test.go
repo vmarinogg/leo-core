@@ -158,7 +158,7 @@ func TestMomStatusCompactShape(t *testing.T) {
 		name, _ := s["command"].(string)
 		seen[name] = true
 	}
-	for _, want := range []string{"/mom-status", "/mom-recall", "/mom-wrap-up"} {
+	for _, want := range []string{"/mom-status", "/mom-recall", "/mom-project", "/mom-wrap-up"} {
 		if !seen[want] {
 			t.Fatalf("mom_status skills missing %s: %#v", want, skills)
 		}

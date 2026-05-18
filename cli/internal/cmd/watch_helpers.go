@@ -63,6 +63,9 @@ func ensureGlobalDaemon(projectRoot, momDir string, harnesses []string) error {
 	// Do NOT resolve symlinks — global daemon uses the symlink path so
 	// brew upgrade / package updates are picked up on restart.
 
+	// Prune stale pre-v0.40 registry entries before registering this project.
+	_, _ = daemon.PruneInvalidRegistry()
+
 	// Register this project in the global registry.
 	if err := daemon.RegisterProject(projectRoot, momDir, harnesses); err != nil {
 		return fmt.Errorf("registering project: %w", err)

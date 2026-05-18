@@ -221,6 +221,9 @@ func newProjectBus(workers centralWorkers) *herald.Bus {
 
 // runWatchGlobal runs the global watch daemon: watches all registered projects.
 func runWatchGlobal(sweepOnly bool) error {
+	if _, err := daemon.PruneInvalidRegistry(); err != nil {
+		return fmt.Errorf("pruning registry: %w", err)
+	}
 	reg, err := daemon.LoadRegistry()
 	if err != nil {
 		return fmt.Errorf("loading registry: %w", err)

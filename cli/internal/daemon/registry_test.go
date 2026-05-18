@@ -247,3 +247,53 @@ func TestGlobalLogsDir(t *testing.T) {
 		t.Error("expected directory")
 	}
 }
+
+func TestPruneInvalidRegistryRemovesStaleEntries(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+
+	validProject := filepath.Join(tmp, "valid")
+	validMom := filepath.Join(tmp, ".mom")
+	if err := os.MkdirAll(validProject, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(validMom, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(validMom, "config.yaml"), []byte("version: \"1\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	staleProject := filepath.Join(tmp, "stale")
+	staleMom := filepath.Join(staleProject, ".mom")
+	if err := os.MkdirAll(staleProject, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := SaveRegistry(Registry{
+		validProject:                  {MomDir: validMom, Harnesses: []string{"pi"}},
+		staleProject:                  {MomDir: staleMom, Harnesses: []string{"pi"}},
+		filepath.Join(tmp, "nohooks"): {MomDir: validMom, Harnesses: nil},
+	}); err != nil {
+		t.Fatalf("SaveRegistry: %v", err)
+	}
+
+	report, err := PruneInvalidRegistry()
+	if err != nil {
+		t.Fatalf("PruneInvalidRegistry: %v", err)
+	}
+	if len(report.Removed) != 2 {
+		t.Fatalf("removed %d entries, want 2: %#v", len(report.Removed), report.Removed)
+	}
+
+	reg, err := LoadRegistry()
+	if err != nil {
+		t.Fatalf("LoadRegistry: %v", err)
+	}
+	if len(reg) != 1 {
+		t.Fatalf("registry len = %d, want 1: %#v", len(reg), reg)
+	}
+	if _, ok := reg[pathutil.CanonicalDir(validProject)]; !ok {
+		t.Fatalf("valid project pruned: %#v", reg)
+	}
+}

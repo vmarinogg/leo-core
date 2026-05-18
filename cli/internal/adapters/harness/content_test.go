@@ -9,7 +9,7 @@ import (
 func TestBuildMinimalContextContent(t *testing.T) {
 	content := BuildMinimalContextContent()
 
-	for _, want := range []string{"mom_status", "/mom-status", "/mom-recall", "/mom-wrap-up", "CLI", "MCP fallback"} {
+	for _, want := range []string{"mom_status", "/mom-status", "/mom-recall", "/mom-project", "/mom-wrap-up", "CLI", "MCP fallback"} {
 		if !strings.Contains(content, want) {
 			t.Errorf("minimal content must mention %q", want)
 		}

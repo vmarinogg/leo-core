@@ -150,14 +150,15 @@ func (a *CodexAdapter) RegisterMCP() error {
 	return nil
 }
 
-// codexFeaturesBlock enables the hooks feature flag required by Codex.
+// codexFeaturesBlock enables Codex hooks. Codex deprecated the old
+// `codex_hooks` flag in favour of `hooks`.
 const codexFeaturesBlock = `
 [features]
-codex_hooks = true
+hooks = true
 `
 
-// upsertCodexMCPEntry ensures [mcp_servers.mom] and [features] codex_hooks
-// exist in a Codex config.toml. Idempotent — skips sections that already exist.
+// upsertCodexMCPEntry ensures [mcp_servers.mom] and [features].hooks exist in
+// a Codex config.toml. Idempotent — skips sections that already exist.
 func upsertCodexMCPEntry(path string) error {
 	existing, err := os.ReadFile(path)
 	if err != nil && !os.IsNotExist(err) {
@@ -175,7 +176,12 @@ func upsertCodexMCPEntry(path string) error {
 		changed = true
 	}
 
-	if !strings.Contains(content, "codex_hooks") {
+	if strings.Contains(content, "codex_hooks") {
+		content = strings.ReplaceAll(content, "codex_hooks", "hooks")
+		changed = true
+	}
+
+	if !strings.Contains(content, "hooks = true") {
 		content = strings.TrimRight(content, "\n") + "\n" + codexFeaturesBlock
 		changed = true
 	}
