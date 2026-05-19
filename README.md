@@ -24,7 +24,7 @@ _Mom_ gives AI coding agents persistent memory across sessions, projects, and to
 Instead of re-explaining architecture, decisions, conventions, and constraints every time you start a new chat, _mom_ stores them in a local SQLite vault and makes them available inside the agents you already use.
 
 > [!IMPORTANT]
-> `v0.30.0-alpha` is the current public alpha. Pi and Claude Code flows have been validated. Windsurf still needs validation. Codex integration is currently broken and will be addressed in the next release.
+> `v0.40.0-alpha` is the current public alpha. Pi, Claude Code, and Codex flows are validated end-to-end. Windsurf support was retired in this release (see [ADR — Windsurf retirement](https://github.com/momhq/mom/pull/343)).
 
 ## Why _mom_?
 
@@ -34,7 +34,7 @@ _Mom_ is the memory layer beside them:
 
 - **Persistent** — memory survives `/clear`, compaction, restarts, and tool switches.
 - **Local-first** — the central vault lives at `$HOME/.mom/mom.db`.
-- **Harness-agnostic** — Pi, Claude Code, Windsurf, and Codex are integration targets, not storage silos.
+- **Harness-agnostic** — Pi, Claude Code, and Codex are integration targets, not storage silos.
 - **Agent-integrated** — memory is available through _mom_ skills and native harness integrations.
 - **MCP-backed** — MCP remains available for startup, discovery, and fallback access.
 - **Continuously recorded** — supported harness transcripts are watched and distilled into draft memories.
@@ -87,7 +87,7 @@ _Mom_ keeps one central memory vault and adapts it to each harness.
 AI harnesses
   ├─ Pi extension
   ├─ Claude Code hooks + skills
-  ├─ Windsurf integration
+  ├─ Codex hooks + MCP
   └─ MCP fallback
         │
         ▼
@@ -153,10 +153,9 @@ mom import <path>
 
 | Harness | Current status | Notes |
 | --- | --- | --- |
-| Pi | Validated | Native extension support. Gold standard for _mom_. |
+| Pi | Validated | Native extension support via `pi install npm:pi-mom`. Gold standard for _mom_. |
 | Claude Code | Validated | Fluent speaker. Provides all the necessary tools _mom_ needs. |
-| Windsurf | Needs validation | It works. Windsurf has some transcript, hook, and MCP limitations. |
-| Codex | Broken in this alpha | Planned for the next release. |
+| Codex | Validated | Hooks, MCP, and per-turn project scoping working end-to-end. |
 
 > [!NOTE]
 > _Mom_ uses **harness** to mean the agent framework around the model: tools, hooks, transcripts, prompt files, and MCP configuration.
