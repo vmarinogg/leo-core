@@ -2,62 +2,87 @@
 name: mom-wrap-up
 description: Curate recent MOM drafts. Use when user asks to wrap up, finish, close the session, preserve decisions, or prepare memory before clearing context.
 user-invocable: true
-allowed-tools: Bash(mom drafts*), Bash(mom curate*)
+allowed-tools: Bash(mom drafts*), Bash(mom curate*), Bash(command -v mom*), Bash(brew install momhq/tap/mom*)
 ---
 
-Run only after explicit user request.
+Run only after the user explicitly asks to wrap up.
 
-1. Surface recent drafts with strict cwd project scoping. Always pass `--strict-project` so legacy/unbound drafts and concurrent sessions from other projects do not leak into the wrap-up plan.
+## Preflight
 
-```bash
-mom drafts --strict-project
-```
-
-If user gives a Go duration window, use it:
+Check that `mom` is on PATH:
 
 ```bash
-mom drafts --strict-project --since 1h
+command -v mom
 ```
 
-Narrow further if context calls for it:
-- `--harness codex` — only drafts from a specific harness (claude-code, codex, pi)
-- `--session <id>` — only drafts from one session, when the user knows the id
-- `--all-projects` — disable the cwd scope (cross-project wrap-up)
-- `--strict-project` — exclude legacy drafts with no `project_id`
-
-The output columns are `ID  Created  Harness  Project  Summary`. The Harness and Project columns help the agent and user tell concurrent-session drafts apart at a glance.
-
-2. Synthesize a curation plan.
-
-For each draft worth keeping, propose:
-- draft id
-- type: `semantic`, `procedural`, or `episodic`
-- approved summary
-- reason to curate
-
-Hide drafts you recommend discarding unless user asks to see them.
-
-3. Wait for user approval.
-
-Do not curate anything before approval.
-
-4. Execute approved curation exactly:
-
-```bash
-mom curate <id> --type <semantic|procedural|episodic> --summary "<approved summary>"
-```
-
-5. Report:
+If it is missing, tell the user MOM is not installed and ask permission to install it:
 
 ```text
-## Wrap-up complete
-Curated:  <N>
-Deferred: <N or none>
+MOM is not installed. Install it now with Homebrew?
+  brew install momhq/tap/mom
+Source: https://github.com/momhq/mom
 ```
 
-Do not:
-- Use MCP.
-- Use ad hoc database queries.
-- Use removed legacy curation commands.
-- Rewrite draft content.
-- Skip type or summary.
+If the user agrees, run that command. If the user declines, stop. Do not install MOM without explicit permission.
+
+## Flow
+
+1. List recent drafts scoped to the current project:
+
+   ```bash
+   mom drafts --strict-project
+   ```
+
+   If the user gives a time window (Go duration like `1h`, `30m`, `2d`), pass it:
+
+   ```bash
+   mom drafts --strict-project --since 1h
+   ```
+
+   Optional narrowing flags, only when context calls for it:
+   - `--harness <name>` — restrict to one harness (`claude-code`, `codex`, `pi`)
+   - `--session <id>` — restrict to one session when the user knows the id
+   - `--all-projects` — disable project scoping for a cross-project wrap-up
+
+   The output has columns `ID  Created  Harness  Project  Summary`.
+
+2. Propose a curation plan. For each draft worth keeping, list:
+   - draft id
+   - type: `semantic`, `procedural`, or `episodic`
+   - approved summary
+   - one-line reason to keep it
+
+   Hide drafts you recommend discarding unless the user asks to see them.
+
+3. Wait for the user to approve. Do not curate anything before approval.
+
+4. For each approved draft, run:
+
+   ```bash
+   mom curate <id> --type <semantic|procedural|episodic> --summary "<approved summary>"
+   ```
+
+5. Report when done:
+
+   ```text
+   ## Wrap-up complete
+   Curated:  <N>
+   Deferred: <N or none>
+   ```
+
+## Rules
+
+- Never curate without user approval.
+- Never skip `--type` or `--summary`.
+- Do not rewrite draft content.
+- Do not use MCP or run ad hoc database queries — only the commands above.
+
+## Postflight (version hint)
+
+Any `mom ...` command may print a banner to stderr like:
+
+```
+MOM 0.40.1 available. Run `brew upgrade mom` or `mom self-update`
+```
+
+If you see that line, finish the task first, then add one short line at the end of your reply suggesting the upgrade. Do not run the upgrade yourself.
