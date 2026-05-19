@@ -5,7 +5,7 @@ user-invocable: true
 allowed-tools: Bash(mom drafts*), Bash(mom curate*), Bash(command -v mom*), Bash(brew install momhq/tap/mom*)
 ---
 
-Run only after the user explicitly asks to wrap up.
+Invoking this skill **is** the user's request to wrap up. Proceed with the flow below immediately — do not ask the user to confirm they want to wrap up.
 
 ## Preflight
 
