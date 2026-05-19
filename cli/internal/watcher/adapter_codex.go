@@ -3,6 +3,7 @@ package watcher
 import (
 	"encoding/json"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -12,14 +13,20 @@ import (
 //
 //	{ "timestamp": "...", "type": "...", "payload": {...} }
 //
-// Only `response_item` lines produce Turns. Inside, payload.type selects
-// the shape — `message` for user/assistant text, `function_call` and
-// `custom_tool_call` for assistant tool invocations. Everything else is
-// dropped.
-type CodexAdapter struct{}
+// `response_item` lines produce Turns. `turn_context` lines carry the
+// session's working directory; the adapter caches the latest cwd per
+// session and tags every subsequent Turn with it so the watcher can
+// resolve the correct project_id for cross-project Codex sessions
+// (Codex uses a single global ~/.codex/sessions/ directory).
+type CodexAdapter struct {
+	mu          sync.Mutex
+	cwdBySessID map[string]string
+}
 
 // NewCodexAdapter returns a new CodexAdapter.
-func NewCodexAdapter() *CodexAdapter { return &CodexAdapter{} }
+func NewCodexAdapter() *CodexAdapter {
+	return &CodexAdapter{cwdBySessID: map[string]string{}}
+}
 
 func (a *CodexAdapter) Name() string { return "codex" }
 
@@ -48,6 +55,10 @@ func (a *CodexAdapter) ExtractTurn(line []byte, sessionID string) (Turn, bool) {
 	}
 	var env codexEnvelope
 	if err := json.Unmarshal(line, &env); err != nil {
+		return Turn{}, false
+	}
+	if env.Type == "turn_context" {
+		a.rememberCwd(sessionID, env.Payload)
 		return Turn{}, false
 	}
 	if env.Type != "response_item" {
@@ -83,7 +94,31 @@ func (a *CodexAdapter) ExtractTurn(line []byte, sessionID string) (Turn, bool) {
 	} else {
 		turn.Timestamp = time.Now().UTC()
 	}
+	if cwd := a.recallCwd(sessionID); cwd != "" {
+		turn.Cwd = cwd
+	}
 	return turn, true
+}
+
+// rememberCwd stores the latest cwd reported by a Codex `turn_context`
+// envelope for the given session. The cwd is reused for every
+// subsequent Turn from that session until another turn_context arrives.
+func (a *CodexAdapter) rememberCwd(sessionID string, payload json.RawMessage) {
+	var ctx struct {
+		Cwd string `json:"cwd"`
+	}
+	if err := json.Unmarshal(payload, &ctx); err != nil || ctx.Cwd == "" {
+		return
+	}
+	a.mu.Lock()
+	a.cwdBySessID[sessionID] = ctx.Cwd
+	a.mu.Unlock()
+}
+
+func (a *CodexAdapter) recallCwd(sessionID string) string {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return a.cwdBySessID[sessionID]
 }
 
 func parseCodexTimestamp(s string) time.Time {

@@ -441,8 +441,19 @@ func (w *Watcher) ingestFile(path string) int {
 	// these for the filter + cluster + persist pipeline; Logbook
 	// projects to a privacy-safe metadata row.
 	if w.cfg.Bus != nil {
-		projectId := w.resolveProjectId()
+		defaultProjectId := w.resolveProjectId()
 		for _, t := range turns {
+			// Prefer per-turn cwd when the adapter surfaced one (Codex
+			// reports cwd per turn_context — required to scope cross-project
+			// sessions correctly when transcripts share a global directory).
+			// Fall back to the watcher's configured ProjectDir when no
+			// per-turn cwd is available (Claude/Pi).
+			projectId := defaultProjectId
+			if t.Cwd != "" {
+				if id, _, _, err := project.ResolveProject(t.Cwd); err == nil {
+					projectId = id
+				}
+			}
 			if projectId != "" {
 				t.ProjectId = projectId
 			}

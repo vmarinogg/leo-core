@@ -148,3 +148,33 @@ func TestCodexAdapter_ExtractTurn_AssistantText(t *testing.T) {
 		t.Errorf("Harness = %q, want codex", turn.Harness)
 	}
 }
+
+// Codex sessions carry per-turn cwd in `turn_context` envelopes. When
+// the adapter sees one it must stamp every subsequent Turn from the
+// same session with that cwd so the watcher can resolve the correct
+// project_id even when multiple projects share ~/.codex/sessions/.
+const codexTurnContextWithCwd = `{"timestamp":"2026-05-09T20:53:00.000Z","type":"turn_context","payload":{"cwd":"/tmp/cross-project","model":"gpt-5.5"}}`
+const codexUserAfterContext = `{"timestamp":"2026-05-09T20:53:01.000Z","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"hello"}]}}`
+
+func TestCodexAdapter_ExtractTurn_StampsCwdFromTurnContext(t *testing.T) {
+	a := NewCodexAdapter()
+
+	// turn_context line itself does not emit a Turn.
+	if _, ok := a.ExtractTurn([]byte(codexTurnContextWithCwd), "s-1"); ok {
+		t.Fatal("turn_context envelope should not produce a Turn")
+	}
+
+	turn, ok := a.ExtractTurn([]byte(codexUserAfterContext), "s-1")
+	if !ok {
+		t.Fatal("response_item after turn_context should produce a Turn")
+	}
+	if turn.Cwd != "/tmp/cross-project" {
+		t.Fatalf("Turn.Cwd = %q, want /tmp/cross-project", turn.Cwd)
+	}
+
+	// A different session must not inherit the cached cwd.
+	other, ok := a.ExtractTurn([]byte(codexUserAfterContext), "s-other")
+	if !ok || other.Cwd != "" {
+		t.Fatalf("cross-session cwd leak: ok=%v cwd=%q", ok, other.Cwd)
+	}
+}

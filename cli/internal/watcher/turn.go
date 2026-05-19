@@ -30,6 +30,13 @@ type Turn struct {
 	// ProjectId carries the resolved project identity (ADR 0016).
 	// Empty means "unknown" — the resolver found no .mom-project.yaml.
 	ProjectId string
+
+	// Cwd is the working directory the harness reported for this turn,
+	// when the transcript carries it (Codex includes per-turn cwd in
+	// `turn_context` envelopes). The watcher prefers this for project
+	// resolution over the watcher's configured ProjectDir — critical when
+	// multiple projects share a global transcript directory (Codex).
+	Cwd string
 }
 
 // ToolCall is one tool invocation observed in an assistant turn.
