@@ -76,6 +76,7 @@ If the user agrees, run that command. If the user declines, stop. Do not install
 ## Rules
 
 - Always include `--strict-project` on every `mom drafts` call. Zero results means "no drafts in this project" — it does **not** mean "try a wider search". Only the user can opt into `--all-projects`.
+- If `mom drafts --strict-project` fails with `unknown flag: --strict-project`, the installed MOM is too old. Tell the user to upgrade with `brew upgrade mom` (or `mom self-update`) and stop. **Do not** fall back to a bare `mom drafts` — that would leak drafts from other projects.
 - Never curate without user approval.
 - Never skip `--type` or `--summary`.
 - Do not rewrite draft content.
