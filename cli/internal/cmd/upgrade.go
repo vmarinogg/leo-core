@@ -11,6 +11,7 @@ import (
 	"github.com/momhq/mom/cli/internal/adapters/harness"
 	"github.com/momhq/mom/cli/internal/adapters/storage"
 	"github.com/momhq/mom/cli/internal/config"
+	"github.com/momhq/mom/cli/internal/project"
 	"github.com/momhq/mom/cli/internal/ux"
 	"github.com/spf13/cobra"
 	"gopkg.in/yaml.v3"
@@ -56,6 +57,19 @@ func runUpgrade(cmd *cobra.Command, args []string) error {
 	}
 
 	projectRoot := filepath.Dir(momDir)
+
+	// v0.40 central-vault layout: momDir is always ~/.mom, so filepath.Dir
+	// returns $HOME and we'd register HOME as a project. Prefer the cwd
+	// (or its nearest .mom-project.yaml ancestor) in that case so upgrades
+	// stay scoped to the actual project the user invoked them from.
+	if home, herr := os.UserHomeDir(); herr == nil && filepath.Clean(momDir) == filepath.Join(home, ".mom") {
+		if cwd, werr := os.Getwd(); werr == nil {
+			projectRoot = cwd
+			if _, source, found, _ := project.ResolveProject(cwd); found && source != "" {
+				projectRoot = filepath.Dir(source)
+			}
+		}
+	}
 
 	return upgradeSingleDir(cmd, projectRoot, dryRun)
 }
