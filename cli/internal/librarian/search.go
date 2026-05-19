@@ -235,7 +235,7 @@ func (l *Librarian) RecentDrafts(f RecentDraftsFilter) ([]Memory, error) {
 
 	query := `SELECT id, type, summary, content, created_at, session_id,
 		        provenance_actor, provenance_source_type, provenance_trigger_event,
-		        promotion_state, landmark, centrality_score
+		        promotion_state, landmark, centrality_score, project_id
 		 FROM memories
 		 WHERE ` + strings.Join(wheres, " AND ") + `
 		 ORDER BY created_at DESC, id DESC
@@ -248,15 +248,15 @@ func (l *Librarian) RecentDrafts(f RecentDraftsFilter) ([]Memory, error) {
 		func(rs *sql.Rows) error {
 			for rs.Next() {
 				var (
-					m                                        Memory
-					summary, actor, sourceType, triggerEvent sql.NullString
-					createdAtStr                             string
-					landmarkInt                              int64
+					m                                                   Memory
+					summary, actor, sourceType, triggerEvent, projectId sql.NullString
+					createdAtStr                                        string
+					landmarkInt                                         int64
 				)
 				if err := rs.Scan(
 					&m.ID, &m.Type, &summary, &m.Content, &createdAtStr, &m.SessionID,
 					&actor, &sourceType, &triggerEvent,
-					&m.PromotionState, &landmarkInt, &m.CentralityScore,
+					&m.PromotionState, &landmarkInt, &m.CentralityScore, &projectId,
 				); err != nil {
 					return err
 				}
@@ -265,6 +265,7 @@ func (l *Librarian) RecentDrafts(f RecentDraftsFilter) ([]Memory, error) {
 				m.ProvenanceSourceType = sourceType.String
 				m.ProvenanceTriggerEvent = triggerEvent.String
 				m.Landmark = landmarkInt != 0
+				m.ProjectId = projectId.String
 				t, err := parseTime(createdAtStr)
 				if err != nil {
 					return fmt.Errorf("parse created_at %q: %w", createdAtStr, err)
