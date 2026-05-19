@@ -131,6 +131,14 @@ func invalidRegistryEntryReason(projectDir string, entry RegistryEntry) string {
 	if _, err := os.Stat(filepath.Join(entry.MomDir, "config.yaml")); err != nil {
 		return "MOM config missing"
 	}
+	// ADR 0016: a project must declare itself via .mom-project.yaml before
+	// the daemon will watch it. Otherwise an accidental `mom init` from
+	// $HOME (or any unrelated cwd) silently turns that directory into a
+	// permanently-watched project. Bound projects are explicit; everything
+	// else gets pruned.
+	if _, err := os.Stat(filepath.Join(projectDir, ".mom-project.yaml")); err != nil {
+		return "no .mom-project.yaml binding"
+	}
 	return ""
 }
 

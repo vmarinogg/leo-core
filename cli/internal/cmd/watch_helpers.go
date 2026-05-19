@@ -66,6 +66,14 @@ func ensureGlobalDaemon(projectRoot, momDir string, harnesses []string) error {
 	// Prune stale pre-v0.40 registry entries before registering this project.
 	_, _ = daemon.PruneInvalidRegistry()
 
+	// ADR 0016: require an explicit project binding before adding this
+	// directory to the daemon registry. Without this, running `mom init`
+	// or `mom upgrade` from $HOME (or any unrelated cwd) would silently
+	// promote that directory into a permanently-watched project.
+	if _, err := os.Stat(filepath.Join(projectRoot, ".mom-project.yaml")); err != nil {
+		return fmt.Errorf("refusing to watch %s: no .mom-project.yaml binding (run `mom project bind <id>`)", projectRoot)
+	}
+
 	// Register this project in the global registry.
 	if err := daemon.RegisterProject(projectRoot, momDir, harnesses); err != nil {
 		return fmt.Errorf("registering project: %w", err)

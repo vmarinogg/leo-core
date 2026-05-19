@@ -305,6 +305,14 @@ func upgradeSingleDir(cmd *cobra.Command, projectRoot string, dryRun bool) error
 
 		installSkillsDuringUpgrade(cfg.EnabledHarnesses(), dryRun, addAction)
 
+		// Refresh harness-native extensions (currently just Pi). Skills.sh
+		// keeps SKILL.md in sync for every harness; pi additionally ships
+		// the deeper pi-mom extension via the Pi marketplace, so we must
+		// refresh that on every upgrade or the two sources drift.
+		if !dryRun {
+			refreshHarnessExtensionsDuringUpgrade(cfg.EnabledHarnesses(), projectRoot, addAction)
+		}
+
 		// Rebuild SQLite search index from JSON files.
 		if !dryRun {
 			idx := storage.NewIndexedAdapter(momDir)
@@ -375,6 +383,29 @@ func upgradeSingleDir(cmd *cobra.Command, projectRoot string, dryRun bool) error
 	p.Blank()
 
 	return nil
+}
+
+// refreshHarnessExtensionsDuringUpgrade re-runs GlobalExtensionInstaller for
+// every enabled harness that implements it. Today this means re-running
+// `pi install npm:pi-mom` so the deeper Pi extension stays in lockstep with
+// the skills.sh-installed SKILL.md files.
+func refreshHarnessExtensionsDuringUpgrade(harnesses []string, projectRoot string, addAction func(string, string)) {
+	reg := harness.NewRegistry(projectRoot)
+	for _, h := range harnesses {
+		adapter, ok := reg.Get(h)
+		if !ok {
+			continue
+		}
+		ext, ok := adapter.(harness.GlobalExtensionInstaller)
+		if !ok {
+			continue
+		}
+		if err := ext.RegisterGlobalExtension(); err != nil {
+			addAction("⚠", fmt.Sprintf("%s extension refresh: %v", h, err))
+			continue
+		}
+		addAction("✔", fmt.Sprintf("%s extension refreshed", h))
+	}
 }
 
 func installSkillsDuringUpgrade(harnesses []string, dryRun bool, addAction func(string, string)) {

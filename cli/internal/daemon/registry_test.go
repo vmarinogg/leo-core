@@ -263,6 +263,9 @@ func TestPruneInvalidRegistryRemovesStaleEntries(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(validMom, "config.yaml"), []byte("version: \"1\"\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
+	if err := os.WriteFile(filepath.Join(validProject, ".mom-project.yaml"), []byte("version: \"1\"\nid: valid-project\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
 
 	staleProject := filepath.Join(tmp, "stale")
 	staleMom := filepath.Join(staleProject, ".mom")
