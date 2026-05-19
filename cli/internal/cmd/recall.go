@@ -99,18 +99,22 @@ func runRecall(cmd *cobra.Command, args []string) error {
 
 	p.Diamond(fmt.Sprintf("recall %q — %d results", query, len(results)))
 	p.Blank()
-	p.Bold(fmt.Sprintf("%-36s  %-10s  %-12s  %s", "ID", "Score", "State", "Summary"))
+	p.Bold(fmt.Sprintf("%-36s  %-10s  %-12s  %s", "ID", "Score", "State", "Summary / excerpt"))
 	p.Muted(strings.Repeat("─", 92))
 	for _, r := range results {
 		landmark := ""
 		if r.Landmark {
 			landmark = p.HighlightValue(" ★")
 		}
+		gist := strings.TrimSpace(r.Summary)
+		if gist == "" {
+			gist = memoryTextExcerpt(r.Content, 200)
+		}
 		p.Textf("%-36s  %s  %-12s  %s%s",
 			truncate(r.ID, 36),
 			p.HighlightValue(fmt.Sprintf("%-10.3f", r.Score)),
 			r.PromotionState,
-			truncate(r.Summary, 40),
+			truncate(gist, 80),
 			landmark,
 		)
 	}
