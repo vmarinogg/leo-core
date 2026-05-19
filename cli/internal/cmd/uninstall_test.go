@@ -132,18 +132,20 @@ func TestUninstall_FullUninstall_RemovesGlobalWatchDaemon(t *testing.T) {
 		t.Fatalf("register p2: %v", err)
 	}
 
-	// Pre-create a fake daemon service file under the isolated HOME.
-	// macOS: ~/Library/LaunchAgents/com.momhq.watch.plist
-	// linux: ~/.config/systemd/user/mom-watch.service
-	// We create both shapes; whichever the OS-specific UninstallGlobal
-	// targets will be removed; the other is harmless leftover.
-	macPlist := filepath.Join(home, "Library", "LaunchAgents", "com.momhq.watch.plist")
-	if err := os.MkdirAll(filepath.Dir(macPlist), 0o755); err != nil {
-		t.Fatalf("mkdir LaunchAgents: %v", err)
+	// Pre-create the platform-specific daemon service file under the
+	// isolated HOME so UninstallGlobal has something to remove. On macOS
+	// this is the launchd plist; on Linux the systemd user unit.
+	serviceFile, err := daemon.GlobalDaemonFile()
+	if err != nil {
+		t.Fatalf("resolving daemon service path: %v", err)
 	}
-	if err := os.WriteFile(macPlist, []byte("<plist/>"), 0o644); err != nil {
-		t.Fatalf("write plist: %v", err)
+	if err := os.MkdirAll(filepath.Dir(serviceFile), 0o755); err != nil {
+		t.Fatalf("mkdir daemon service dir: %v", err)
 	}
+	if err := os.WriteFile(serviceFile, []byte("placeholder\n"), 0o644); err != nil {
+		t.Fatalf("write daemon service file: %v", err)
+	}
+	_ = home
 
 	out, err := runUninstallCmd(t, "2\ndelete everything\n")
 	if err != nil {
@@ -159,9 +161,10 @@ func TestUninstall_FullUninstall_RemovesGlobalWatchDaemon(t *testing.T) {
 		t.Errorf("watch registry must be empty after full uninstall, got %d entries", len(reg))
 	}
 
-	// Daemon service file must be removed (macOS path).
-	if _, err := os.Stat(macPlist); err == nil {
-		t.Errorf("daemon plist must be removed by full uninstall on macOS")
+	// Daemon service file must be removed by full uninstall, regardless
+	// of platform.
+	if _, err := os.Stat(serviceFile); err == nil {
+		t.Errorf("daemon service file must be removed by full uninstall: %s", serviceFile)
 	}
 }
 

@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/momhq/mom/cli/internal/centralvault"
+	"github.com/momhq/mom/cli/internal/daemon"
 )
 
 // setupDoctorCleanInstall provisions the minimum filesystem state that
@@ -27,13 +28,18 @@ func setupDoctorCleanInstall(t *testing.T) string {
 		t.Fatalf("close vault: %v", err)
 	}
 
-	// Daemon service file (macOS shape; doctor checks for either platform).
-	plistDir := filepath.Join(home, "Library", "LaunchAgents")
-	if err := os.MkdirAll(plistDir, 0o755); err != nil {
-		t.Fatalf("mkdir LaunchAgents: %v", err)
+	// Daemon service file. Doctor calls daemon.GlobalDaemonFile() which is
+	// platform-specific (launchd plist on darwin, systemd unit on linux);
+	// write whichever one the running platform actually checks.
+	serviceFile, err := daemon.GlobalDaemonFile()
+	if err != nil {
+		t.Fatalf("resolving daemon service path: %v", err)
 	}
-	if err := os.WriteFile(filepath.Join(plistDir, "com.momhq.watch.plist"), []byte("<plist/>"), 0o644); err != nil {
-		t.Fatalf("write plist: %v", err)
+	if err := os.MkdirAll(filepath.Dir(serviceFile), 0o755); err != nil {
+		t.Fatalf("mkdir daemon service dir: %v", err)
+	}
+	if err := os.WriteFile(serviceFile, []byte("placeholder\n"), 0o644); err != nil {
+		t.Fatalf("write daemon service file: %v", err)
 	}
 
 	// Global harness MCP wiring.
