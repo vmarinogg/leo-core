@@ -451,8 +451,8 @@ func TestFlushAll_PropagatesProjectIdFromPayload(t *testing.T) {
 	if len(rows) != 1 {
 		t.Fatalf("got %d memories, want 1", len(rows))
 	}
-	if rows[0].Memory.ProjectId != "alpha" {
-		t.Errorf("memory.ProjectId = %q, want alpha", rows[0].Memory.ProjectId)
+	if rows[0].ProjectId != "alpha" {
+		t.Errorf("memory.ProjectId = %q, want alpha", rows[0].ProjectId)
 	}
 }
 
@@ -475,7 +475,7 @@ func TestProcessRecord_PropagatesProjectIdFromPayload(t *testing.T) {
 	if len(rows) != 1 {
 		t.Fatalf("got %d memories, want 1", len(rows))
 	}
-	if rows[0].Memory.ProjectId != "alpha" {
-		t.Errorf("memory.ProjectId = %q, want alpha", rows[0].Memory.ProjectId)
+	if rows[0].ProjectId != "alpha" {
+		t.Errorf("memory.ProjectId = %q, want alpha", rows[0].ProjectId)
 	}
 }
