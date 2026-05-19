@@ -379,3 +379,44 @@ func TestCodexAdapter_RegisterGlobalHooks_HonorsCodexHome(t *testing.T) {
 		t.Errorf("expected hooks.json under CODEX_HOME, got: %v", err)
 	}
 }
+
+func TestCodexAdapter_RegisterMCP_RefreshesStaleCommand(t *testing.T) {
+	dir := t.TempDir()
+	codexDir := filepath.Join(dir, ".codex")
+	if err := os.MkdirAll(codexDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	existing := `[mcp_servers.mom]
+command = "/tmp/mom-dev"
+args = ["serve", "mcp"]
+
+[mcp_servers.mom.env]
+MOM_PROJECT_DIR = "/private/tmp/stale"
+
+[features]
+hooks = true
+`
+	if err := os.WriteFile(filepath.Join(codexDir, "config.toml"), []byte(existing), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	a := NewCodexAdapter(dir)
+	if err := a.RegisterMCP(); err != nil {
+		t.Fatalf("RegisterMCP failed: %v", err)
+	}
+
+	data, _ := os.ReadFile(filepath.Join(codexDir, "config.toml"))
+	content := string(data)
+	if strings.Contains(content, "/tmp/mom-dev") {
+		t.Fatalf("stale command path should be replaced:\n%s", content)
+	}
+	if !strings.Contains(content, `command = "mom"`) {
+		t.Fatalf("canonical command should be \"mom\":\n%s", content)
+	}
+	if strings.Contains(content, "MOM_PROJECT_DIR") {
+		t.Fatalf("stale [mcp_servers.mom.env] should be dropped:\n%s", content)
+	}
+	if count := strings.Count(content, "[mcp_servers.mom]"); count != 1 {
+		t.Fatalf("expected exactly one [mcp_servers.mom] block, got %d:\n%s", count, content)
+	}
+}

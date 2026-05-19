@@ -178,7 +178,7 @@ func upsertMCPEntryWithEnv(path, projectRoot string) error {
 		servers = make(map[string]any)
 	}
 	servers["mom"] = map[string]any{
-		"command": resolveCommand(),
+		"command": "mom",
 		"args":    []string{"serve", "mcp"},
 		"env": map[string]string{
 			"MOM_PROJECT_DIR": projectRoot,

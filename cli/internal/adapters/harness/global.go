@@ -148,7 +148,7 @@ func upsertClaudeUserMCP() error {
 	}
 	servers["mom"] = map[string]any{
 		"type":    "stdio",
-		"command": resolveCommand(),
+		"command": "mom",
 		"args":    []string{"serve", "mcp"},
 		"env":     map[string]string{},
 	}

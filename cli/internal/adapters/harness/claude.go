@@ -160,7 +160,7 @@ func (a *ClaudeAdapter) RegisterMCP() error {
 	}
 
 	servers["mom"] = map[string]any{
-		"command": resolveCommand(),
+		"command": "mom",
 		"args":    []string{"serve", "mcp"},
 	}
 	root["mcpServers"] = servers
@@ -294,7 +294,7 @@ func upsertMCPEntry(path string) error {
 	}
 
 	servers["mom"] = map[string]any{
-		"command": resolveCommand(),
+		"command": "mom",
 		"args":    []string{"serve", "mcp"},
 	}
 	root["mcpServers"] = servers

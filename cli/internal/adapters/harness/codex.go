@@ -84,7 +84,7 @@ func (a *CodexAdapter) RegisterGlobalHooks() error {
 // hook never fires.
 func writeCodexHooks(hooksPath string) error {
 	hooks := []HookDef{
-		{Event: "Stop", Command: fmt.Sprintf("%q watch --sweep --global", resolveCommand())},
+		{Event: "Stop", Command: "mom watch --sweep --global"},
 	}
 	if err := os.MkdirAll(filepath.Dir(hooksPath), 0755); err != nil {
 		return fmt.Errorf("creating %s: %w", filepath.Dir(hooksPath), err)
@@ -166,13 +166,21 @@ func upsertCodexMCPEntry(path string) error {
 		return fmt.Errorf("reading %s: %w", filepath.Base(path), err)
 	}
 
-	// Build the MCP block with the resolved absolute path to the mom binary.
-	codexMCPBlock := fmt.Sprintf("\n[mcp_servers.mom]\ncommand = %q\nargs = [\"serve\", \"mcp\"]\n", resolveCommand())
+	// Build the MCP block. Always use the literal "mom" command so brew /
+	// npm / package upgrades pick up the right binary at runtime, instead of
+	// baking whichever absolute path happened to be on PATH at install time.
+	codexMCPBlock := "\n[mcp_servers.mom]\ncommand = \"mom\"\nargs = [\"serve\", \"mcp\"]\n"
 
 	content := string(existing)
 	changed := false
 
-	if !strings.Contains(content, "[mcp_servers.mom]") {
+	if strings.Contains(content, "[mcp_servers.mom]") {
+		refreshed, refreshedChanged := replaceCodexMCPBlock(content)
+		if refreshedChanged {
+			content = refreshed
+			changed = true
+		}
+	} else {
 		content = strings.TrimRight(content, "\n") + "\n" + codexMCPBlock
 		changed = true
 	}
@@ -191,6 +199,51 @@ func upsertCodexMCPEntry(path string) error {
 		return fmt.Errorf("writing %s: %w", filepath.Base(path), err)
 	}
 	return nil
+}
+
+// replaceCodexMCPBlock rewrites the existing [mcp_servers.mom] section so
+// its command/args fields always reflect the canonical "mom serve mcp" entry.
+// Stale paths baked by earlier installs (e.g. /tmp/mom-dev) are repaired.
+// The block ends at the next top-level [section] header. Any nested
+// [mcp_servers.mom.env] table is dropped — it was test-only debris.
+func replaceCodexMCPBlock(content string) (string, bool) {
+	lines := strings.Split(content, "\n")
+	var out []string
+	inBlock := false
+	changed := false
+	canonical := []string{
+		"[mcp_servers.mom]",
+		"command = \"mom\"",
+		"args = [\"serve\", \"mcp\"]",
+	}
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		isHeader := strings.HasPrefix(trimmed, "[") && strings.HasSuffix(trimmed, "]")
+		if trimmed == "[mcp_servers.mom]" {
+			inBlock = true
+			out = append(out, canonical...)
+			changed = true
+			continue
+		}
+		if inBlock {
+			if isHeader {
+				// nested mcp_servers.mom.* tables (e.g. .env) are dropped.
+				if strings.HasPrefix(trimmed, "[mcp_servers.mom.") {
+					changed = true
+					continue
+				}
+				inBlock = false
+				out = append(out, line)
+				continue
+			}
+			// drop original key/value lines inside the block.
+			changed = true
+			continue
+		}
+		out = append(out, line)
+	}
+	rebuilt := strings.TrimRight(strings.Join(out, "\n"), "\n") + "\n"
+	return rebuilt, changed && rebuilt != content
 }
 
 func normalizeCodexFeaturesBlock(content string) string {
