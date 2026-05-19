@@ -126,10 +126,13 @@ func TestDoctor_VaultCorrupt_FailsWithDistinctHint(t *testing.T) {
 
 // Daemon service file missing → watch-daemon check fails with hint.
 func TestDoctor_DaemonServiceMissing_FailsWithHint(t *testing.T) {
-	home := setupDoctorCleanInstall(t)
-	plist := filepath.Join(home, "Library", "LaunchAgents", "com.momhq.watch.plist")
-	if err := os.Remove(plist); err != nil {
-		t.Fatalf("remove plist: %v", err)
+	_ = setupDoctorCleanInstall(t)
+	serviceFile, err := daemon.GlobalDaemonFile()
+	if err != nil {
+		t.Fatalf("resolving daemon service path: %v", err)
+	}
+	if err := os.Remove(serviceFile); err != nil {
+		t.Fatalf("remove daemon service file: %v", err)
 	}
 
 	out, err := runDoctorCmd(t)
