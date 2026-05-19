@@ -5,7 +5,7 @@ user-invocable: true
 allowed-tools: Bash(mom project*), Bash(cat .mom-project.yaml*), Bash(test -f .mom-project.yaml*), Bash(command -v mom*), Bash(brew install momhq/tap/mom*)
 ---
 
-Run only after the user explicitly asks to bind, rebind, or set up project scoping (or after the user accepts a nudge from `mom status` about an unbound directory).
+Invoking this skill **is** the user's request to set up or change project scoping. Proceed with the flow below immediately — do not ask the user to confirm they want to bind. (The skill still asks for confirmation of the `id` itself in step 2.)
 
 A bound directory has a `.mom-project.yaml` file at its root declaring a project `id`. Memories captured while working in that directory are tagged with that id, and recall scopes to it by default.
 
