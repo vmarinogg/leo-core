@@ -58,20 +58,27 @@ func runUpgrade(cmd *cobra.Command, args []string) error {
 
 	projectRoot := filepath.Dir(momDir)
 
-	// v0.40 central-vault layout: momDir is always ~/.mom, so filepath.Dir
-	// returns $HOME and we'd register HOME as a project. Prefer the cwd
-	// (or its nearest .mom-project.yaml ancestor) in that case so upgrades
-	// stay scoped to the actual project the user invoked them from.
-	if home, herr := os.UserHomeDir(); herr == nil && filepath.Clean(momDir) == filepath.Join(home, ".mom") {
-		if cwd, werr := os.Getwd(); werr == nil {
-			projectRoot = cwd
-			if _, source, found, _ := project.ResolveProject(cwd); found && source != "" {
-				projectRoot = filepath.Dir(source)
-			}
-		}
-	}
-
 	return upgradeSingleDir(cmd, projectRoot, dryRun)
+}
+
+// resolveDaemonProjectRoot picks the directory to register with the global
+// watch daemon. With the v0.40 central vault, momDir is always ~/.mom and
+// filepath.Dir(momDir) resolves to $HOME — never a real project. Fall back
+// to the cwd / nearest .mom-project.yaml ancestor so `mom upgrade` registers
+// the project the user actually invoked it from.
+func resolveDaemonProjectRoot(momDir, fallback string) string {
+	home, err := os.UserHomeDir()
+	if err != nil || filepath.Clean(momDir) != filepath.Join(home, ".mom") {
+		return fallback
+	}
+	cwd, err := os.Getwd()
+	if err != nil {
+		return fallback
+	}
+	if _, source, found, _ := project.ResolveProject(cwd); found && source != "" {
+		return filepath.Dir(source)
+	}
+	return cwd
 }
 
 // upgradeSingleDir runs the full upgrade pipeline on a single .mom/ directory.
@@ -356,8 +363,9 @@ func upgradeSingleDir(cmd *cobra.Command, projectRoot string, dryRun bool) error
 	}
 
 	// ── Phase 3.5: Register with global watch daemon ────────────────────────
+	daemonProjectRoot := resolveDaemonProjectRoot(momDir, projectRoot)
 	if !dryRun {
-		if err := ensureGlobalDaemon(projectRoot, momDir, cfg.EnabledHarnesses()); err != nil {
+		if err := ensureGlobalDaemon(daemonProjectRoot, momDir, cfg.EnabledHarnesses()); err != nil {
 			addAction("⚠", fmt.Sprintf("watch daemon: %v", err))
 		} else {
 			addAction("✔", "watch daemon installed/updated")
@@ -426,7 +434,8 @@ func installSkillsDuringUpgrade(harnesses []string, dryRun bool, addAction func(
 	for _, h := range harnesses {
 		agent, ok := skillsAgentForHarness(h)
 		if !ok {
-			addAction("⚠", fmt.Sprintf("skills: unsupported harness %s", h))
+			// Pi installs its skills via the pi-mom extension; other
+			// harnesses not supported by skills.sh stay silent.
 			continue
 		}
 		args, command := skillsInstallCommand(agent)

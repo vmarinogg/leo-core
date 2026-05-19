@@ -486,7 +486,8 @@ func installGlobalSkills(p *ux.Printer, harnesses []string) {
 	for _, h := range harnesses {
 		agent, ok := skillsAgentForHarness(h)
 		if !ok {
-			p.Warnf("skills: unsupported harness %s", h)
+			// Pi installs its skills via the pi-mom extension; other
+			// harnesses not supported by skills.sh stay silent.
 			continue
 		}
 		args, command := skillsInstallCommand(agent)
@@ -504,14 +505,19 @@ func skillsInstallCommand(agent string) ([]string, string) {
 	return args, fmt.Sprintf("npx skills add momhq/mom -g -s '*' -a %s -y", agent)
 }
 
+// skillsAgentForHarness maps a MOM harness id to the skills.sh agent id.
+//
+// Pi is intentionally excluded: it installs the deeper pi-mom extension via
+// `pi install npm:pi-mom`, which already drops SKILL.md files into
+// ~/.pi/agent/skills/. Running skills.sh on top would duplicate every skill
+// in Pi's TUI. The pi-mom package and momhq/mom skills source stay in
+// lockstep via scripts/verify-skills-sync.sh.
 func skillsAgentForHarness(h string) (string, bool) {
 	switch h {
 	case "claude":
 		return "claude-code", true
 	case "codex":
 		return "codex", true
-	case "pi":
-		return "pi", true
 	default:
 		return "", false
 	}
