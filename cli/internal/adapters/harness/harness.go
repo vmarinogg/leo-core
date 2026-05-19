@@ -1,24 +1,6 @@
 // Package harness defines the Adapter interface for AI Harness integrations.
 package harness
 
-import (
-	"os/exec"
-	"path/filepath"
-)
-
-// resolveCommand returns the absolute path to the mom binary.
-// Falls back to "mom" if resolution fails (e.g. in test environments where
-// mom is not installed).
-func resolveCommand() string {
-	if path, err := exec.LookPath("mom"); err == nil {
-		if abs, err := filepath.Abs(path); err == nil {
-			return abs
-		}
-		return path
-	}
-	return "mom"
-}
-
 // Config represents the user's .mom/config.yaml configuration.
 type Config struct {
 	Version  string

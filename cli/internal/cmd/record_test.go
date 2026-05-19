@@ -265,8 +265,8 @@ func TestRunRecord_StampsProjectIdFromBindFile(t *testing.T) {
 	if len(rows) != 1 {
 		t.Fatalf("got %d memories, want 1", len(rows))
 	}
-	if rows[0].Memory.ProjectId != "alpha" {
-		t.Errorf("ProjectId = %q, want alpha", rows[0].Memory.ProjectId)
+	if rows[0].ProjectId != "alpha" {
+		t.Errorf("ProjectId = %q, want alpha", rows[0].ProjectId)
 	}
 }
 
@@ -292,7 +292,7 @@ func TestRunRecord_NullProjectIdWhenCwdUnbound(t *testing.T) {
 	if len(rows) != 1 {
 		t.Fatalf("got %d memories, want 1", len(rows))
 	}
-	if rows[0].Memory.ProjectId != "" {
-		t.Errorf("ProjectId = %q, want empty (cwd unbound)", rows[0].Memory.ProjectId)
+	if rows[0].ProjectId != "" {
+		t.Errorf("ProjectId = %q, want empty (cwd unbound)", rows[0].ProjectId)
 	}
 }

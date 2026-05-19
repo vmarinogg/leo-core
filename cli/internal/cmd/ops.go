@@ -189,22 +189,3 @@ func checkIndexConsistency(p *ux.Printer, momDir string, diskDocIDs map[string]b
 	p.Check("index consistency: ok")
 	return false
 }
-
-// checkDirWritable verifies a directory exists and is writable.
-func checkDirWritable(dir string) error {
-	info, err := os.Stat(dir)
-	if err != nil {
-		return fmt.Errorf("not found: %v", err)
-	}
-	if !info.IsDir() {
-		return fmt.Errorf("path is not a directory")
-	}
-
-	tmp := filepath.Join(dir, ".write-check")
-	if err := os.WriteFile(tmp, []byte("ok"), 0644); err != nil {
-		return fmt.Errorf("not writable: %v", err)
-	}
-	os.Remove(tmp)
-
-	return nil
-}

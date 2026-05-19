@@ -109,26 +109,6 @@ func ensureGlobalDaemon(projectRoot, momDir string, harnesses []string) error {
 	return nil
 }
 
-// unregisterProject removes a project from the global watch registry,
-// cleans up legacy agents, and stops the global daemon if no projects remain.
-func unregisterProject(projectRoot, momDir string) error {
-	projectRoot = pathutil.CanonicalDir(projectRoot)
-	if err := daemon.UnregisterProject(projectRoot); err != nil {
-		return fmt.Errorf("unregistering project: %w", err)
-	}
-
-	_ = daemon.CleanupLegacy(projectRoot)
-
-	empty, err := daemon.IsRegistryEmpty()
-	if err != nil {
-		return err
-	}
-	if empty {
-		return daemon.UninstallGlobal()
-	}
-	return nil
-}
-
 // sweepTranscripts runs a one-shot catch-up sweep for all watcher-capable
 // harnesses. Best-effort: errors are logged to stderr, never returned.
 func sweepTranscripts(projectDir, momDir string) {
