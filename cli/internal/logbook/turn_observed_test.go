@@ -2,6 +2,7 @@ package logbook_test
 
 import (
 	"path/filepath"
+	"sort"
 	"strings"
 	"testing"
 	"time"
@@ -10,6 +11,7 @@ import (
 	"github.com/momhq/mom/cli/internal/librarian"
 	"github.com/momhq/mom/cli/internal/logbook"
 	"github.com/momhq/mom/cli/internal/vault"
+	"github.com/momhq/mom/cli/internal/watcher"
 )
 
 // TestSubscribeTurnObserved_PersistsMetadataProjection locks the
@@ -23,7 +25,7 @@ import (
 // audit substrate.
 func TestSubscribeTurnObserved_PersistsMetadataProjection(t *testing.T) {
 	dir := t.TempDir()
-	migs := append(librarian.Migrations(), logbook.Migrations()...)
+	migs := append(librarian.Migrations(), logbook.Migrations()...); sort.Slice(migs, func(i, j int) bool { return migs[i].Version < migs[j].Version })
 	v, err := vault.Open(filepath.Join(dir, "mom.db"), migs)
 	if err != nil {
 		t.Fatalf("vault.Open: %v", err)
@@ -198,7 +200,7 @@ func toString(v any) string {
 
 func TestSubscribeTurnObserved_DropsEventsWithoutSessionID(t *testing.T) {
 	dir := t.TempDir()
-	migs := append(librarian.Migrations(), logbook.Migrations()...)
+	migs := append(librarian.Migrations(), logbook.Migrations()...); sort.Slice(migs, func(i, j int) bool { return migs[i].Version < migs[j].Version })
 	v, _ := vault.Open(filepath.Join(dir, "mom.db"), migs)
 	t.Cleanup(func() { _ = v.Close() })
 	lib := librarian.New(v)
@@ -218,5 +220,53 @@ func TestSubscribeTurnObserved_DropsEventsWithoutSessionID(t *testing.T) {
 	rows, _ := lib.QueryOpEvents(librarian.OpEventFilter{})
 	if len(rows) != 0 {
 		t.Errorf("got %d rows, want 0 (empty session_id should drop)", len(rows))
+	}
+}
+
+// TestSubscribeTurnObserved_PreservesHarnessFromTurnPayload locks the
+// full chain that #340 fixed: when a watcher.Turn with Harness set
+// flows through Turn.ToPayload() → herald.Event → Logbook, the
+// persisted op_events.payload carries the harness.
+//
+// The existing PersistsMetadataProjection test builds the payload by
+// hand (it always had "harness" in the map), so it never noticed that
+// ToPayload was dropping the field. This test goes via ToPayload to
+// verify the integration.
+func TestSubscribeTurnObserved_PreservesHarnessFromTurnPayload(t *testing.T) {
+	dir := t.TempDir()
+	migs := append(librarian.Migrations(), logbook.Migrations()...)
+	sort.Slice(migs, func(i, j int) bool { return migs[i].Version < migs[j].Version })
+	v, err := vault.Open(filepath.Join(dir, "mom.db"), migs)
+	if err != nil {
+		t.Fatalf("vault.Open: %v", err)
+	}
+	t.Cleanup(func() { _ = v.Close() })
+	lib := librarian.New(v)
+	w := logbook.New(lib)
+	bus := herald.NewBus()
+	defer w.SubscribeTurnObserved(bus)()
+
+	turn := watcher.Turn{
+		SessionID: "s-harness",
+		Role:      "user",
+		Text:      "hello",
+		Harness:   "pi",
+	}
+	bus.Publish(herald.Event{
+		Type:      herald.TurnObserved,
+		SessionID: turn.SessionID,
+		Payload:   turn.ToPayload(),
+	})
+
+	rows, err := lib.QueryOpEvents(librarian.OpEventFilter{EventType: "turn.observed"})
+	if err != nil {
+		t.Fatalf("QueryOpEvents: %v", err)
+	}
+	if len(rows) != 1 {
+		t.Fatalf("got %d op_events rows, want 1", len(rows))
+	}
+	got, _ := rows[0].Payload["harness"].(string)
+	if got != "pi" {
+		t.Errorf("op_events.payload.harness = %q, want pi", got)
 	}
 }

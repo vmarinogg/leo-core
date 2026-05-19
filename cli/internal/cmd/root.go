@@ -44,4 +44,5 @@ func init() {
 	rootCmd.AddCommand(watchCmd)
 	rootCmd.AddCommand(demoCmd)
 	rootCmd.AddCommand(lensCmd)
+	rootCmd.AddCommand(projectCmd)
 }

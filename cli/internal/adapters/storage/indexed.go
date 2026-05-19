@@ -238,16 +238,16 @@ func (a *IndexedAdapter) jsonFallbackSearch(opts SearchOptions) ([]SearchResult,
 		}
 
 		results = append(results, SearchResult{
-			ID:             doc.ID,
-			Summary:        buildSummary(doc),
-			Tags:           doc.Tags,
-			Score:          score,
-			ScopePath:      a.scopePath,
-			PromotionState: doc.PromotionState,
-			Landmark:       doc.Landmark,
+			ID:              doc.ID,
+			Summary:         buildSummary(doc),
+			Tags:            doc.Tags,
+			Score:           score,
+			ScopePath:       a.scopePath,
+			PromotionState:  doc.PromotionState,
+			Landmark:        doc.Landmark,
 			CentralityScore: doc.CentralityScore,
-			Created:        doc.Created.UTC().Format("2006-01-02T15:04:05Z"),
-			SessionID:      doc.SessionID,
+			Created:         doc.Created.UTC().Format("2006-01-02T15:04:05Z"),
+			SessionID:       doc.SessionID,
 		})
 	}
 

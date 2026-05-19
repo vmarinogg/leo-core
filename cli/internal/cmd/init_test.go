@@ -265,7 +265,7 @@ func TestInitCmd_HarnessesAllUsesDetectedInstalledHarnesses(t *testing.T) {
 	if !strings.Contains(enabled, "claude") || !strings.Contains(enabled, "codex") {
 		t.Fatalf("expected detected harnesses to include claude and codex, got %v", cfg.EnabledHarnesses())
 	}
-	if strings.Contains(enabled, "windsurf") || strings.Contains(enabled, "pi") {
+	if strings.Contains(enabled, "pi") {
 		t.Fatalf("expected undetected harnesses to be excluded, got %v", cfg.EnabledHarnesses())
 	}
 }
@@ -547,5 +547,33 @@ func TestInitCmd_DoesNotCreateGeneratedCentralDocs(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(dir, ".mom")); err == nil {
 		t.Error("project-local .mom/ should not be created")
+	}
+}
+
+// TestInitCmd_RejectsRetiredWindsurfHarness verifies that #342 retires
+// the Windsurf harness — `mom init --harnesses windsurf` returns a
+// clear error explaining the retirement, not a silent failure.
+func TestInitCmd_RejectsRetiredWindsurfHarness(t *testing.T) {
+	dir := t.TempDir()
+	_ = initTestCentralVault(t)
+	origDir, _ := os.Getwd()
+	os.Chdir(dir)
+	defer os.Chdir(origDir)
+
+	buf := new(bytes.Buffer)
+	rootCmd.SetOut(buf)
+	rootCmd.SetErr(buf)
+	rootCmd.SetArgs([]string{"init", "--harnesses", "windsurf"})
+
+	err := rootCmd.Execute()
+	if err == nil {
+		t.Fatalf("expected error for retired windsurf harness, got nil\noutput:\n%s", buf.String())
+	}
+	msg := strings.ToLower(err.Error() + " " + buf.String())
+	if !strings.Contains(msg, "windsurf") {
+		t.Errorf("error should mention windsurf, got: %v / %s", err, buf.String())
+	}
+	if !strings.Contains(msg, "retired") {
+		t.Errorf("error should mention retirement, got: %v / %s", err, buf.String())
 	}
 }

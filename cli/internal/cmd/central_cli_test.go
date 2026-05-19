@@ -3,6 +3,7 @@ package cmd
 import (
 	"bytes"
 	"encoding/json"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -338,5 +339,371 @@ func TestCurateCmd_AlreadyCuratedErrors(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "already curated") {
 		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+// ── ADR 0016: project-scoped recall ──────────────────────────────────────────
+
+// insertProjectMemory mints a curated memory with the given project_id.
+func insertProjectMemory(t *testing.T, lib *librarian.Librarian, summary, text, projectId string) string {
+	t.Helper()
+	content, _ := json.Marshal(map[string]any{"text": text})
+	id, err := lib.InsertMemoryWithTags(librarian.InsertMemory{
+		Type:                   "semantic",
+		Summary:                summary,
+		Content:                string(content),
+		SessionID:              "s-cli-test",
+		ProjectId:              projectId,
+		ProvenanceActor:        "test",
+		ProvenanceSourceType:   "test",
+		ProvenanceTriggerEvent: "test",
+	}, []string{"cli"})
+	if err != nil {
+		t.Fatalf("InsertMemoryWithTags: %v", err)
+	}
+	curated := "curated"
+	if err := lib.UpdateOperational(id, librarian.OperationalUpdate{PromotionState: &curated}); err != nil {
+		t.Fatalf("UpdateOperational: %v", err)
+	}
+	return id
+}
+
+// chdirToBoundDir creates a tempdir with .mom-project.yaml (id=projectId)
+// and chdirs into it for the duration of the test.
+func chdirToBoundDir(t *testing.T, projectId string) string {
+	t.Helper()
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, ".mom-project.yaml"),
+		[]byte("version: \"1\"\nid: "+projectId+"\n"), 0o644); err != nil {
+		t.Fatalf("write bind file: %v", err)
+	}
+	orig, _ := os.Getwd()
+	if err := os.Chdir(dir); err != nil {
+		t.Fatalf("chdir: %v", err)
+	}
+	t.Cleanup(func() { _ = os.Chdir(orig) })
+	return dir
+}
+
+func runRecallTest(t *testing.T, query string) string {
+	t.Helper()
+	buf := new(bytes.Buffer)
+	recallCmd.SetOut(buf)
+	recallCmd.SetErr(buf)
+	if err := runRecall(recallCmd, []string{query}); err != nil {
+		t.Fatalf("runRecall: %v\noutput:\n%s", err, buf.String())
+	}
+	return buf.String()
+}
+
+// Default scope: cwd's project_id filters; other project's memories absent.
+func TestRecallCmd_DefaultScopesToCwdProject(t *testing.T) {
+	resetRecallFlags()
+	lib := openCentralTestLib(t)
+	alphaID := insertProjectMemory(t, lib, "alpha memory", "deploy alpha service", "alpha")
+	betaID := insertProjectMemory(t, lib, "beta memory", "deploy beta service", "beta")
+	chdirToBoundDir(t, "alpha")
+
+	out := runRecallTest(t, "deploy")
+	if !strings.Contains(out, alphaID) {
+		t.Errorf("expected alpha memory %s in output, got:\n%s", alphaID, out)
+	}
+	if strings.Contains(out, betaID) {
+		t.Errorf("beta memory %s should be scoped out, got:\n%s", betaID, out)
+	}
+}
+
+// --all disables scoping; both projects appear.
+func TestRecallCmd_AllFlagDisablesScope(t *testing.T) {
+	resetRecallFlags()
+	lib := openCentralTestLib(t)
+	alphaID := insertProjectMemory(t, lib, "alpha memory", "deploy alpha service", "alpha")
+	betaID := insertProjectMemory(t, lib, "beta memory", "deploy beta service", "beta")
+	chdirToBoundDir(t, "alpha")
+	recallAllProjects = true
+
+	out := runRecallTest(t, "deploy")
+	if !strings.Contains(out, alphaID) {
+		t.Errorf("--all should include alpha memory %s, got:\n%s", alphaID, out)
+	}
+	if !strings.Contains(out, betaID) {
+		t.Errorf("--all should include beta memory %s, got:\n%s", betaID, out)
+	}
+}
+
+// --project=foo overrides cwd resolution.
+func TestRecallCmd_ProjectFlagOverridesCwd(t *testing.T) {
+	resetRecallFlags()
+	lib := openCentralTestLib(t)
+	alphaID := insertProjectMemory(t, lib, "alpha memory", "deploy alpha service", "alpha")
+	betaID := insertProjectMemory(t, lib, "beta memory", "deploy beta service", "beta")
+	chdirToBoundDir(t, "alpha") // cwd says alpha
+	recallProject = "beta"      // but the flag wins
+
+	out := runRecallTest(t, "deploy")
+	if strings.Contains(out, alphaID) {
+		t.Errorf("--project=beta should exclude alpha %s, got:\n%s", alphaID, out)
+	}
+	if !strings.Contains(out, betaID) {
+		t.Errorf("--project=beta should include beta %s, got:\n%s", betaID, out)
+	}
+}
+
+// Unbound cwd → falls through to all-projects + prints stderr hint
+// mentioning /mom-project.
+func TestRecallCmd_UnboundCwdFallsThroughWithHint(t *testing.T) {
+	resetRecallFlags()
+	lib := openCentralTestLib(t)
+	alphaID := insertProjectMemory(t, lib, "alpha memory", "deploy alpha", "alpha")
+
+	dir := t.TempDir() // no bind file
+	orig, _ := os.Getwd()
+	if err := os.Chdir(dir); err != nil {
+		t.Fatalf("chdir: %v", err)
+	}
+	t.Cleanup(func() { _ = os.Chdir(orig) })
+
+	out := runRecallTest(t, "deploy")
+	if !strings.Contains(out, alphaID) {
+		t.Errorf("unbound cwd should fall through and include alpha %s, got:\n%s", alphaID, out)
+	}
+	if !strings.Contains(out, "/mom-project") {
+		t.Errorf("expected stderr hint mentioning /mom-project, got:\n%s", out)
+	}
+}
+
+// --strict-project excludes NULL project_id rows.
+func TestRecallCmd_StrictProjectExcludesNull(t *testing.T) {
+	resetRecallFlags()
+	lib := openCentralTestLib(t)
+	alphaID := insertProjectMemory(t, lib, "alpha memory", "deploy alpha", "alpha")
+	legacyID := insertProjectMemory(t, lib, "legacy memory", "deploy legacy", "")
+	chdirToBoundDir(t, "alpha")
+	recallStrictProject = true
+
+	out := runRecallTest(t, "deploy")
+	if !strings.Contains(out, alphaID) {
+		t.Errorf("strict should include alpha %s, got:\n%s", alphaID, out)
+	}
+	if strings.Contains(out, legacyID) {
+		t.Errorf("strict should exclude NULL %s, got:\n%s", legacyID, out)
+	}
+}
+
+// Cycle 7: When cwd has no .mom-project.yaml ancestor, status surfaces
+// a one-line nudge pointing at /mom-project (per ADR 0016 Q5).
+func TestStatusCmd_NudgesWhenCwdUnbound(t *testing.T) {
+	openCentralTestLib(t)
+
+	// Chdir to an unbound dir.
+	unbound := t.TempDir()
+	orig, _ := os.Getwd()
+	if err := os.Chdir(unbound); err != nil {
+		t.Fatalf("chdir: %v", err)
+	}
+	t.Cleanup(func() { _ = os.Chdir(orig) })
+
+	buf := new(bytes.Buffer)
+	statusCmd.SetOut(buf)
+	statusCmd.SetErr(buf)
+	if err := runStatus(statusCmd, nil); err != nil {
+		t.Fatalf("runStatus: %v", err)
+	}
+	out := buf.String()
+	if !strings.Contains(out, "/mom-project") {
+		t.Errorf("expected nudge mentioning /mom-project for unbound cwd, got:\n%s", out)
+	}
+}
+
+// Cycle 8: When cwd is bound, status reports the project id and stays quiet.
+func TestStatusCmd_ShowsProjectWhenBound(t *testing.T) {
+	openCentralTestLib(t)
+
+	bound := t.TempDir()
+	if err := os.WriteFile(filepath.Join(bound, ".mom-project.yaml"),
+		[]byte("version: \"1\"\nid: alpha\n"), 0o644); err != nil {
+		t.Fatalf("write bind file: %v", err)
+	}
+	orig, _ := os.Getwd()
+	if err := os.Chdir(bound); err != nil {
+		t.Fatalf("chdir: %v", err)
+	}
+	t.Cleanup(func() { _ = os.Chdir(orig) })
+
+	buf := new(bytes.Buffer)
+	statusCmd.SetOut(buf)
+	statusCmd.SetErr(buf)
+	if err := runStatus(statusCmd, nil); err != nil {
+		t.Fatalf("runStatus: %v", err)
+	}
+	out := buf.String()
+	if !strings.Contains(out, "alpha") {
+		t.Errorf("expected bound project id in output, got:\n%s", out)
+	}
+	if strings.Contains(out, "/mom-project") {
+		t.Errorf("bound cwd should NOT trigger the nudge, got:\n%s", out)
+	}
+}
+
+// ── #345 drafts filters (project / harness / session) ──
+
+// insertDraftFull inserts a draft with full provenance + project_id
+// control for the drafts-filter tests.
+func insertDraftFull(t *testing.T, lib *librarian.Librarian, summary, harness, sessionID, projectID string) string {
+	t.Helper()
+	content, _ := json.Marshal(map[string]any{"text": "draft body for " + summary})
+	id, err := lib.InsertMemoryWithTags(librarian.InsertMemory{
+		Type:                   "untyped",
+		Summary:                summary,
+		Content:                string(content),
+		SessionID:              sessionID,
+		ProjectId:              projectID,
+		ProvenanceActor:        harness,
+		ProvenanceSourceType:   "transcript-extraction",
+		ProvenanceTriggerEvent: "watcher",
+	}, []string{"cli"})
+	if err != nil {
+		t.Fatalf("InsertMemoryWithTags: %v", err)
+	}
+	return id
+}
+
+func runDraftsTest(t *testing.T) string {
+	t.Helper()
+	buf := new(bytes.Buffer)
+	draftsCmd.SetOut(buf)
+	draftsCmd.SetErr(buf)
+	if err := runDrafts(draftsCmd, nil); err != nil {
+		t.Fatalf("runDrafts: %v\noutput:\n%s", err, buf.String())
+	}
+	return buf.String()
+}
+
+// Cycle 5: --project foo scopes to the named project.
+func TestDraftsCmd_ProjectFlagScopes(t *testing.T) {
+	resetDraftsFlags()
+	lib := openCentralTestLib(t)
+	alphaID := insertDraftFull(t, lib, "alpha draft", "claude-code", "s-1", "alpha")
+	betaID := insertDraftFull(t, lib, "beta draft", "claude-code", "s-2", "beta")
+	draftsProject = "alpha"
+
+	out := runDraftsTest(t)
+	if !strings.Contains(out, alphaID) {
+		t.Errorf("expected alpha %s in output, got:\n%s", alphaID, out)
+	}
+	if strings.Contains(out, betaID) {
+		t.Errorf("beta %s should be excluded, got:\n%s", betaID, out)
+	}
+}
+
+// Cycle 6: --all-projects returns everything regardless of cwd.
+func TestDraftsCmd_AllProjectsFlag(t *testing.T) {
+	resetDraftsFlags()
+	lib := openCentralTestLib(t)
+	alphaID := insertDraftFull(t, lib, "alpha draft", "claude-code", "s-1", "alpha")
+	betaID := insertDraftFull(t, lib, "beta draft", "claude-code", "s-2", "beta")
+	chdirToBoundDir(t, "alpha")
+	draftsAllProjects = true
+
+	out := runDraftsTest(t)
+	if !strings.Contains(out, alphaID) || !strings.Contains(out, betaID) {
+		t.Errorf("--all-projects should include both, got:\n%s", out)
+	}
+}
+
+// Cycle 7: --harness codex filters by provenance_actor.
+func TestDraftsCmd_HarnessFlag(t *testing.T) {
+	resetDraftsFlags()
+	lib := openCentralTestLib(t)
+	codexID := insertDraftFull(t, lib, "codex draft", "codex", "s-c", "alpha")
+	claudeID := insertDraftFull(t, lib, "claude draft", "claude-code", "s-cl", "alpha")
+	draftsAllProjects = true // skip project filter
+	draftsHarness = "codex"
+
+	out := runDraftsTest(t)
+	if !strings.Contains(out, codexID) {
+		t.Errorf("expected codex draft %s", codexID)
+	}
+	if strings.Contains(out, claudeID) {
+		t.Errorf("claude draft %s should be excluded when --harness=codex", claudeID)
+	}
+}
+
+// Cycle 8: --session filters by exact session id.
+func TestDraftsCmd_SessionFlag(t *testing.T) {
+	resetDraftsFlags()
+	lib := openCentralTestLib(t)
+	wantID := insertDraftFull(t, lib, "target session", "claude-code", "s-target", "alpha")
+	otherID := insertDraftFull(t, lib, "other session", "claude-code", "s-other", "alpha")
+	draftsAllProjects = true
+	draftsSession = "s-target"
+
+	out := runDraftsTest(t)
+	if !strings.Contains(out, wantID) {
+		t.Errorf("expected target draft %s", wantID)
+	}
+	if strings.Contains(out, otherID) {
+		t.Errorf("other-session draft %s should be excluded", otherID)
+	}
+}
+
+// Cycle 9: default behaviour scopes to cwd-resolved project.
+func TestDraftsCmd_DefaultScopesToCwdProject(t *testing.T) {
+	resetDraftsFlags()
+	lib := openCentralTestLib(t)
+	alphaID := insertDraftFull(t, lib, "alpha draft", "claude-code", "s-1", "alpha")
+	betaID := insertDraftFull(t, lib, "beta draft", "claude-code", "s-2", "beta")
+	chdirToBoundDir(t, "alpha")
+
+	out := runDraftsTest(t)
+	if !strings.Contains(out, alphaID) {
+		t.Errorf("expected alpha %s in cwd-scoped output", alphaID)
+	}
+	if strings.Contains(out, betaID) {
+		t.Errorf("beta %s should be excluded when cwd is bound to alpha", betaID)
+	}
+}
+
+// Cycle 10: unbound cwd → falls through to all + stderr hint.
+func TestDraftsCmd_UnboundCwdFallsThroughWithHint(t *testing.T) {
+	resetDraftsFlags()
+	lib := openCentralTestLib(t)
+	alphaID := insertDraftFull(t, lib, "alpha draft", "claude-code", "s-1", "alpha")
+
+	unbound := t.TempDir()
+	orig, _ := os.Getwd()
+	if err := os.Chdir(unbound); err != nil {
+		t.Fatalf("chdir: %v", err)
+	}
+	t.Cleanup(func() { _ = os.Chdir(orig) })
+
+	out := runDraftsTest(t)
+	if !strings.Contains(out, alphaID) {
+		t.Errorf("unbound cwd should fall through and include alpha %s, got:\n%s", alphaID, out)
+	}
+	if !strings.Contains(out, "/mom-project") {
+		t.Errorf("expected stderr hint mentioning /mom-project, got:\n%s", out)
+	}
+}
+
+// Cycle 11: output shows Harness + Project columns.
+func TestDraftsCmd_OutputColumns(t *testing.T) {
+	resetDraftsFlags()
+	lib := openCentralTestLib(t)
+	insertDraftFull(t, lib, "alpha draft", "codex", "s-1", "alpha")
+	draftsAllProjects = true
+
+	out := runDraftsTest(t)
+	if !strings.Contains(out, "Harness") {
+		t.Errorf("expected Harness column header, got:\n%s", out)
+	}
+	if !strings.Contains(out, "Project") {
+		t.Errorf("expected Project column header, got:\n%s", out)
+	}
+	if !strings.Contains(out, "codex") {
+		t.Errorf("expected codex value in row, got:\n%s", out)
+	}
+	if !strings.Contains(out, "alpha") {
+		t.Errorf("expected alpha value in row, got:\n%s", out)
 	}
 }

@@ -3,6 +3,7 @@ package cmd
 import (
 	"bytes"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -233,5 +234,65 @@ func TestRunRecord_RejectsEmptyNormalisedTag(t *testing.T) {
 	rows, _ := lib.SearchMemories(librarian.SearchFilter{SessionID: "11111111-1111-4111-8111-111111111111", Limit: 10})
 	if len(rows) != 0 {
 		t.Errorf("got %d memories, want 0 (rejection must not persist)", len(rows))
+	}
+}
+
+// TestRunRecord_StampsProjectIdFromBindFile locks ADR 0016 wiring on
+// the CLI explicit-record path: when cwd has a .mom-project.yaml, the
+// persisted memory carries the declared id.
+func TestRunRecord_StampsProjectIdFromBindFile(t *testing.T) {
+	resetRecordFlags()
+	lib := openCentralVaultForTest(t)
+
+	// Bind cwd to project "alpha".
+	projectDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(projectDir, ".mom-project.yaml"),
+		[]byte("version: \"1\"\nid: alpha\n"), 0o644); err != nil {
+		t.Fatalf("write bind file: %v", err)
+	}
+	origDir, _ := os.Getwd()
+	if err := os.Chdir(projectDir); err != nil {
+		t.Fatalf("chdir: %v", err)
+	}
+	t.Cleanup(func() { _ = os.Chdir(origDir) })
+
+	recordSession = "11111111-1111-4111-8111-111111111111"
+	if _, err := runRecordWithStdin(t, "bound project capture"); err != nil {
+		t.Fatalf("runRecord: %v", err)
+	}
+
+	rows, _ := lib.SearchMemories(librarian.SearchFilter{SessionID: "11111111-1111-4111-8111-111111111111", Limit: 10})
+	if len(rows) != 1 {
+		t.Fatalf("got %d memories, want 1", len(rows))
+	}
+	if rows[0].Memory.ProjectId != "alpha" {
+		t.Errorf("ProjectId = %q, want alpha", rows[0].Memory.ProjectId)
+	}
+}
+
+// TestRunRecord_NullProjectIdWhenCwdUnbound: capture from an unbound cwd
+// persists with empty ProjectId (ADR 0016 default).
+func TestRunRecord_NullProjectIdWhenCwdUnbound(t *testing.T) {
+	resetRecordFlags()
+	lib := openCentralVaultForTest(t)
+
+	projectDir := t.TempDir() // no .mom-project.yaml
+	origDir, _ := os.Getwd()
+	if err := os.Chdir(projectDir); err != nil {
+		t.Fatalf("chdir: %v", err)
+	}
+	t.Cleanup(func() { _ = os.Chdir(origDir) })
+
+	recordSession = "22222222-2222-4222-8222-222222222222"
+	if _, err := runRecordWithStdin(t, "unbound capture"); err != nil {
+		t.Fatalf("runRecord: %v", err)
+	}
+
+	rows, _ := lib.SearchMemories(librarian.SearchFilter{SessionID: "22222222-2222-4222-8222-222222222222", Limit: 10})
+	if len(rows) != 1 {
+		t.Fatalf("got %d memories, want 1", len(rows))
+	}
+	if rows[0].Memory.ProjectId != "" {
+		t.Errorf("ProjectId = %q, want empty (cwd unbound)", rows[0].Memory.ProjectId)
 	}
 }

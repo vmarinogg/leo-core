@@ -13,9 +13,9 @@ func newStatusTestDir(t *testing.T) string {
 	t.Helper()
 	setCentralVault(t)
 	dir := t.TempDir()
-	leoDir := filepath.Join(dir, ".mom")
+	momDir := filepath.Join(dir, ".mom")
 
-	if err := os.MkdirAll(filepath.Join(leoDir, "memory"), 0755); err != nil {
+	if err := os.MkdirAll(filepath.Join(momDir, "memory"), 0755); err != nil {
 		t.Fatal(err)
 	}
 
@@ -29,18 +29,18 @@ user:
 communication:
   mode: concise
 `
-	if err := os.WriteFile(filepath.Join(leoDir, "config.yaml"), []byte(cfg), 0644); err != nil {
+	if err := os.WriteFile(filepath.Join(momDir, "config.yaml"), []byte(cfg), 0644); err != nil {
 		t.Fatal(err)
 	}
 
 	insertCentralMemory(t, "A test memory", "detail x", []string{"test"})
-	return leoDir
+	return momDir
 }
 
 // callMomStatus sends the mom_status tool call and returns the parsed JSON payload.
-func callMomStatusText(t *testing.T, leoDir string) string {
+func callMomStatusText(t *testing.T, momDir string) string {
 	t.Helper()
-	inW, outR, _ := runServer(t, leoDir)
+	inW, outR, _ := runServer(t, momDir)
 	defer inW.Close()
 
 	sendRequest(t, inW, "initialize", 1, map[string]any{"protocolVersion": "2024-11-05"})
@@ -75,8 +75,8 @@ func callMomStatusText(t *testing.T, leoDir string) string {
 }
 
 func TestMomStatusCompactShape(t *testing.T) {
-	leoDir := newStatusTestDir(t)
-	text := callMomStatusText(t, leoDir)
+	momDir := newStatusTestDir(t)
+	text := callMomStatusText(t, momDir)
 	if strings.Contains(text, "\n  ") {
 		t.Fatalf("mom_status should return compact JSON, got: %s", text)
 	}
@@ -158,7 +158,7 @@ func TestMomStatusCompactShape(t *testing.T) {
 		name, _ := s["command"].(string)
 		seen[name] = true
 	}
-	for _, want := range []string{"/mom-status", "/mom-recall", "/mom-wrap-up"} {
+	for _, want := range []string{"/mom-status", "/mom-recall", "/mom-project", "/mom-wrap-up"} {
 		if !seen[want] {
 			t.Fatalf("mom_status skills missing %s: %#v", want, skills)
 		}
@@ -177,8 +177,8 @@ func fmtString(v any) string {
 }
 
 func TestMomStatusInToolsList(t *testing.T) {
-	leoDir := newStatusTestDir(t)
-	inW, outR, _ := runServer(t, leoDir)
+	momDir := newStatusTestDir(t)
+	inW, outR, _ := runServer(t, momDir)
 	defer inW.Close()
 
 	sendRequest(t, inW, "initialize", 1, map[string]any{"protocolVersion": "2024-11-05"})

@@ -133,5 +133,15 @@ func Migrations() []vault.Migration {
 				END`,
 			},
 		},
+		{
+			// ADR 0016: project_id stamps the declared project identity
+			// (read from .mom-project.yaml). NULL = unknown/legacy.
+			// Substance-immutable per ADR 0011.
+			Version: 6,
+			Stmts: []string{
+				`ALTER TABLE memories ADD COLUMN project_id TEXT`,
+				`CREATE INDEX idx_memories_project ON memories(project_id)`,
+			},
+		},
 	}
 }

@@ -87,6 +87,7 @@ type bufferedTurn struct {
 	harness   string
 	provider  string
 	model     string
+	projectId string // ADR 0016 — stamped at capture, copied to memory row at persist
 }
 
 // New returns a Drafter bound to the given Librarian, configured with
@@ -182,6 +183,7 @@ func (d *Drafter) observeTurn(bus *herald.Bus, e herald.Event) error {
 		}
 	}
 
+	projectId, _ := e.Payload["project_id"].(string)
 	bt := bufferedTurn{
 		timestamp: extractCreatedAt(e.Payload),
 		role:      role,
@@ -190,6 +192,7 @@ func (d *Drafter) observeTurn(bus *herald.Bus, e herald.Event) error {
 		harness:   harness,
 		provider:  provider,
 		model:     model,
+		projectId: projectId,
 	}
 	if bt.timestamp.IsZero() {
 		bt.timestamp = d.now()
@@ -320,6 +323,7 @@ func (d *Drafter) persistChunk(bus *herald.Bus, sessionID string, turns []buffer
 	id, err := d.lib.InsertMemoryWithTags(librarian.InsertMemory{
 		Content:                string(contentBytes),
 		SessionID:              sessionID,
+		ProjectId:              last.projectId,
 		ProvenanceActor:        actor,
 		ProvenanceSourceType:   "transcript-extraction",
 		ProvenanceTriggerEvent: "watcher",
@@ -396,10 +400,12 @@ func (d *Drafter) processRecord(bus *herald.Bus, e herald.Event) error {
 		trigger = "record"
 	}
 	tags := tagsFromPayload(e.Payload["tags"])
+	projectId, _ := e.Payload["project_id"].(string)
 	id, err := d.lib.InsertMemoryWithTags(librarian.InsertMemory{
 		Content:                string(contentBytes),
 		Summary:                summary,
 		SessionID:              e.SessionID,
+		ProjectId:              projectId,
 		ProvenanceActor:        actor,
 		ProvenanceSourceType:   source,
 		ProvenanceTriggerEvent: trigger,

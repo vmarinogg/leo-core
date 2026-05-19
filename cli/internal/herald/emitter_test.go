@@ -57,7 +57,7 @@ func TestEmitSessionEvent(t *testing.T) {
 	e.EmitSessionEvent(SessionEvent{
 		SessionID:     "s-abc",
 		RepoID:        "mom",
-		Runtime:       "claude-code",
+		Harness:       "claude-code",
 		StartedAt:     "2026-04-18T12:00:00Z",
 		Trigger:       "normal",
 		TurnCount:     12,
@@ -152,13 +152,13 @@ func TestEmitConsumptionEvent(t *testing.T) {
 	assertEqual(t, "context", "prompt", got["context"])
 }
 
-func TestEmitRuntimeHealth(t *testing.T) {
+func TestEmitHarnessHealth(t *testing.T) {
 	e, telDir := newTmpEmitter(t)
 	day := time.Date(2026, 4, 18, 13, 0, 0, 0, time.UTC)
 	setNow(t, day)
 
-	e.EmitRuntimeHealth(RuntimeHealth{
-		Runtime:       "claude-code",
+	e.EmitHarnessHealth(HarnessHealth{
+		Harness:       "claude-code",
 		TS:            "2026-04-18T13:00:00Z",
 		WrapUpSuccess: true,
 		LatencyMS:     420,
@@ -169,7 +169,7 @@ func TestEmitRuntimeHealth(t *testing.T) {
 		t.Fatalf("expected 1 line, got %d", len(lines))
 	}
 	got := lines[0]
-	assertEqual(t, "kind", "RuntimeHealth", got["kind"])
+	assertEqual(t, "kind", "HarnessHealth", got["kind"])
 	assertEqual(t, "wrap_up_success", true, got["wrap_up_success"])
 	assertEqual(t, "latency_ms", float64(420), got["latency_ms"])
 }
@@ -181,11 +181,11 @@ func TestDayRotation(t *testing.T) {
 
 	day1 := time.Date(2026, 4, 18, 23, 59, 59, 0, time.UTC)
 	setNow(t, day1)
-	e.EmitRuntimeHealth(RuntimeHealth{Runtime: "claude-code", TS: "2026-04-18T23:59:59Z", WrapUpSuccess: true})
+	e.EmitHarnessHealth(HarnessHealth{Harness: "claude-code", TS: "2026-04-18T23:59:59Z", WrapUpSuccess: true})
 
 	day2 := time.Date(2026, 4, 19, 0, 0, 1, 0, time.UTC)
 	nowFn = func() time.Time { return day2 }
-	e.EmitRuntimeHealth(RuntimeHealth{Runtime: "claude-code", TS: "2026-04-19T00:00:01Z", WrapUpSuccess: true})
+	e.EmitHarnessHealth(HarnessHealth{Harness: "claude-code", TS: "2026-04-19T00:00:01Z", WrapUpSuccess: true})
 
 	file1 := filepath.Join(telDir, "2026-04-18.jsonl")
 	file2 := filepath.Join(telDir, "2026-04-19.jsonl")
@@ -215,7 +215,7 @@ func TestDisabledEmitter(t *testing.T) {
 	day := time.Date(2026, 4, 18, 12, 0, 0, 0, time.UTC)
 	setNow(t, day)
 
-	e.EmitRuntimeHealth(RuntimeHealth{Runtime: "claude-code", TS: "2026-04-18T12:00:00Z", WrapUpSuccess: true})
+	e.EmitHarnessHealth(HarnessHealth{Harness: "claude-code", TS: "2026-04-18T12:00:00Z", WrapUpSuccess: true})
 
 	telDir := filepath.Join(momDir, "logs")
 	entries, _ := os.ReadDir(telDir)
@@ -243,7 +243,7 @@ func TestReadOnlyDirNoPanic(t *testing.T) {
 	setNow(t, day)
 
 	// Must not panic.
-	e.EmitRuntimeHealth(RuntimeHealth{Runtime: "claude-code", TS: "2026-04-18T12:00:00Z", WrapUpSuccess: false})
+	e.EmitHarnessHealth(HarnessHealth{Harness: "claude-code", TS: "2026-04-18T12:00:00Z", WrapUpSuccess: false})
 }
 
 // ── Multiple events same day ─────────────────────────────────────────────────
@@ -253,9 +253,9 @@ func TestMultipleEventsAppend(t *testing.T) {
 	day := time.Date(2026, 4, 18, 12, 0, 0, 0, time.UTC)
 	setNow(t, day)
 
-	e.EmitRuntimeHealth(RuntimeHealth{Runtime: "r1", TS: "T", WrapUpSuccess: true})
-	e.EmitRuntimeHealth(RuntimeHealth{Runtime: "r2", TS: "T", WrapUpSuccess: false})
-	e.EmitSessionEvent(SessionEvent{SessionID: "s-1", Runtime: "claude-code", Trigger: "normal"})
+	e.EmitHarnessHealth(HarnessHealth{Harness: "r1", TS: "T", WrapUpSuccess: true})
+	e.EmitHarnessHealth(HarnessHealth{Harness: "r2", TS: "T", WrapUpSuccess: false})
+	e.EmitSessionEvent(SessionEvent{SessionID: "s-1", Harness: "claude-code", Trigger: "normal"})
 
 	lines := readLines(t, filepath.Join(telDir, "2026-04-18.jsonl"))
 	if len(lines) != 3 {

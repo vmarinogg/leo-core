@@ -15,6 +15,26 @@ func TestCodexAdapter_Name(t *testing.T) {
 	}
 }
 
+func TestCodexAdapter_DefaultTranscriptDir(t *testing.T) {
+	t.Run("uses CODEX_HOME when set", func(t *testing.T) {
+		t.Setenv("CODEX_HOME", "/custom/codex")
+		a := NewCodexAdapter("/tmp")
+		got := a.DefaultTranscriptDir()
+		want := "/custom/codex/sessions"
+		if got != want {
+			t.Errorf("DefaultTranscriptDir = %q, want %q", got, want)
+		}
+	})
+	t.Run("falls back to ~/.codex/sessions when CODEX_HOME unset", func(t *testing.T) {
+		t.Setenv("CODEX_HOME", "")
+		a := NewCodexAdapter("/tmp")
+		got := a.DefaultTranscriptDir()
+		if got != "~/.codex/sessions" {
+			t.Errorf("DefaultTranscriptDir = %q, want ~/.codex/sessions", got)
+		}
+	})
+}
+
 func TestCodexAdapter_DetectHarness(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
@@ -133,8 +153,9 @@ func TestCodexAdapter_RegisterHooks(t *testing.T) {
 	if hookEntry["type"] != "command" {
 		t.Errorf("expected type 'command', got %v", hookEntry["type"])
 	}
-	if hookEntry["command"] != "mom watch --sweep" {
-		t.Errorf("expected command 'mom watch --sweep', got %v", hookEntry["command"])
+	command, _ := hookEntry["command"].(string)
+	if !strings.Contains(command, "watch --sweep --global") {
+		t.Errorf("expected command to run global sweep, got %v", hookEntry["command"])
 	}
 }
 
@@ -168,8 +189,11 @@ func TestCodexAdapter_RegisterMCP(t *testing.T) {
 	if !strings.Contains(toml, "command = ") {
 		t.Error("config.toml missing command entry for mom")
 	}
-	if !strings.Contains(toml, "codex_hooks = true") {
-		t.Error("config.toml missing codex_hooks feature flag")
+	if !strings.Contains(toml, "hooks = true") {
+		t.Error("config.toml missing hooks feature flag")
+	}
+	if strings.Contains(toml, "codex_hooks") {
+		t.Error("config.toml should not use deprecated codex_hooks feature flag")
 	}
 }
 
@@ -187,9 +211,54 @@ func TestCodexAdapter_RegisterMCP_Idempotent(t *testing.T) {
 	if count != 1 {
 		t.Errorf("expected 1 [mcp_servers.mom] section, got %d", count)
 	}
-	count = strings.Count(content, "codex_hooks")
+	count = strings.Count(content, "hooks = true")
 	if count != 1 {
-		t.Errorf("expected 1 codex_hooks entry, got %d", count)
+		t.Errorf("expected 1 hooks entry, got %d", count)
+	}
+	if strings.Contains(content, "codex_hooks") {
+		t.Error("config.toml should not use deprecated codex_hooks feature flag")
+	}
+}
+
+func TestCodexAdapter_RegisterMCP_NormalizesDuplicateFeaturesBlocks(t *testing.T) {
+	dir := t.TempDir()
+	codexDir := filepath.Join(dir, ".codex")
+	if err := os.MkdirAll(codexDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	existing := `[projects."/some/path"]
+trust_level = "trusted"
+
+[features]
+codex_hooks = true
+
+[hooks.state]
+
+[features]
+hooks = true
+`
+	if err := os.WriteFile(filepath.Join(codexDir, "config.toml"), []byte(existing), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	a := NewCodexAdapter(dir)
+	if err := a.RegisterMCP(); err != nil {
+		t.Fatalf("RegisterMCP failed: %v", err)
+	}
+
+	data, _ := os.ReadFile(filepath.Join(codexDir, "config.toml"))
+	content := string(data)
+	if count := strings.Count(content, "[features]"); count != 1 {
+		t.Fatalf("expected one [features] block, got %d:\n%s", count, content)
+	}
+	if count := strings.Count(content, "hooks = true"); count != 1 {
+		t.Fatalf("expected one hooks flag, got %d:\n%s", count, content)
+	}
+	if strings.Contains(content, "codex_hooks") {
+		t.Fatalf("deprecated codex_hooks should be removed:\n%s", content)
+	}
+	if !strings.Contains(content, "[hooks.state]") {
+		t.Fatalf("unrelated TOML sections should be preserved:\n%s", content)
 	}
 }
 
@@ -252,5 +321,102 @@ func TestCodexAdapter_NoIdentity(t *testing.T) {
 	content, _ := os.ReadFile(filepath.Join(dir, "AGENTS.md"))
 	if !strings.Contains(string(content), "You are MOM") {
 		t.Error("should have fallback identity")
+	}
+}
+
+// TestCodexAdapter_RegisterGlobalHooks_WritesToHomeCodexDir locks the
+// global-install contract: mom init --harnesses codex must drop
+// hooks.json at ~/.codex/ so Codex Desktop fires `mom watch --sweep --global`
+// after each Cascade response. Without this, only project-local
+// inits get the hook wired.
+func TestCodexAdapter_RegisterGlobalHooks_WritesToHomeCodexDir(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("CODEX_HOME", "")
+	a := NewCodexAdapter("/tmp/unused-project-root")
+
+	if err := a.RegisterGlobalHooks(); err != nil {
+		t.Fatalf("RegisterGlobalHooks: %v", err)
+	}
+
+	hooksPath := filepath.Join(home, ".codex", "hooks.json")
+	data, err := os.ReadFile(hooksPath)
+	if err != nil {
+		t.Fatalf("reading global hooks.json: %v", err)
+	}
+	var root map[string]any
+	if err := json.Unmarshal(data, &root); err != nil {
+		t.Fatalf("parse hooks.json: %v", err)
+	}
+	hooks, ok := root["hooks"].(map[string]any)
+	if !ok {
+		t.Fatal("missing top-level 'hooks' key")
+	}
+	stop, ok := hooks["Stop"].([]any)
+	if !ok || len(stop) == 0 {
+		t.Fatal("missing Stop event")
+	}
+	group := stop[0].(map[string]any)
+	inner := group["hooks"].([]any)
+	entry := inner[0].(map[string]any)
+	command, _ := entry["command"].(string)
+	if !strings.Contains(command, "watch --sweep --global") {
+		t.Errorf("Stop hook command = %v, want global sweep", entry["command"])
+	}
+}
+
+// CODEX_HOME override puts the hooks.json under the override path.
+func TestCodexAdapter_RegisterGlobalHooks_HonorsCodexHome(t *testing.T) {
+	codexHome := t.TempDir()
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("CODEX_HOME", codexHome)
+	a := NewCodexAdapter("/tmp/unused")
+
+	if err := a.RegisterGlobalHooks(); err != nil {
+		t.Fatalf("RegisterGlobalHooks: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(codexHome, "hooks.json")); err != nil {
+		t.Errorf("expected hooks.json under CODEX_HOME, got: %v", err)
+	}
+}
+
+func TestCodexAdapter_RegisterMCP_RefreshesStaleCommand(t *testing.T) {
+	dir := t.TempDir()
+	codexDir := filepath.Join(dir, ".codex")
+	if err := os.MkdirAll(codexDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	existing := `[mcp_servers.mom]
+command = "/tmp/mom-dev"
+args = ["serve", "mcp"]
+
+[mcp_servers.mom.env]
+MOM_PROJECT_DIR = "/private/tmp/stale"
+
+[features]
+hooks = true
+`
+	if err := os.WriteFile(filepath.Join(codexDir, "config.toml"), []byte(existing), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	a := NewCodexAdapter(dir)
+	if err := a.RegisterMCP(); err != nil {
+		t.Fatalf("RegisterMCP failed: %v", err)
+	}
+
+	data, _ := os.ReadFile(filepath.Join(codexDir, "config.toml"))
+	content := string(data)
+	if strings.Contains(content, "/tmp/mom-dev") {
+		t.Fatalf("stale command path should be replaced:\n%s", content)
+	}
+	if !strings.Contains(content, `command = "mom"`) {
+		t.Fatalf("canonical command should be \"mom\":\n%s", content)
+	}
+	if strings.Contains(content, "MOM_PROJECT_DIR") {
+		t.Fatalf("stale [mcp_servers.mom.env] should be dropped:\n%s", content)
+	}
+	if count := strings.Count(content, "[mcp_servers.mom]"); count != 1 {
+		t.Fatalf("expected exactly one [mcp_servers.mom] block, got %d:\n%s", count, content)
 	}
 }

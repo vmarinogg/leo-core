@@ -31,7 +31,7 @@ const fullDocJSON = `{
 	"classification": "INTERNAL",
 	"compartments": {"project": ["alpha", "beta"], "department": ["engineering"]},
 	"provenance": {
-		"runtime": "claude-code",
+		"harness": "claude-code",
 		"trigger_event": "session.end",
 		"commit_sha": "deadbeef",
 		"raw_exhaust_ref": ".mom/raw/2026-04-13.jsonl"
@@ -135,7 +135,7 @@ func TestFullDoc_RoundTrip(t *testing.T) {
 	if len(doc2.Compartments["project"]) != 2 {
 		t.Errorf("compartments[project] mismatch: got %v", doc2.Compartments["project"])
 	}
-	if doc2.Provenance == nil || doc2.Provenance.Runtime != "claude-code" {
+	if doc2.Provenance == nil || doc2.Provenance.Harness != "claude-code" {
 		t.Errorf("provenance.runtime mismatch: got %v", doc2.Provenance)
 	}
 	if doc2.Provenance.RawExhaustRef != ".mom/raw/2026-04-13.jsonl" {
@@ -291,7 +291,7 @@ func TestNewDoc_WriteEmitsFields(t *testing.T) {
 		Classification: "INTERNAL",
 		Compartments:   map[string][]string{},
 		Provenance: &Provenance{
-			Runtime:      "claude-code",
+			Harness:      "claude-code",
 			TriggerEvent: "session.end",
 		},
 		Landmark:        false,
@@ -323,8 +323,8 @@ func TestNewDoc_WriteEmitsFields(t *testing.T) {
 	if !ok {
 		t.Fatal("provenance is not an object")
 	}
-	if prov["runtime"] != "claude-code" {
-		t.Errorf("provenance.runtime mismatch: got %v", prov["runtime"])
+	if prov["harness"] != "claude-code" {
+		t.Errorf("provenance.harness mismatch: got %v", prov["harness"])
 	}
 }
 

@@ -1,6 +1,6 @@
 // Package mcp implements a minimal Model Context Protocol server over stdio.
 // It exposes MOM memories as MCP tools and resources, allowing any MCP-aware
-// runtime (Claude Code, Cursor, Cline, …) to query and write memories without
+// harness (Claude Code, Cursor, Cline, …) to query and write memories without
 // adapter code.
 //
 // Transport: JSON-RPC 2.0, newline-delimited, over stdin/stdout.

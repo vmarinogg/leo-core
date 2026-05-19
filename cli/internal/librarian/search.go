@@ -25,6 +25,15 @@ type SearchFilter struct {
 	SessionID      string
 	PromotionState string
 	Limit          int
+
+	// ProjectId restricts results to the named project (per ADR 0016).
+	// Empty means no project filter — all projects are considered.
+	ProjectId string
+	// StrictProject controls handling of NULL project_id rows when
+	// ProjectId is set. Zero value (false) = NULL rows are INCLUDED (the
+	// ADR 0016 default; legacy memories remain findable). Setting true
+	// excludes NULL rows, used by `mom recall --strict-project`.
+	StrictProject bool
 }
 
 // SearchedMemory is a Memory plus the BM25 score from the matching
@@ -106,9 +115,22 @@ func (l *Librarian) SearchMemories(f SearchFilter) ([]SearchedMemory, error) {
 		wheres = append(wheres, "m.promotion_state = ?")
 		args = append(args, f.PromotionState)
 	}
+	if f.ProjectId != "" {
+		// ADR 0016: NULL project_id is "unknown / legacy". By default we
+		// include those rows in scoped queries so the foundation migration
+		// does not silently hide pre-existing memory. `StrictProject` flips
+		// to exclude.
+		if f.StrictProject {
+			wheres = append(wheres, "m.project_id = ?")
+			args = append(args, f.ProjectId)
+		} else {
+			wheres = append(wheres, "(m.project_id = ? OR m.project_id IS NULL)")
+			args = append(args, f.ProjectId)
+		}
+	}
 
 	sb.WriteString(`SELECT m.id, m.type, m.summary, m.content, m.created_at, m.session_id,
-		m.provenance_actor, m.provenance_source_type, m.provenance_trigger_event,
+		m.project_id, m.provenance_actor, m.provenance_source_type, m.provenance_trigger_event,
 		m.promotion_state, m.landmark, m.centrality_score`)
 	if hasFTS {
 		sb.WriteString(`, bm25(memories_fts, 0, 2, 10)`)
@@ -133,19 +155,20 @@ func (l *Librarian) SearchMemories(f SearchFilter) ([]SearchedMemory, error) {
 	err := l.v.Query(sb.String(), args, func(rs *sql.Rows) error {
 		for rs.Next() {
 			var (
-				sm                                       SearchedMemory
-				summary, actor, sourceType, triggerEvent sql.NullString
-				createdAtStr                             string
-				landmarkInt                              int64
+				sm                                                  SearchedMemory
+				summary, projectId, actor, sourceType, triggerEvent sql.NullString
+				createdAtStr                                        string
+				landmarkInt                                         int64
 			)
 			if err := rs.Scan(
 				&sm.ID, &sm.Type, &summary, &sm.Content, &createdAtStr, &sm.SessionID,
-				&actor, &sourceType, &triggerEvent,
+				&projectId, &actor, &sourceType, &triggerEvent,
 				&sm.PromotionState, &landmarkInt, &sm.CentralityScore, &sm.Score,
 			); err != nil {
 				return err
 			}
 			sm.Summary = summary.String
+			sm.ProjectId = projectId.String
 			sm.ProvenanceActor = actor.String
 			sm.ProvenanceSourceType = sourceType.String
 			sm.ProvenanceTriggerEvent = triggerEvent.String
@@ -165,34 +188,75 @@ func (l *Librarian) SearchMemories(f SearchFilter) ([]SearchedMemory, error) {
 	return out, nil
 }
 
-// RecentDrafts returns newest draft memories created within the given window.
-func (l *Librarian) RecentDrafts(since time.Duration, limit int) ([]Memory, error) {
+// RecentDraftsFilter narrows a RecentDrafts call. Since is required;
+// every other field is optional and defaults to "no filter on this
+// dimension." StrictProject defaults to false (matches ADR 0016: NULL
+// project_id rows are INCLUDED in scoped queries by default so legacy
+// drafts stay findable).
+type RecentDraftsFilter struct {
+	Since           time.Duration
+	Limit           int
+	ProjectId       string
+	StrictProject   bool
+	SessionID       string
+	ProvenanceActor string // exact match (e.g. "claude-code", "codex", "pi")
+}
+
+// RecentDrafts returns newest draft memories created within the given
+// window, optionally narrowed by project / session / harness. Used by
+// `mom drafts` to feed the /mom-wrap-up flow.
+func (l *Librarian) RecentDrafts(f RecentDraftsFilter) ([]Memory, error) {
+	limit := f.Limit
 	if limit <= 0 {
 		limit = 50
 	}
-	cutoff := formatTime(l.now().Add(-since))
+	cutoff := formatTime(l.now().Add(-f.Since))
+
+	wheres := []string{"promotion_state = 'draft'", "created_at >= ?"}
+	args := []any{cutoff}
+	if f.ProjectId != "" {
+		if f.StrictProject {
+			wheres = append(wheres, "project_id = ?")
+			args = append(args, f.ProjectId)
+		} else {
+			wheres = append(wheres, "(project_id = ? OR project_id IS NULL)")
+			args = append(args, f.ProjectId)
+		}
+	}
+	if f.SessionID != "" {
+		wheres = append(wheres, "session_id = ?")
+		args = append(args, f.SessionID)
+	}
+	if f.ProvenanceActor != "" {
+		wheres = append(wheres, "provenance_actor = ?")
+		args = append(args, f.ProvenanceActor)
+	}
+	args = append(args, limit)
+
+	query := `SELECT id, type, summary, content, created_at, session_id,
+		        provenance_actor, provenance_source_type, provenance_trigger_event,
+		        promotion_state, landmark, centrality_score, project_id
+		 FROM memories
+		 WHERE ` + strings.Join(wheres, " AND ") + `
+		 ORDER BY created_at DESC, id DESC
+		 LIMIT ?`
+
 	out := []Memory{}
 	err := l.v.Query(
-		`SELECT id, type, summary, content, created_at, session_id,
-		        provenance_actor, provenance_source_type, provenance_trigger_event,
-		        promotion_state, landmark, centrality_score
-		 FROM memories
-		 WHERE promotion_state = 'draft' AND created_at >= ?
-		 ORDER BY created_at DESC, id DESC
-		 LIMIT ?`,
-		[]any{cutoff, limit},
+		query,
+		args,
 		func(rs *sql.Rows) error {
 			for rs.Next() {
 				var (
-					m                                        Memory
-					summary, actor, sourceType, triggerEvent sql.NullString
-					createdAtStr                             string
-					landmarkInt                              int64
+					m                                                   Memory
+					summary, actor, sourceType, triggerEvent, projectId sql.NullString
+					createdAtStr                                        string
+					landmarkInt                                         int64
 				)
 				if err := rs.Scan(
 					&m.ID, &m.Type, &summary, &m.Content, &createdAtStr, &m.SessionID,
 					&actor, &sourceType, &triggerEvent,
-					&m.PromotionState, &landmarkInt, &m.CentralityScore,
+					&m.PromotionState, &landmarkInt, &m.CentralityScore, &projectId,
 				); err != nil {
 					return err
 				}
@@ -201,6 +265,7 @@ func (l *Librarian) RecentDrafts(since time.Duration, limit int) ([]Memory, erro
 				m.ProvenanceSourceType = sourceType.String
 				m.ProvenanceTriggerEvent = triggerEvent.String
 				m.Landmark = landmarkInt != 0
+				m.ProjectId = projectId.String
 				t, err := parseTime(createdAtStr)
 				if err != nil {
 					return fmt.Errorf("parse created_at %q: %w", createdAtStr, err)

@@ -11,6 +11,7 @@ import (
 	"github.com/momhq/mom/cli/internal/adapters/harness"
 	"github.com/momhq/mom/cli/internal/adapters/storage"
 	"github.com/momhq/mom/cli/internal/config"
+	"github.com/momhq/mom/cli/internal/project"
 	"github.com/momhq/mom/cli/internal/ux"
 	"github.com/spf13/cobra"
 	"gopkg.in/yaml.v3"
@@ -22,7 +23,8 @@ var upgradeCmd = &cobra.Command{
 	Long: `Upgrades core infrastructure (schema and harness files)
 to match the installed mom binary. Your documents in .mom/memory/ are never touched.
 
-Legacy central import scans $HOME and asks before writing.`,
+Users on versions older than v0.30 must first upgrade to v0.30 and run
+mom upgrade there before upgrading to v0.40 or newer.`,
 	RunE: runUpgrade,
 }
 
@@ -36,22 +38,47 @@ type upgradeAction struct {
 	desc   string
 }
 
+func errPreV030Layout(layout string) error {
+	return fmt.Errorf("pre-v0.30 layout %s is no longer migrated by this MOM version; upgrade to MOM v0.30 first, run `mom upgrade`, then upgrade to v0.40+", layout)
+}
+
 func runUpgrade(cmd *cobra.Command, args []string) error {
 	dryRun, _ := cmd.Flags().GetBool("dry-run")
 
 	momDir, err := findMomDir()
 	if err != nil {
+		cwd, cwdErr := os.Getwd()
+		if cwdErr == nil {
+			if _, statErr := os.Stat(filepath.Join(cwd, ".leo")); statErr == nil {
+				return errPreV030Layout(".leo/")
+			}
+		}
 		return err
 	}
 
 	projectRoot := filepath.Dir(momDir)
 
-	// Upgrade the root scope.
-	if err := upgradeSingleDir(cmd, projectRoot, dryRun); err != nil {
-		return err
-	}
+	return upgradeSingleDir(cmd, projectRoot, dryRun)
+}
 
-	return runCentralImport(cmd, dryRun)
+// resolveDaemonProjectRoot picks the directory to register with the global
+// watch daemon. With the v0.40 central vault, momDir is always ~/.mom and
+// filepath.Dir(momDir) resolves to $HOME — never a real project. Fall back
+// to the cwd / nearest .mom-project.yaml ancestor so `mom upgrade` registers
+// the project the user actually invoked it from.
+func resolveDaemonProjectRoot(momDir, fallback string) string {
+	home, err := os.UserHomeDir()
+	if err != nil || filepath.Clean(momDir) != filepath.Join(home, ".mom") {
+		return fallback
+	}
+	cwd, err := os.Getwd()
+	if err != nil {
+		return fallback
+	}
+	if _, source, found, _ := project.ResolveProject(cwd); found && source != "" {
+		return filepath.Dir(source)
+	}
+	return cwd
 }
 
 // upgradeSingleDir runs the full upgrade pipeline on a single .mom/ directory.
@@ -61,12 +88,7 @@ func upgradeSingleDir(cmd *cobra.Command, projectRoot string, dryRun bool) error
 
 	// Check if this dir has a .mom/ at all.
 	if _, err := os.Stat(momDir); os.IsNotExist(err) {
-		// Try .leo/ fallback.
-		leoDir := filepath.Join(projectRoot, ".leo")
-		if _, err := os.Stat(leoDir); os.IsNotExist(err) {
-			return nil // not a MOM project, skip silently
-		}
-		momDir = leoDir
+		return nil // not a MOM project, skip silently
 	}
 
 	if !isMomProject(momDir) {
@@ -78,45 +100,16 @@ func upgradeSingleDir(cmd *cobra.Command, projectRoot string, dryRun bool) error
 		actions = append(actions, upgradeAction{symbol, desc})
 	}
 
-	// ── Phase -1: Migrate .leo/ → .mom/ legacy path ─────────────────────────
-	isLegacyLeoDir := filepath.Base(momDir) == ".leo"
-	if isLegacyLeoDir {
-		if dryRun {
-			addAction("⚠", fmt.Sprintf("would migrate %s → %s (run without --dry-run)", momDir, filepath.Join(projectRoot, ".mom")))
-		} else {
-			pathActions, err := migrateLeoToMom(momDir)
-			if err != nil {
-				return fmt.Errorf("path migration: %w", err)
-			}
-			for _, a := range pathActions {
-				addAction(a.symbol, a.desc)
-			}
-			momDir = filepath.Join(projectRoot, ".mom")
-		}
-	}
-
-	leoDir := momDir
-
-	// ── Phase 0: Migrate legacy kb/ layout to flat layout ───────────────────
-	if !dryRun {
-		layoutActions, err := migrateKBLayout(leoDir)
-		if err != nil {
-			return fmt.Errorf("migrating layout: %w", err)
-		}
-		for _, a := range layoutActions {
-			addAction(a.symbol, a.desc)
-		}
-	} else {
-		if _, statErr := os.Stat(filepath.Join(leoDir, "kb")); statErr == nil {
-			addAction("⚠", "legacy .mom/kb/ detected — would flatten to new layout (run without --dry-run)")
-		}
+	if _, statErr := os.Stat(filepath.Join(momDir, "kb")); statErr == nil {
+		return errPreV030Layout(".mom/kb/")
 	}
 
 	// ── Phase 1: Load, migrate, and persist config ───────────────────────────
-	cfg, err := config.Load(leoDir)
+	cfg, err := config.Load(momDir)
 	if err != nil {
 		return fmt.Errorf("loading config: %w", err)
 	}
+	pruneRetiredHarnesses(cfg, addAction)
 
 	var phase1Err error
 	doPhase1 := func() {
@@ -125,18 +118,18 @@ func upgradeSingleDir(cmd *cobra.Command, projectRoot string, dryRun bool) error
 			addAction("✔", "communication.mode set to concise (default)")
 		}
 
-		if err := config.Save(leoDir, cfg); err != nil {
+		if err := config.Save(momDir, cfg); err != nil {
 			phase1Err = fmt.Errorf("saving config: %w", err)
 			return
 		}
 		addAction("✔", "config.yaml migrated to latest format")
 
-		if scrubbed, changed, err := scrubDeadConfigFields(leoDir); err != nil {
+		if scrubbed, changed, err := scrubDeadConfigFields(momDir); err != nil {
 			phase1Err = fmt.Errorf("scrubbing dead config fields: %w", err)
 			return
 		} else if changed {
 			if !dryRun {
-				configPath := filepath.Join(leoDir, "config.yaml")
+				configPath := filepath.Join(momDir, "config.yaml")
 				if err := os.WriteFile(configPath, scrubbed, 0644); err != nil {
 					phase1Err = fmt.Errorf("writing scrubbed config: %w", err)
 					return
@@ -146,12 +139,12 @@ func upgradeSingleDir(cmd *cobra.Command, projectRoot string, dryRun bool) error
 		}
 
 		newDirs := []string{
-			filepath.Join(leoDir, "memory"),
-			filepath.Join(leoDir, "constraints"),
-			filepath.Join(leoDir, "skills"),
-			filepath.Join(leoDir, "logs"),
-			filepath.Join(leoDir, "cache"),
-			filepath.Join(leoDir, "raw"),
+			filepath.Join(momDir, "memory"),
+			filepath.Join(momDir, "constraints"),
+			filepath.Join(momDir, "skills"),
+			filepath.Join(momDir, "logs"),
+			filepath.Join(momDir, "cache"),
+			filepath.Join(momDir, "raw"),
 		}
 		for _, d := range newDirs {
 			if _, err := os.Stat(d); os.IsNotExist(err) {
@@ -166,7 +159,7 @@ func upgradeSingleDir(cmd *cobra.Command, projectRoot string, dryRun bool) error
 			}
 		}
 
-		profilesDir := filepath.Join(leoDir, "profiles")
+		profilesDir := filepath.Join(momDir, "profiles")
 		if _, statErr := os.Stat(profilesDir); statErr == nil {
 			if !dryRun {
 				if err := os.RemoveAll(profilesDir); err != nil {
@@ -189,7 +182,7 @@ func upgradeSingleDir(cmd *cobra.Command, projectRoot string, dryRun bool) error
 			"metrics-collection",
 			"propagation",
 		}
-		constraintsDir := filepath.Join(leoDir, "constraints")
+		constraintsDir := filepath.Join(momDir, "constraints")
 		for _, name := range retiredConstraints {
 			path := filepath.Join(constraintsDir, name+".json")
 			if _, statErr := os.Stat(path); statErr == nil {
@@ -204,7 +197,7 @@ func upgradeSingleDir(cmd *cobra.Command, projectRoot string, dryRun bool) error
 		}
 
 		retiredSkills := []string{"task-intake"}
-		skillsDir := filepath.Join(leoDir, "skills")
+		skillsDir := filepath.Join(momDir, "skills")
 		for _, name := range retiredSkills {
 			path := filepath.Join(skillsDir, name+".json")
 			if _, statErr := os.Stat(path); statErr == nil {
@@ -218,7 +211,7 @@ func upgradeSingleDir(cmd *cobra.Command, projectRoot string, dryRun bool) error
 			}
 		}
 
-		removedGenerated, err := removeKnownGeneratedCentralDocs(leoDir, dryRun)
+		removedGenerated, err := removeKnownGeneratedCentralDocs(momDir, dryRun)
 		if err != nil {
 			phase1Err = err
 			return
@@ -261,7 +254,7 @@ func upgradeSingleDir(cmd *cobra.Command, projectRoot string, dryRun bool) error
 			phase2Err = fmt.Errorf("reading embedded schema: %w", err)
 			return
 		}
-		schemaPath := filepath.Join(leoDir, "schema.json")
+		schemaPath := filepath.Join(momDir, "schema.json")
 		if changed := fileChanged(schemaPath, schemaData); changed {
 			if !dryRun {
 				if err := os.WriteFile(schemaPath, schemaData, 0644); err != nil {
@@ -272,7 +265,7 @@ func upgradeSingleDir(cmd *cobra.Command, projectRoot string, dryRun bool) error
 			addAction("✔", "schema.json updated")
 		}
 
-		identityPath := filepath.Join(leoDir, "identity.json")
+		identityPath := filepath.Join(momDir, "identity.json")
 		identityBytes := []byte(defaultIdentity())
 		if changed := fileChanged(identityPath, identityBytes); changed {
 			if !dryRun {
@@ -284,7 +277,7 @@ func upgradeSingleDir(cmd *cobra.Command, projectRoot string, dryRun bool) error
 			addAction("✔", "identity.json updated")
 		}
 
-		docsDir := filepath.Join(leoDir, "memory")
+		docsDir := filepath.Join(momDir, "memory")
 		migrated := migrateMetricDocs(docsDir, dryRun)
 		for _, docID := range migrated {
 			addAction("✔", fmt.Sprintf("doc %s migrated metric → session-log", docID))
@@ -322,7 +315,7 @@ func upgradeSingleDir(cmd *cobra.Command, projectRoot string, dryRun bool) error
 	var phase3Err error
 	doPhase3 := func() {
 		if !dryRun {
-			if err := regenerateHarnessFiles(projectRoot, leoDir, cfg); err != nil {
+			if err := regenerateHarnessFiles(projectRoot, momDir, cfg); err != nil {
 				phase3Err = err
 				return
 			}
@@ -333,9 +326,17 @@ func upgradeSingleDir(cmd *cobra.Command, projectRoot string, dryRun bool) error
 
 		installSkillsDuringUpgrade(cfg.EnabledHarnesses(), dryRun, addAction)
 
+		// Refresh harness-native extensions (currently just Pi). Skills.sh
+		// keeps SKILL.md in sync for every harness; pi additionally ships
+		// the deeper pi-mom extension via the Pi marketplace, so we must
+		// refresh that on every upgrade or the two sources drift.
+		if !dryRun {
+			refreshHarnessExtensionsDuringUpgrade(cfg.EnabledHarnesses(), projectRoot, addAction)
+		}
+
 		// Rebuild SQLite search index from JSON files.
 		if !dryRun {
-			idx := storage.NewIndexedAdapter(leoDir)
+			idx := storage.NewIndexedAdapter(momDir)
 			if err := idx.Reindex(); err != nil {
 				addAction("⚠", fmt.Sprintf("reindex: %v", err))
 			} else {
@@ -362,8 +363,9 @@ func upgradeSingleDir(cmd *cobra.Command, projectRoot string, dryRun bool) error
 	}
 
 	// ── Phase 3.5: Register with global watch daemon ────────────────────────
+	daemonProjectRoot := resolveDaemonProjectRoot(momDir, projectRoot)
 	if !dryRun {
-		if err := ensureGlobalDaemon(projectRoot, leoDir, cfg.EnabledHarnesses()); err != nil {
+		if err := ensureGlobalDaemon(daemonProjectRoot, momDir, cfg.EnabledHarnesses()); err != nil {
 			addAction("⚠", fmt.Sprintf("watch daemon: %v", err))
 		} else {
 			addAction("✔", "watch daemon installed/updated")
@@ -405,11 +407,35 @@ func upgradeSingleDir(cmd *cobra.Command, projectRoot string, dryRun bool) error
 	return nil
 }
 
+// refreshHarnessExtensionsDuringUpgrade re-runs GlobalExtensionInstaller for
+// every enabled harness that implements it. Today this means re-running
+// `pi install npm:pi-mom` so the deeper Pi extension stays in lockstep with
+// the skills.sh-installed SKILL.md files.
+func refreshHarnessExtensionsDuringUpgrade(harnesses []string, projectRoot string, addAction func(string, string)) {
+	reg := harness.NewRegistry(projectRoot)
+	for _, h := range harnesses {
+		adapter, ok := reg.Get(h)
+		if !ok {
+			continue
+		}
+		ext, ok := adapter.(harness.GlobalExtensionInstaller)
+		if !ok {
+			continue
+		}
+		if err := ext.RegisterGlobalExtension(); err != nil {
+			addAction("⚠", fmt.Sprintf("%s extension refresh: %v", h, err))
+			continue
+		}
+		addAction("✔", fmt.Sprintf("%s extension refreshed", h))
+	}
+}
+
 func installSkillsDuringUpgrade(harnesses []string, dryRun bool, addAction func(string, string)) {
 	for _, h := range harnesses {
 		agent, ok := skillsAgentForHarness(h)
 		if !ok {
-			addAction("⚠", fmt.Sprintf("skills: unsupported harness %s", h))
+			// Pi installs its skills via the pi-mom extension; other
+			// harnesses not supported by skills.sh stay silent.
 			continue
 		}
 		args, command := skillsInstallCommand(agent)
@@ -436,10 +462,10 @@ func fileChanged(path string, data []byte) bool {
 	return string(existing) != string(data)
 }
 
-func removeKnownGeneratedCentralDocs(leoDir string, dryRun bool) ([]upgradeAction, error) {
+func removeKnownGeneratedCentralDocs(momDir string, dryRun bool) ([]upgradeAction, error) {
 	var actions []upgradeAction
 	for _, doc := range knownGeneratedCentralDocs {
-		path := filepath.Join(leoDir, doc.DirName, doc.Name+".json")
+		path := filepath.Join(momDir, doc.DirName, doc.Name+".json")
 		if _, statErr := os.Stat(path); statErr != nil {
 			if os.IsNotExist(statErr) {
 				continue
@@ -457,6 +483,10 @@ func removeKnownGeneratedCentralDocs(leoDir string, dryRun bool) ([]upgradeActio
 }
 
 func removeDeadHookCommands(projectRoot string, dryRun bool) ([]upgradeAction, error) {
+	// Windsurf paths remain here purely for legacy upgrade cleanup —
+	// users who installed MOM hooks before Windsurf retirement
+	// (#342/#343) still have stale hook entries that need pruning. The
+	// harness itself is no longer supported (see harness_retirement.go).
 	paths := []string{
 		filepath.Join(projectRoot, ".claude", "settings.json"),
 		filepath.Join(projectRoot, ".codex", "hooks.json"),
@@ -568,86 +598,102 @@ func isDeadHookCommand(command string) bool {
 	return len(fields) >= 2 && fields[0] == "mom" && (fields[1] == "draft" || fields[1] == "record")
 }
 
-// migrateKBLayout detects a legacy .mom/kb/ layout and promotes each subdirectory
-// one level up to the new flat layout. It is idempotent: if the destination already
-// exists it skips that step and reports a conflict rather than overwriting.
-func migrateKBLayout(leoDir string) ([]upgradeAction, error) {
-	kbDir := filepath.Join(leoDir, "kb")
-	if _, err := os.Stat(kbDir); os.IsNotExist(err) {
-		return nil, nil
+// scrubDeadConfigFields reads config.yaml from momDir, removes the retired
+// "tiers" key from every harness block and the "autonomy" key from the user
+// block, and returns the cleaned bytes plus a changed flag. It does nothing
+// when the keys are already absent.
+//
+// The scrub operates on the raw YAML node tree so that comments and
+// formatting are preserved as much as possible.
+func scrubDeadConfigFields(momDir string) (scrubbed []byte, changed bool, err error) {
+	configPath := filepath.Join(momDir, "config.yaml")
+	data, err := os.ReadFile(configPath)
+	if err != nil {
+		return nil, false, fmt.Errorf("reading config: %w", err)
 	}
 
-	var actions []upgradeAction
-
-	type migration struct {
-		src  string
-		dst  string
-		desc string
+	var root yaml.Node
+	if err := yaml.Unmarshal(data, &root); err != nil {
+		return nil, false, fmt.Errorf("parsing config: %w", err)
+	}
+	if root.Kind == 0 || len(root.Content) == 0 {
+		return data, false, nil
 	}
 
-	moves := []migration{
-		{filepath.Join(kbDir, "docs"), filepath.Join(leoDir, "memory"), "kb/docs/ → memory/"},
-		{filepath.Join(kbDir, "constraints"), filepath.Join(leoDir, "constraints"), "kb/constraints/ → constraints/"},
-		{filepath.Join(kbDir, "skills"), filepath.Join(leoDir, "skills"), "kb/skills/ → skills/"},
-		{filepath.Join(kbDir, "logs"), filepath.Join(leoDir, "logs"), "kb/logs/ → logs/"},
+	doc := root.Content[0] // document node wraps a mapping node
+	if doc.Kind != yaml.MappingNode {
+		return data, false, nil
 	}
 
-	for _, m := range moves {
-		if _, err := os.Stat(m.src); os.IsNotExist(err) {
-			continue
-		}
-		if _, err := os.Stat(m.dst); err == nil {
-			actions = append(actions, upgradeAction{"⚠", fmt.Sprintf("skipped %s — destination already exists", m.desc)})
-			continue
-		}
-		if err := os.Rename(m.src, m.dst); err != nil {
-			return nil, fmt.Errorf("moving %s: %w", m.desc, err)
-		}
-		actions = append(actions, upgradeAction{"✔", fmt.Sprintf("migrated %s", m.desc)})
-	}
+	changed = renameYAMLKey(doc, "runtimes", "harnesses") || changed
 
-	fileMovs := []migration{
-		{filepath.Join(kbDir, "index.json"), filepath.Join(leoDir, "index.json"), "kb/index.json → index.json"},
-		{filepath.Join(kbDir, "schema.json"), filepath.Join(leoDir, "schema.json"), "kb/schema.json → schema.json"},
-	}
-	for _, m := range fileMovs {
-		if _, err := os.Stat(m.src); os.IsNotExist(err) {
-			continue
-		}
-		if _, err := os.Stat(m.dst); err == nil {
-			actions = append(actions, upgradeAction{"⚠", fmt.Sprintf("skipped %s — destination already exists", m.desc)})
-			continue
-		}
-		if err := os.Rename(m.src, m.dst); err != nil {
-			return nil, fmt.Errorf("moving %s: %w", m.desc, err)
-		}
-		actions = append(actions, upgradeAction{"✔", fmt.Sprintf("migrated %s", m.desc)})
-	}
-
-	remaining, _ := os.ReadDir(kbDir)
-	hasVisible := false
-	for _, e := range remaining {
-		if !strings.HasPrefix(e.Name(), ".") {
-			hasVisible = true
-			break
-		}
-	}
-	if !hasVisible {
-		if err := os.RemoveAll(kbDir); err != nil {
-			actions = append(actions, upgradeAction{"⚠", fmt.Sprintf("could not remove empty kb/: %v", err)})
-		} else {
-			actions = append(actions, upgradeAction{"✔", "removed empty kb/ directory"})
+	// Strip retired "tiers" sub-keys from each harness block.
+	if harnessesNode := findMappingValue(doc, "harnesses"); harnessesNode != nil && harnessesNode.Kind == yaml.MappingNode {
+		for i := 1; i < len(harnessesNode.Content); i += 2 {
+			rtVal := harnessesNode.Content[i]
+			if rtVal.Kind == yaml.MappingNode {
+				if removeYAMLKey(rtVal, "tiers") {
+					changed = true
+				}
+			}
 		}
 	}
 
-	if len(actions) > 0 {
-		actions = append([]upgradeAction{{"✔", "filesystem layout migrated (kb/ flattened)"}}, actions...)
+	if removeYAMLKey(findMappingValue(doc, "user"), "autonomy") {
+		changed = true
 	}
 
-	return actions, nil
+	if !changed {
+		return data, false, nil
+	}
+
+	out, err := yaml.Marshal(&root)
+	if err != nil {
+		return nil, false, fmt.Errorf("marshaling scrubbed config: %w", err)
+	}
+	return out, true, nil
 }
 
-// migrateMetricDocs finds docs with type "metric" and migrates them to "session-log".
+// renameYAMLKey renames a top-level key in a YAML mapping node from oldKey to
+// newKey, preserving the value and its position. Returns true if the key was
+// found and renamed.
+func renameYAMLKey(mapping *yaml.Node, oldKey, newKey string) bool {
+	for i := 0; i+1 < len(mapping.Content); i += 2 {
+		if mapping.Content[i].Value == oldKey {
+			mapping.Content[i].Value = newKey
+			return true
+		}
+	}
+	return false
+}
+
+// findMappingValue returns the value node for key in a YAML mapping node, or nil.
+func findMappingValue(mapping *yaml.Node, key string) *yaml.Node {
+	if mapping == nil {
+		return nil
+	}
+	for i := 0; i+1 < len(mapping.Content); i += 2 {
+		if mapping.Content[i].Value == key {
+			return mapping.Content[i+1]
+		}
+	}
+	return nil
+}
+
+// removeYAMLKey removes the key+value pair for key from a YAML mapping node.
+// Returns true if the key was present and removed.
+func removeYAMLKey(mapping *yaml.Node, key string) bool {
+	if mapping == nil || mapping.Kind != yaml.MappingNode {
+		return false
+	}
+	for i := 0; i+1 < len(mapping.Content); i += 2 {
+		if mapping.Content[i].Value == key {
+			mapping.Content = append(mapping.Content[:i], mapping.Content[i+2:]...)
+			return true
+		}
+	}
+	return false
+}
 func migrateMetricDocs(docsDir string, dryRun bool) []string {
 	var migrated []string
 
@@ -851,20 +897,20 @@ func kebabOnly(s string) string {
 }
 
 // regenerateHarnessFiles rebuilds all harness context files from the current config.
-func regenerateHarnessFiles(projectRoot, leoDir string, cfg *config.Config) error {
+func regenerateHarnessFiles(projectRoot, momDir string, cfg *config.Config) error {
 	registry := harness.NewRegistry(projectRoot)
 
-	runtimeCfg := buildRuntimeConfig(cfg)
-	runtimeConstraints := buildRuntimeConstraints()
-	runtimeSkills := buildRuntimeSkills()
-	runtimeIdentity := buildRuntimeIdentity()
+	harnessCfg := buildHarnessConfig(cfg)
+	harnessConstraints := buildHarnessConstraints()
+	harnessSkills := buildHarnessSkills()
+	harnessIdentity := buildHarnessIdentity()
 
 	for _, rt := range cfg.EnabledHarnesses() {
 		adapter, ok := registry.Get(rt)
 		if !ok {
 			continue
 		}
-		if err := adapter.GenerateContextFile(runtimeCfg, runtimeConstraints, runtimeSkills, runtimeIdentity); err != nil {
+		if err := adapter.GenerateContextFile(harnessCfg, harnessConstraints, harnessSkills, harnessIdentity); err != nil {
 			return fmt.Errorf("generating %s context: %w", rt, err)
 		}
 
@@ -876,160 +922,7 @@ func regenerateHarnessFiles(projectRoot, leoDir string, cfg *config.Config) erro
 				return fmt.Errorf("registering %s hooks: %w", rt, err)
 			}
 		}
-		if e, ok := adapter.(harness.ExtensionInstaller); ok {
-			if err := e.RegisterExtension(); err != nil {
-				return fmt.Errorf("registering %s extension: %w", rt, err)
-			}
-		}
 	}
 
 	return nil
-}
-
-// scrubDeadConfigFields reads config.yaml from leoDir, removes the retired
-// "tiers" key from every harness block and the "autonomy" key from the user
-// block, and returns the cleaned bytes plus a changed flag. It does nothing
-// when the keys are already absent.
-//
-// The scrub operates on the raw YAML node tree so that comments and
-// formatting are preserved as much as possible.
-func scrubDeadConfigFields(leoDir string) (scrubbed []byte, changed bool, err error) {
-	configPath := filepath.Join(leoDir, "config.yaml")
-	data, err := os.ReadFile(configPath)
-	if err != nil {
-		return nil, false, fmt.Errorf("reading config: %w", err)
-	}
-
-	var root yaml.Node
-	if err := yaml.Unmarshal(data, &root); err != nil {
-		return nil, false, fmt.Errorf("parsing config: %w", err)
-	}
-	if root.Kind == 0 || len(root.Content) == 0 {
-		return data, false, nil
-	}
-
-	doc := root.Content[0] // document node wraps a mapping node
-	if doc.Kind != yaml.MappingNode {
-		return data, false, nil
-	}
-
-	changed = renameYAMLKey(doc, "runtimes", "harnesses") || changed
-
-	// Strip retired "tiers" sub-keys from each harness block.
-	if harnessesNode := findMappingValue(doc, "harnesses"); harnessesNode != nil && harnessesNode.Kind == yaml.MappingNode {
-		for i := 1; i < len(harnessesNode.Content); i += 2 {
-			rtVal := harnessesNode.Content[i]
-			if rtVal.Kind == yaml.MappingNode {
-				if removeYAMLKey(rtVal, "tiers") {
-					changed = true
-				}
-			}
-		}
-	}
-
-	if removeYAMLKey(findMappingValue(doc, "user"), "autonomy") {
-		changed = true
-	}
-
-	if !changed {
-		return data, false, nil
-	}
-
-	out, err := yaml.Marshal(&root)
-	if err != nil {
-		return nil, false, fmt.Errorf("marshaling scrubbed config: %w", err)
-	}
-	return out, true, nil
-}
-
-// renameYAMLKey renames a top-level key in a YAML mapping node from oldKey to
-// newKey, preserving the value and its position. Returns true if the key was
-// found and renamed.
-func renameYAMLKey(mapping *yaml.Node, oldKey, newKey string) bool {
-	for i := 0; i+1 < len(mapping.Content); i += 2 {
-		if mapping.Content[i].Value == oldKey {
-			mapping.Content[i].Value = newKey
-			return true
-		}
-	}
-	return false
-}
-
-// findMappingValue returns the value node for key in a YAML mapping node, or nil.
-func findMappingValue(mapping *yaml.Node, key string) *yaml.Node {
-	if mapping == nil {
-		return nil
-	}
-	for i := 0; i+1 < len(mapping.Content); i += 2 {
-		if mapping.Content[i].Value == key {
-			return mapping.Content[i+1]
-		}
-	}
-	return nil
-}
-
-// removeYAMLKey removes the key+value pair for key from a YAML mapping node.
-// Returns true if the key was present and removed.
-func removeYAMLKey(mapping *yaml.Node, key string) bool {
-	if mapping == nil || mapping.Kind != yaml.MappingNode {
-		return false
-	}
-	for i := 0; i+1 < len(mapping.Content); i += 2 {
-		if mapping.Content[i].Value == key {
-			mapping.Content = append(mapping.Content[:i], mapping.Content[i+2:]...)
-			return true
-		}
-	}
-	return false
-}
-
-// migrateLeoToMom copies a .leo/ directory to .mom/ at the same level.
-// The .leo/ directory is preserved (not deleted) — users can remove it manually
-// or it will be removed. Returns actions describing what was done.
-// If .mom/ already exists, the migration is skipped.
-func migrateLeoToMom(leoDir string) ([]upgradeAction, error) {
-	parent := filepath.Dir(leoDir)
-	momDir := filepath.Join(parent, ".mom")
-
-	if _, err := os.Stat(momDir); err == nil {
-		return nil, nil
-	}
-
-	var actions []upgradeAction
-
-	if err := copyDirRecursive(leoDir, momDir); err != nil {
-		return nil, fmt.Errorf("copying .leo/ to .mom/: %w", err)
-	}
-
-	actions = append(actions, upgradeAction{"✔", fmt.Sprintf("migrated %s → %s", leoDir, momDir)})
-	actions = append(actions, upgradeAction{"⚠", ".leo/ preserved — remove it manually after verifying .mom/ works"})
-
-	return actions, nil
-}
-
-// copyDirRecursive recursively copies src directory to dst.
-func copyDirRecursive(src, dst string) error {
-	return filepath.Walk(src, func(path string, info os.FileInfo, err error) error {
-		if err != nil {
-			return err
-		}
-
-		rel, err := filepath.Rel(src, path)
-		if err != nil {
-			return err
-		}
-
-		target := filepath.Join(dst, rel)
-
-		if info.IsDir() {
-			return os.MkdirAll(target, info.Mode())
-		}
-
-		data, err := os.ReadFile(path)
-		if err != nil {
-			return err
-		}
-
-		return os.WriteFile(target, data, info.Mode())
-	})
 }

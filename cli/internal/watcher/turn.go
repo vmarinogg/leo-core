@@ -25,7 +25,18 @@ type Turn struct {
 	// surface the data.
 	Model    string // "the model": e.g. "claude-sonnet-4-6", "gpt-4o"
 	Provider string // "provided by whom": model vendor — "anthropic", "openai", …
-	Harness  string // "used in which client": "claude-code", "codex", "windsurf", "pi"
+	Harness  string // "used in which client": "claude-code", "codex", "pi"
+
+	// ProjectId carries the resolved project identity (ADR 0016).
+	// Empty means "unknown" — the resolver found no .mom-project.yaml.
+	ProjectId string
+
+	// Cwd is the working directory the harness reported for this turn,
+	// when the transcript carries it (Codex includes per-turn cwd in
+	// `turn_context` envelopes). The watcher prefers this for project
+	// resolution over the watcher's configured ProjectDir — critical when
+	// multiple projects share a global transcript directory (Codex).
+	Cwd string
 }
 
 // ToolCall is one tool invocation observed in an assistant turn.
@@ -58,7 +69,8 @@ type Usage struct {
 // reinvent extraction.
 //
 // Keys: "role", "text", "tool_calls" ([]map with name/input/category),
-// "usage" (map of token counts), "model", "provider".
+// "usage" (map of token counts), "model", "provider", "harness",
+// "project_id".
 func (t Turn) ToPayload() map[string]any {
 	out := map[string]any{
 		"role": t.Role,
@@ -99,6 +111,12 @@ func (t Turn) ToPayload() map[string]any {
 	}
 	if t.Provider != "" {
 		out["provider"] = t.Provider
+	}
+	if t.Harness != "" {
+		out["harness"] = t.Harness
+	}
+	if t.ProjectId != "" {
+		out["project_id"] = t.ProjectId
 	}
 	return out
 }

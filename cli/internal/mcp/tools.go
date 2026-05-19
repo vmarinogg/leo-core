@@ -71,12 +71,12 @@ func allTools() []toolDef {
 		},
 		{
 			Name:        "mom_record",
-			Description: "Fallback explicit-write path: intentionally save a memory mid-session when CLI is unavailable. Bypasses Drafter's content filters and stamps trigger_event='record', source_type='manual-draft'. Required: content. Optional: session_id only when it is a real runtime session ID; never invent one. Optional: summary, tags, actor.",
+			Description: "Fallback explicit-write path: intentionally save a memory mid-session when CLI is unavailable. Bypasses Drafter's content filters and stamps trigger_event='record', source_type='manual-draft'. Required: content. Optional: session_id only when it is a real harness session ID; never invent one. Optional: summary, tags, actor.",
 			InputSchema: map[string]any{
 				"type":     "object",
 				"required": []string{"content"},
 				"properties": map[string]any{
-					"session_id": map[string]any{"type": "string", "description": "Real runtime session ID only. Omit when unavailable; MOM resolves known harness env vars or rejects."},
+					"session_id": map[string]any{"type": "string", "description": "Real harness session ID only. Omit when unavailable; MOM resolves known harness env vars or rejects."},
 					"summary":    map[string]any{"type": "string", "description": "One-line summary"},
 					"tags":       map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": "Tag names (will be normalised; empty after normalisation rejects the request)"},
 					"content":    map[string]any{"type": "object", "description": "Memory content (must include $.text for FTS)"},

@@ -1,6 +1,6 @@
 package herald
 
-// MRP v0 event structs — wire protocol between a runtime adapter and MOM.
+// MRP v0 event structs — wire protocol between a harness adapter and MOM.
 // Field names match JSON schema definitions in .github/mrp/schemas/.
 
 // MRPSessionStart is the session.start MRP event.
@@ -8,7 +8,7 @@ type MRPSessionStart struct {
 	MRPVersion  string `json:"mrp_version"`
 	Event       string `json:"event"`
 	SessionID   string `json:"session_id"`
-	Runtime     string `json:"runtime"`
+	Harness     string `json:"harness"`
 	Timestamp   string `json:"timestamp"`
 	StartedAt   string `json:"started_at"`
 	ProjectRoot string `json:"project_root,omitempty"`
@@ -20,7 +20,7 @@ type MRPSessionEnd struct {
 	MRPVersion string  `json:"mrp_version"`
 	Event      string  `json:"event"`
 	SessionID  string  `json:"session_id"`
-	Runtime    string  `json:"runtime"`
+	Harness    string  `json:"harness"`
 	Timestamp  string  `json:"timestamp"`
 	StartedAt  string  `json:"started_at"`
 	EndedAt    string  `json:"ended_at"`
@@ -33,7 +33,7 @@ type MRPTurnComplete struct {
 	MRPVersion       string `json:"mrp_version"`
 	Event            string `json:"event"`
 	SessionID        string `json:"session_id"`
-	Runtime          string `json:"runtime"`
+	Harness          string `json:"harness"`
 	Timestamp        string `json:"timestamp"`
 	TurnIndex        int    `json:"turn_index"`
 	PromptTokens     *int   `json:"prompt_tokens,omitempty"`
@@ -45,7 +45,7 @@ type MRPCompactTriggered struct {
 	MRPVersion    string  `json:"mrp_version"`
 	Event         string  `json:"event"`
 	SessionID     string  `json:"session_id"`
-	Runtime       string  `json:"runtime"`
+	Harness       string  `json:"harness"`
 	Timestamp     string  `json:"timestamp"`
 	TriggerSource *string `json:"trigger_source,omitempty"`
 }
@@ -55,7 +55,7 @@ type MRPClearTriggered struct {
 	MRPVersion    string  `json:"mrp_version"`
 	Event         string  `json:"event"`
 	SessionID     string  `json:"session_id"`
-	Runtime       string  `json:"runtime"`
+	Harness       string  `json:"harness"`
 	Timestamp     string  `json:"timestamp"`
 	TriggerSource *string `json:"trigger_source,omitempty"`
 }

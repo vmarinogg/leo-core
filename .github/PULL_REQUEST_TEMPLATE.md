@@ -11,7 +11,7 @@ Link to related issue: closes #
 - [ ] Bug fix
 - [ ] New feature
 - [ ] Documentation
-- [ ] Runtime adapter
+- [ ] Harness adapter
 - [ ] Refactor
 
 ## Checklist

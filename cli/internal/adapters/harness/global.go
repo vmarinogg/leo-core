@@ -96,6 +96,41 @@ func upsertManagedBlock(path, body string) error {
 	return os.WriteFile(path, []byte(updated), 0o644)
 }
 
+// RemoveManagedBlock strips the MOM-generated block from a global context
+// file (e.g. ~/.claude/CLAUDE.md), preserving any surrounding user content.
+// If the block is absent, the file is left untouched. If no other content
+// remains after removal, the file is deleted.
+func RemoveManagedBlock(path string) error {
+	existing, err := os.ReadFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return err
+	}
+	content := string(existing)
+	start := strings.Index(content, momBlockStart)
+	end := strings.Index(content, momBlockEnd)
+	if start < 0 || end < 0 || end < start {
+		return nil
+	}
+	end += len(momBlockEnd)
+	head := strings.TrimRight(content[:start], "\n")
+	tail := strings.TrimLeft(content[end:], "\n")
+	var updated string
+	switch {
+	case head == "" && tail == "":
+		return os.Remove(path)
+	case head == "":
+		updated = tail
+	case tail == "":
+		updated = head + "\n"
+	default:
+		updated = head + "\n\n" + tail
+	}
+	return os.WriteFile(path, []byte(updated), 0o644)
+}
+
 func upsertClaudeUserMCP() error {
 	path, err := homePath(".claude.json")
 	if err != nil {
@@ -113,7 +148,7 @@ func upsertClaudeUserMCP() error {
 	}
 	servers["mom"] = map[string]any{
 		"type":    "stdio",
-		"command": resolveCommand(),
+		"command": "mom",
 		"args":    []string{"serve", "mcp"},
 		"env":     map[string]string{},
 	}

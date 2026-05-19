@@ -3,6 +3,7 @@ package logbook_test
 import (
 	"errors"
 	"path/filepath"
+	"sort"
 	"sync/atomic"
 	"testing"
 
@@ -18,7 +19,7 @@ import (
 func openWorker(t *testing.T) (*logbook.Worker, *librarian.Librarian) {
 	t.Helper()
 	dir := t.TempDir()
-	migs := append(librarian.Migrations(), logbook.Migrations()...)
+	migs := append(librarian.Migrations(), logbook.Migrations()...); sort.Slice(migs, func(i, j int) bool { return migs[i].Version < migs[j].Version })
 	v, err := vault.Open(filepath.Join(dir, "mom.db"), migs)
 	if err != nil {
 		t.Fatalf("vault.Open: %v", err)

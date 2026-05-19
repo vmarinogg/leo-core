@@ -60,7 +60,7 @@ func (s *Server) toolMomStatus() (toolCallResult, error) {
 		},
 		Routing: statusRoutingBlock{
 			Startup:   "Call mom_status at session start. After this, prefer MOM skills and CLI.",
-			Preferred: "Use /mom-status, /mom-recall, /mom-wrap-up, and mom CLI commands first.",
+			Preferred: "Use /mom-status, /mom-recall, /mom-project, /mom-wrap-up, and mom CLI commands first.",
 			MCP:       "Fallback for discovery, startup handshake, or when CLI skills are unavailable.",
 		},
 		Session:    statusSession(),
@@ -94,6 +94,7 @@ func statusSkills() []statusSkillBlock {
 	return []statusSkillBlock{
 		{Command: "/mom-status", Purpose: "Show MOM health and vault state via mom status."},
 		{Command: "/mom-recall", Purpose: "Search persistent memory with mom recall."},
+		{Command: "/mom-project", Purpose: "Bind the current directory to a MOM project id with mom project bind."},
 		{Command: "/mom-wrap-up", Purpose: "Curate recent drafts with mom drafts and mom curate."},
 	}
 }

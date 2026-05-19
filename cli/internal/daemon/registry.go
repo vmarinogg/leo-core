@@ -12,8 +12,24 @@ import (
 
 // RegistryEntry describes a single MOM-enabled project in the global registry.
 type RegistryEntry struct {
-	MomDir   string   `json:"momDir"`
-	Runtimes []string `json:"runtimes"`
+	MomDir    string   `json:"momDir"`
+	Harnesses []string `json:"harnesses"`
+}
+
+func (e *RegistryEntry) UnmarshalJSON(data []byte) error {
+	type registryEntryAlias RegistryEntry
+	var raw struct {
+		registryEntryAlias
+		LegacyRuntimes []string `json:"runtimes"`
+	}
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return err
+	}
+	*e = RegistryEntry(raw.registryEntryAlias)
+	if len(e.Harnesses) == 0 && len(raw.LegacyRuntimes) > 0 {
+		e.Harnesses = raw.LegacyRuntimes
+	}
+	return nil
 }
 
 // Registry maps absolute project directory paths to their entries.
@@ -72,6 +88,60 @@ func canonicalizeRegistry(reg Registry) Registry {
 	return out
 }
 
+// RegistryPruneReport describes entries removed from watch-registry.json.
+type RegistryPruneReport struct {
+	Removed map[string]string // project dir -> reason
+}
+
+// PruneInvalidRegistry removes stale global-watch entries left by older MOM
+// releases. v0.40 uses a central ~/.mom config; pre-v0.40 registries may point
+// at project-local .mom dirs that no longer exist, or carry no harness list.
+// Those entries cannot be watched successfully and otherwise spam every sweep.
+func PruneInvalidRegistry() (RegistryPruneReport, error) {
+	report := RegistryPruneReport{Removed: make(map[string]string)}
+	err := withRegistryLock(func() error {
+		reg, err := LoadRegistry()
+		if err != nil {
+			return err
+		}
+		for projectDir, entry := range reg {
+			if reason := invalidRegistryEntryReason(projectDir, entry); reason != "" {
+				delete(reg, projectDir)
+				report.Removed[projectDir] = reason
+			}
+		}
+		if len(report.Removed) == 0 {
+			return nil
+		}
+		return SaveRegistry(reg)
+	})
+	return report, err
+}
+
+func invalidRegistryEntryReason(projectDir string, entry RegistryEntry) string {
+	if _, err := os.Stat(projectDir); err != nil {
+		return "project directory missing"
+	}
+	if len(entry.Harnesses) == 0 {
+		return "no enabled harnesses"
+	}
+	if entry.MomDir == "" {
+		return "momDir missing"
+	}
+	if _, err := os.Stat(filepath.Join(entry.MomDir, "config.yaml")); err != nil {
+		return "MOM config missing"
+	}
+	// ADR 0016: a project must declare itself via .mom-project.yaml before
+	// the daemon will watch it. Otherwise an accidental `mom init` from
+	// $HOME (or any unrelated cwd) silently turns that directory into a
+	// permanently-watched project. Bound projects are explicit; everything
+	// else gets pruned.
+	if _, err := os.Stat(filepath.Join(projectDir, ".mom-project.yaml")); err != nil {
+		return "no .mom-project.yaml binding"
+	}
+	return ""
+}
+
 // SaveRegistry atomically writes the registry to disk (tmp + rename).
 func SaveRegistry(reg Registry) error {
 	path, err := RegistryPath()
@@ -119,7 +189,7 @@ func withRegistryLock(fn func() error) error {
 }
 
 // RegisterProject adds or updates a project in the registry (lock → load → upsert → save).
-func RegisterProject(projectDir, momDir string, runtimes []string) error {
+func RegisterProject(projectDir, momDir string, harnesses []string) error {
 	canonicalProjectDir := pathutil.CanonicalDir(projectDir)
 	return withRegistryLock(func() error {
 		reg, err := LoadRegistry()
@@ -132,8 +202,8 @@ func RegisterProject(projectDir, momDir string, runtimes []string) error {
 			}
 		}
 		reg[canonicalProjectDir] = RegistryEntry{
-			MomDir:   momDir,
-			Runtimes: runtimes,
+			MomDir:    momDir,
+			Harnesses: harnesses,
 		}
 		return SaveRegistry(reg)
 	})

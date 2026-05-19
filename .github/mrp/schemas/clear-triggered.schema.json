@@ -2,9 +2,9 @@
   "$schema": "http://json-schema.org/draft-07/schema#",
   "$id": "https://github.com/momhq/mom/mrp/v0/clear-triggered",
   "title": "MRP v0 — clear.triggered event",
-  "description": "Emitted when the user or runtime triggers /clear. Fires capture in auto bypass mode (no interactive wrap-up).",
+  "description": "Emitted when the user or harness triggers /clear. Fires capture in auto bypass mode (no interactive wrap-up).",
   "type": "object",
-  "required": ["mrp_version", "event", "session_id", "runtime", "timestamp"],
+  "required": ["mrp_version", "event", "session_id", "harness", "timestamp"],
   "additionalProperties": false,
   "properties": {
     "mrp_version": {
@@ -22,7 +22,7 @@
       "minLength": 1,
       "description": "Unique session identifier"
     },
-    "runtime": {
+    "harness": {
       "type": "string",
       "minLength": 1,
       "description": "Adapter name"
@@ -34,8 +34,8 @@
     },
     "trigger_source": {
       "type": "string",
-      "enum": ["user", "runtime"],
-      "description": "Whether the user or the runtime initiated clear"
+      "enum": ["user", "harness"],
+      "description": "Whether the user or the harness initiated clear"
     }
   }
 }

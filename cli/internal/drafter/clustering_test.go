@@ -2,6 +2,7 @@ package drafter_test
 
 import (
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -20,6 +21,7 @@ func openDrafter(t *testing.T) (*drafter.Drafter, *librarian.Librarian) {
 	t.Helper()
 	dir := t.TempDir()
 	migs := append(librarian.Migrations(), logbook.Migrations()...)
+	sort.Slice(migs, func(i, j int) bool { return migs[i].Version < migs[j].Version })
 	v, err := vault.Open(filepath.Join(dir, "mom.db"), migs)
 	if err != nil {
 		t.Fatalf("vault.Open: %v", err)
@@ -268,7 +270,7 @@ func TestTick_FlushesIdleSession(t *testing.T) {
 
 	// Tick well past the idle window — 10 minutes is comfortably
 	// beyond the 90s default.
-	d.Tick(time.Now().Add(10*time.Minute))
+	d.Tick(time.Now().Add(10 * time.Minute))
 
 	rows, _ := lib.SearchMemories(librarian.SearchFilter{SessionID: "s", Limit: 10})
 	if len(rows) != 1 {
@@ -424,5 +426,56 @@ func TestObserveTurn_BufferReCreatedAfterFlush(t *testing.T) {
 	rows, _ := lib.SearchMemories(librarian.SearchFilter{SessionID: "s", Limit: 10})
 	if len(rows) != 2 {
 		t.Fatalf("got %d memories after two flush cycles, want 2", len(rows))
+	}
+}
+
+// TestFlushAll_PropagatesProjectIdFromPayload locks ADR 0016 wiring:
+// when a turn.observed event carries project_id, the persisted memory
+// row stamps it.
+func TestFlushAll_PropagatesProjectIdFromPayload(t *testing.T) {
+	d, lib := openDrafter(t)
+	bus := herald.NewBus()
+	defer d.SubscribeAll(bus)()
+
+	payload := substantiveTurn("decide on postgres for the canary", "claude-code")
+	payload["project_id"] = "alpha"
+
+	bus.Publish(herald.Event{
+		Type:      herald.TurnObserved,
+		SessionID: "s-alpha",
+		Payload:   payload,
+	})
+	d.FlushAll()
+
+	rows, _ := lib.SearchMemories(librarian.SearchFilter{SessionID: "s-alpha", Limit: 10})
+	if len(rows) != 1 {
+		t.Fatalf("got %d memories, want 1", len(rows))
+	}
+	if rows[0].Memory.ProjectId != "alpha" {
+		t.Errorf("memory.ProjectId = %q, want alpha", rows[0].Memory.ProjectId)
+	}
+}
+
+// processRecord (memory.record events) honour project_id too.
+func TestProcessRecord_PropagatesProjectIdFromPayload(t *testing.T) {
+	d, lib := openDrafter(t)
+	bus := herald.NewBus()
+	defer d.SubscribeAll(bus)()
+
+	bus.Publish(herald.Event{
+		Type:      herald.MemoryRecord,
+		SessionID: "s-rec",
+		Payload: map[string]any{
+			"content":    map[string]any{"text": "manual note"},
+			"project_id": "alpha",
+		},
+	})
+	// FlushAll is for buffered turns; record path persists synchronously.
+	rows, _ := lib.SearchMemories(librarian.SearchFilter{SessionID: "s-rec", Limit: 10})
+	if len(rows) != 1 {
+		t.Fatalf("got %d memories, want 1", len(rows))
+	}
+	if rows[0].Memory.ProjectId != "alpha" {
+		t.Errorf("memory.ProjectId = %q, want alpha", rows[0].Memory.ProjectId)
 	}
 }

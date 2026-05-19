@@ -1,5 +1,5 @@
 name: Bug Report
-description: Report a bug in Leo
+description: Report a bug in MOM
 labels: ["bug"]
 body:
   - type: textarea
@@ -28,9 +28,9 @@ body:
     validations:
       required: true
   - type: dropdown
-    id: runtime
+    id: harness
     attributes:
-      label: Runtime
+      label: Harness
       options:
         - Claude Code
         - Cursor
@@ -41,8 +41,8 @@ body:
   - type: input
     id: version
     attributes:
-      label: Leo version
-      placeholder: "leo version"
+      label: MOM version
+      placeholder: "mom version"
     validations:
       required: true
   - type: input

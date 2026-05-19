@@ -40,8 +40,8 @@ func TestComputeReport_SingleSession(t *testing.T) {
 		"mom_memory": {
 			Total: 3,
 			Detail: map[string]int{
-				"mom_recall":          2,
-				"create_memory_draft": 1,
+				"mom_recall": 2,
+				"mom_record": 1,
 			},
 		},
 		"codebase_read": {
@@ -105,7 +105,7 @@ func TestComputeReport_MultipleSessions(t *testing.T) {
 	s2 := makeSession(6, map[string]diagnose.ToolGroup{
 		"mom_memory": {
 			Total:  6,
-			Detail: map[string]int{"search_memories": 6},
+			Detail: map[string]int{"mom_recall": 6},
 		},
 		"codebase_read": {
 			Total:  2,

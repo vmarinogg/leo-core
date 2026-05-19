@@ -44,6 +44,13 @@ type Options struct {
 	SessionID     string
 	IncludeDrafts bool // when false (default), Finder applies tier escalation
 	Limit         int
+
+	// ProjectId restricts results to the named project (ADR 0016).
+	// Empty disables the project filter — searches every project.
+	ProjectId string
+	// StrictProject excludes NULL project_id rows when ProjectId is set.
+	// Defaults to false (legacy memories remain findable in scoped queries).
+	StrictProject bool
 }
 
 // Tier names the escalation pass that surfaced a Result. The four
@@ -130,6 +137,8 @@ func (f *Finder) Recall(opts Options) ([]Result, error) {
 			SessionID:      opts.SessionID,
 			PromotionState: p.state,
 			Limit:          limit,
+			ProjectId:      opts.ProjectId,
+			StrictProject:  opts.StrictProject,
 		})
 		if err != nil {
 			return nil, fmt.Errorf("Recall %s pass: %w", p.tier, err)

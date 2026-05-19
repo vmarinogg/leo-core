@@ -11,7 +11,6 @@ import (
 	"github.com/momhq/mom/cli/internal/config"
 	"github.com/momhq/mom/cli/internal/daemon"
 	"github.com/momhq/mom/cli/internal/pathutil"
-	"github.com/momhq/mom/cli/internal/scope"
 	"github.com/momhq/mom/cli/internal/watcher"
 )
 
@@ -32,9 +31,6 @@ func harnessTranscriptDir(name string) string {
 
 func resolveMomContext(cwd string) (projectDir string, momDir string, err error) {
 	cwd = pathutil.CanonicalDir(cwd)
-	if sc, ok := scope.NearestWritable(cwd); ok {
-		return filepath.Dir(sc.Path), sc.Path, nil
-	}
 	centralDir, err := centralvault.Dir()
 	if err != nil {
 		return "", "", err
@@ -48,7 +44,7 @@ func resolveMomContext(cwd string) (projectDir string, momDir string, err error)
 // ensureGlobalDaemon registers the project in the global watch registry and
 // ensures the single global daemon is running. Also cleans up legacy per-project agents.
 // Skipped when MOM_NO_DAEMON=1 or when running inside a test binary.
-func ensureGlobalDaemon(projectRoot, momDir string, runtimes []string) error {
+func ensureGlobalDaemon(projectRoot, momDir string, harnesses []string) error {
 	projectRoot = pathutil.CanonicalDir(projectRoot)
 	if os.Getenv("MOM_NO_DAEMON") == "1" {
 		return nil
@@ -67,22 +63,47 @@ func ensureGlobalDaemon(projectRoot, momDir string, runtimes []string) error {
 	// Do NOT resolve symlinks — global daemon uses the symlink path so
 	// brew upgrade / package updates are picked up on restart.
 
+	// Prune stale pre-v0.40 registry entries before registering this project.
+	_, _ = daemon.PruneInvalidRegistry()
+
+	// ADR 0016: require an explicit project binding before adding this
+	// directory to the daemon registry. Without this, running `mom init`
+	// or `mom upgrade` from $HOME (or any unrelated cwd) would silently
+	// promote that directory into a permanently-watched project.
+	if _, err := os.Stat(filepath.Join(projectRoot, ".mom-project.yaml")); err != nil {
+		return fmt.Errorf("refusing to watch %s: no .mom-project.yaml binding (run `mom project bind <id>`)", projectRoot)
+	}
+
 	// Register this project in the global registry.
-	if err := daemon.RegisterProject(projectRoot, momDir, runtimes); err != nil {
+	if err := daemon.RegisterProject(projectRoot, momDir, harnesses); err != nil {
 		return fmt.Errorf("registering project: %w", err)
 	}
 
 	// Start global daemon if not already running.
 	h, err := daemon.StatusGlobal()
 	if err == nil && len(h.Services) > 0 && h.Services[0].DaemonRunning {
-		// Already running — cleanup legacy and return.
-		_ = daemon.CleanupLegacy(projectRoot)
-		return nil
+		// Daemon process is alive, but a running daemon executes the
+		// binary it was launched with — `brew upgrade mom` (or any
+		// rebuild) leaves the daemon serving the old code. The sentinel
+		// recorded at install time tells us whether the binary on disk
+		// has moved. Mismatch → unload so the install path below
+		// re-spawns against the current binary (ADR-pointer: #338).
+		match, _ := daemon.BinaryVersionMatches(bin)
+		if match {
+			_ = daemon.CleanupLegacy(projectRoot)
+			return nil
+		}
+		_ = daemon.UninstallGlobal()
 	}
 
 	if err := daemon.InstallGlobal(daemon.GlobalServiceConfig{MomBinary: bin}); err != nil {
 		return fmt.Errorf("installing global daemon: %w", err)
 	}
+	// Best-effort: record the binary identity so the next ensureGlobal
+	// call can detect a future upgrade. Failure to write the sentinel
+	// is non-fatal — at worst the next call treats the daemon as stale
+	// and reinstalls unnecessarily.
+	_ = daemon.RecordBinaryVersion(bin)
 
 	_ = daemon.CleanupLegacy(projectRoot)
 	return nil
@@ -109,7 +130,7 @@ func unregisterProject(projectRoot, momDir string) error {
 }
 
 // sweepTranscripts runs a one-shot catch-up sweep for all watcher-capable
-// runtimes. Best-effort: errors are logged to stderr, never returned.
+// harnesses. Best-effort: errors are logged to stderr, never returned.
 func sweepTranscripts(projectDir, momDir string) {
 	cfg, err := config.Load(momDir)
 	if err != nil {
@@ -152,12 +173,12 @@ func buildWatcherSources(cfg *config.Config, projectDir string) []watcher.Source
 		case "claude":
 			override = cfg.Watcher.TranscriptDir
 			adapter = watcher.NewClaudeAdapter()
-		case "windsurf":
-			override = cfg.Watcher.WindsurfTranscriptDir
-			adapter = &watcher.WindsurfAdapter{ProjectDir: projectDir}
 		case "pi":
 			override = cfg.Watcher.PiTranscriptDir
 			adapter = watcher.NewPiAdapter()
+		case "codex":
+			override = cfg.Watcher.CodexTranscriptDir
+			adapter = watcher.NewCodexAdapter()
 		default:
 			continue
 		}

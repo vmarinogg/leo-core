@@ -1,6 +1,7 @@
 package mcp
 
 import (
+	"encoding/json"
 	"fmt"
 
 	"github.com/momhq/mom/cli/internal/explicitrecord"
@@ -62,10 +63,29 @@ func (s *Server) toolMomRecord(args map[string]any) (toolCallResult, error) {
 // failure mode gets its own message so callers can tell "I forgot to
 // pass it" from "I passed something but the wrong shape" from "I
 // passed an object but it had no fields."
+//
+// Transport tolerance (#351): some harness tool gateways serialise
+// object-typed MCP parameters to JSON strings before forwarding. When
+// the value arrives as a string, it is parsed and accepted only if it
+// decodes to a non-empty JSON object. Strings that decode to anything
+// else (primitive, array, null) or are not valid JSON are rejected
+// with a clear error — the empty-object and shape invariants below
+// still apply post-decode.
 func requireMapArg(args map[string]any, key string) (map[string]any, error) {
 	v, ok := args[key]
 	if !ok || v == nil {
 		return nil, fmt.Errorf("%s is required", key)
+	}
+	if s, isString := v.(string); isString {
+		var parsed any
+		if err := json.Unmarshal([]byte(s), &parsed); err != nil {
+			return nil, fmt.Errorf("%s must be an object (got string that is not valid JSON: %v)", key, err)
+		}
+		m, isMap := parsed.(map[string]any)
+		if !isMap {
+			return nil, fmt.Errorf("%s must be an object (got JSON %T)", key, parsed)
+		}
+		v = m
 	}
 	m, ok := v.(map[string]any)
 	if !ok {

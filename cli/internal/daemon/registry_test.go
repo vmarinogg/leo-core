@@ -14,12 +14,12 @@ func TestRegistryRoundTrip(t *testing.T) {
 
 	reg := Registry{
 		"/home/user/project-a": RegistryEntry{
-			MomDir:   "/home/user/project-a/.mom",
-			Runtimes: []string{"claude"},
+			MomDir:    "/home/user/project-a/.mom",
+			Harnesses: []string{"claude"},
 		},
 		"/home/user/project-b": RegistryEntry{
-			MomDir:   "/home/user/project-b/.mom",
-			Runtimes: []string{"claude", "windsurf"},
+			MomDir:    "/home/user/project-b/.mom",
+			Harnesses: []string{"claude", "windsurf"},
 		},
 	}
 
@@ -39,8 +39,31 @@ func TestRegistryRoundTrip(t *testing.T) {
 	if entryA.MomDir != "/home/user/project-a/.mom" {
 		t.Errorf("unexpected momDir: %q", entryA.MomDir)
 	}
-	if len(entryA.Runtimes) != 1 || entryA.Runtimes[0] != "claude" {
-		t.Errorf("unexpected runtimes: %v", entryA.Runtimes)
+	if len(entryA.Harnesses) != 1 || entryA.Harnesses[0] != "claude" {
+		t.Errorf("unexpected harnesses: %v", entryA.Harnesses)
+	}
+}
+
+func TestLoadRegistry_PromotesLegacyRuntimesField(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+
+	path, err := RegistryPath()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte(`{
+  "/proj": {"momDir":"/proj/.mom", "runtimes":["claude"]}
+}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	reg, err := LoadRegistry()
+	if err != nil {
+		t.Fatalf("LoadRegistry: %v", err)
+	}
+	if got := reg["/proj"].Harnesses; len(got) != 1 || got[0] != "claude" {
+		t.Fatalf("Harnesses = %v, want legacy runtimes promoted", got)
 	}
 }
 
@@ -127,7 +150,7 @@ func TestLoadRegistryCanonicalizesSymlinkedProjectDir(t *testing.T) {
 
 	// Simulate an older registry entry written before canonicalization.
 	if err := SaveRegistry(Registry{
-		linkProjectDir: {MomDir: filepath.Join(linkProjectDir, ".mom"), Runtimes: []string{"claude"}},
+		linkProjectDir: {MomDir: filepath.Join(linkProjectDir, ".mom"), Harnesses: []string{"claude"}},
 	}); err != nil {
 		t.Fatalf("SaveRegistry: %v", err)
 	}
@@ -222,5 +245,58 @@ func TestGlobalLogsDir(t *testing.T) {
 	}
 	if !info.IsDir() {
 		t.Error("expected directory")
+	}
+}
+
+func TestPruneInvalidRegistryRemovesStaleEntries(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+
+	validProject := filepath.Join(tmp, "valid")
+	validMom := filepath.Join(tmp, ".mom")
+	if err := os.MkdirAll(validProject, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(validMom, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(validMom, "config.yaml"), []byte("version: \"1\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(validProject, ".mom-project.yaml"), []byte("version: \"1\"\nid: valid-project\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	staleProject := filepath.Join(tmp, "stale")
+	staleMom := filepath.Join(staleProject, ".mom")
+	if err := os.MkdirAll(staleProject, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := SaveRegistry(Registry{
+		validProject:                  {MomDir: validMom, Harnesses: []string{"pi"}},
+		staleProject:                  {MomDir: staleMom, Harnesses: []string{"pi"}},
+		filepath.Join(tmp, "nohooks"): {MomDir: validMom, Harnesses: nil},
+	}); err != nil {
+		t.Fatalf("SaveRegistry: %v", err)
+	}
+
+	report, err := PruneInvalidRegistry()
+	if err != nil {
+		t.Fatalf("PruneInvalidRegistry: %v", err)
+	}
+	if len(report.Removed) != 2 {
+		t.Fatalf("removed %d entries, want 2: %#v", len(report.Removed), report.Removed)
+	}
+
+	reg, err := LoadRegistry()
+	if err != nil {
+		t.Fatalf("LoadRegistry: %v", err)
+	}
+	if len(reg) != 1 {
+		t.Fatalf("registry len = %d, want 1: %#v", len(reg), reg)
+	}
+	if _, ok := reg[pathutil.CanonicalDir(validProject)]; !ok {
+		t.Fatalf("valid project pruned: %#v", reg)
 	}
 }

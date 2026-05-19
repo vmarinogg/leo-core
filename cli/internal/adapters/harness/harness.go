@@ -102,10 +102,10 @@ type HookDef struct {
 }
 
 // Adapter is the interface that Harness integrations must implement.
-// Each Harness (Claude, Codex, Windsurf, etc.) provides an Adapter
+// Each Harness (Claude, Codex, Pi) provides an Adapter
 // that reads from .mom/ and generates Harness-specific files.
 type Adapter interface {
-	// Name returns the Harness identifier (e.g. "claude", "codex", "windsurf").
+	// Name returns the Harness identifier (e.g. "claude", "codex", "pi").
 	Name() string
 
 	// Tier returns the Harness's integration quality classification.
@@ -128,7 +128,7 @@ type Adapter interface {
 	GeneratedDirs() []string
 
 	// Watermark returns the header comment inserted into generated files.
-	// Used to distinguish Leo-generated files from user-created ones.
+	// Used to distinguish MOM-generated files from user-created ones.
 	Watermark() string
 
 	// Capabilities returns the MRP v0 capability declaration for this adapter.
@@ -143,12 +143,6 @@ type Adapter interface {
 // hook system. The adapter owns its hook list internally.
 type HookInstaller interface {
 	RegisterHooks() error
-}
-
-// ExtensionInstaller is optionally implemented by adapters whose Harness
-// supports loadable extensions.
-type ExtensionInstaller interface {
-	RegisterExtension() error
 }
 
 // TranscriptSource is optionally implemented by adapters whose Harness

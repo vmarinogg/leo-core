@@ -16,9 +16,9 @@ type Config struct {
 	// Scope declares this install's position in the hierarchy.
 	// Valid values: user | org | repo | workspace | custom.
 	// Absent or empty is treated as "repo" for backward compatibility.
-	Scope         string                    `yaml:"scope,omitempty"`
-	Harnesses     map[string]HarnessConfig  `yaml:"harnesses"`
-	User          UserConfig                `yaml:"user"`
+	Scope         string                   `yaml:"scope,omitempty"`
+	Harnesses     map[string]HarnessConfig `yaml:"harnesses"`
+	User          UserConfig               `yaml:"user"`
 	Communication CommunicationConfig      `yaml:"communication"`
 	Memory        MemoryConfig             `yaml:"memory"`
 	RawMemories   RawMemoriesConfig        `yaml:"raw_memories"`
@@ -40,12 +40,12 @@ type WatcherConfig struct {
 	// TranscriptDir overrides the default Claude Code transcript directory.
 	// Defaults to ~/.claude/projects/ when empty.
 	TranscriptDir string `yaml:"transcript_dir,omitempty"`
-	// WindsurfTranscriptDir overrides the default Windsurf transcript directory.
-	// Defaults to ~/.windsurf/transcripts/ when empty.
-	WindsurfTranscriptDir string `yaml:"windsurf_transcript_dir,omitempty"`
 	// PiTranscriptDir overrides the default pi session directory.
 	// Defaults to ~/.pi/agent/sessions/ when empty.
 	PiTranscriptDir string `yaml:"pi_transcript_dir,omitempty"`
+	// CodexTranscriptDir overrides the default Codex session directory.
+	// Defaults to $CODEX_HOME/sessions (or ~/.codex/sessions) when empty.
+	CodexTranscriptDir string `yaml:"codex_transcript_dir,omitempty"`
 	// DebounceMs is the debounce delay in milliseconds. Default: 300.
 	DebounceMs int `yaml:"debounce_ms,omitempty"`
 }
@@ -196,8 +196,8 @@ type legacySpecialists struct {
 // loadableConfig is an intermediate struct used only during YAML parsing to
 // accept both the current "harnesses:" key and the deprecated "runtimes:" key.
 type loadableConfig struct {
-	Config          `yaml:",inline"`
-	LegacyRuntimes  map[string]HarnessConfig `yaml:"runtimes,omitempty"`
+	Config         `yaml:",inline"`
+	LegacyRuntimes map[string]HarnessConfig `yaml:"runtimes,omitempty"`
 }
 
 // Load reads a config.yaml from the given .mom/ directory.
@@ -334,12 +334,6 @@ func Save(momDir string, cfg *Config) error {
 }
 
 // MomDir returns the .mom/ directory path relative to the given project root.
-// Previously named LeoDir; renamed as part of the MOM rebrand (v0.10).
 func MomDir(projectRoot string) string {
 	return filepath.Join(projectRoot, ".mom")
-}
-
-// LeoDir is deprecated: use MomDir. Kept for backward compatibility during migration.
-func LeoDir(projectRoot string) string {
-	return filepath.Join(projectRoot, ".leo")
 }

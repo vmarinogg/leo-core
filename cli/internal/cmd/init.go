@@ -32,7 +32,7 @@ var initCmd = &cobra.Command{
 }
 
 func init() {
-	initCmd.Flags().String("harnesses", "", "AI harnesses to configure as a comma list (claude,codex,windsurf,pi,all)")
+	initCmd.Flags().String("harnesses", "", "AI harnesses to configure as a comma list (claude,codex,pi,all)")
 	initCmd.Flags().Bool("force", false, "Overwrite existing global MOM configuration")
 	initCmd.Flags().BoolP("no-interactive", "y", false, "Skip the interactive wizard and use defaults/flags")
 }
@@ -81,6 +81,9 @@ func runInit(cmd *cobra.Command, args []string) error {
 	if len(harnesses) == 0 {
 		harnesses = []string{"claude"}
 	}
+	if err := rejectRetiredHarnesses(harnesses); err != nil {
+		return err
+	}
 	harnesses = resolveInitHarnesses(cwd, harnesses)
 
 	defaults := config.Default()
@@ -124,14 +127,14 @@ func resolveInitHarnesses(cwd string, requested []string) []string {
 // always the central vault dir ($HOME/.mom or MOM_VAULT's parent for tests/local
 // runs).
 func runInitWithConfig(cmd *cobra.Command, cwd string, force bool, result OnboardingResult) error {
-	leoDir, err := centralvault.Dir()
+	momDir, err := centralvault.Dir()
 	if err != nil {
 		return err
 	}
 
 	// Check if already initialized.
 	alreadyExists := false
-	if _, err := os.Stat(leoDir); err == nil {
+	if _, err := os.Stat(momDir); err == nil {
 		if !force {
 			alreadyExists = true
 		}
@@ -143,7 +146,7 @@ func runInitWithConfig(cmd *cobra.Command, cwd string, force bool, result Onboar
 	// harnesses, refresh global integrations, and reinstall daemon — but skip
 	// scaffold.
 	if alreadyExists {
-		return runReinit(cmd, cwd, leoDir, result, p)
+		return runReinit(cmd, cwd, momDir, result, p)
 	}
 
 	showSpinner := ux.IsTTY(cmd.OutOrStdout())
@@ -152,12 +155,12 @@ func runInitWithConfig(cmd *cobra.Command, cwd string, force bool, result Onboar
 	var scaffoldErr error
 	doScaffold := func() {
 		dirs := []string{
-			leoDir,
-			filepath.Join(leoDir, "memory"),
-			filepath.Join(leoDir, "skills"),
-			filepath.Join(leoDir, "constraints"),
-			filepath.Join(leoDir, "logs"),
-			filepath.Join(leoDir, "cache"),
+			momDir,
+			filepath.Join(momDir, "memory"),
+			filepath.Join(momDir, "skills"),
+			filepath.Join(momDir, "constraints"),
+			filepath.Join(momDir, "logs"),
+			filepath.Join(momDir, "cache"),
 		}
 		for _, d := range dirs {
 			if err := os.MkdirAll(d, 0755); err != nil {
@@ -224,7 +227,7 @@ func runInitWithConfig(cmd *cobra.Command, cwd string, force bool, result Onboar
 			Memory: config.Default().Memory,
 		}
 
-		if err := config.Save(leoDir, &cfg); err != nil {
+		if err := config.Save(momDir, &cfg); err != nil {
 			kbErr = err
 			return
 		}
@@ -235,14 +238,14 @@ func runInitWithConfig(cmd *cobra.Command, cwd string, force bool, result Onboar
 			kbErr = fmt.Errorf("reading embedded schema: %w", err)
 			return
 		}
-		schemaPath := filepath.Join(leoDir, "schema.json")
+		schemaPath := filepath.Join(momDir, "schema.json")
 		if err := os.WriteFile(schemaPath, schemaData, 0644); err != nil {
 			kbErr = fmt.Errorf("writing schema: %w", err)
 			return
 		}
 
 		// Write identity.json.
-		identityPath := filepath.Join(leoDir, "identity.json")
+		identityPath := filepath.Join(momDir, "identity.json")
 		if err := os.WriteFile(identityPath, []byte(defaultIdentity()), 0644); err != nil {
 			kbErr = fmt.Errorf("writing identity.json: %w", err)
 			return
@@ -266,7 +269,7 @@ func runInitWithConfig(cmd *cobra.Command, cwd string, force bool, result Onboar
 	}
 
 	// Re-load config for harness generation.
-	cfg, err := config.Load(leoDir)
+	cfg, err := config.Load(momDir)
 	if err != nil {
 		return fmt.Errorf("loading config after write: %w", err)
 	}
@@ -274,11 +277,11 @@ func runInitWithConfig(cmd *cobra.Command, cwd string, force bool, result Onboar
 	// ── Phase 3: Generate harness context files ────────────────────────────
 	var genErr error
 	doGenerate := func() {
-		runtimeCfg := buildRuntimeConfig(cfg)
+		harnessCfg := buildHarnessConfig(cfg)
 
-		runtimeConstraints := buildRuntimeConstraints()
-		runtimeSkills := buildRuntimeSkills()
-		runtimeIdentity := buildRuntimeIdentity()
+		harnessConstraints := buildHarnessConstraints()
+		harnessSkills := buildHarnessSkills()
+		harnessIdentity := buildHarnessIdentity()
 
 		// Install global context/tool integration for all selected harnesses.
 		for _, rt := range result.Harnesses {
@@ -286,7 +289,7 @@ func runInitWithConfig(cmd *cobra.Command, cwd string, force bool, result Onboar
 			if !ok {
 				continue
 			}
-			if err := installGlobalHarness(adapter, rt, runtimeCfg, runtimeConstraints, runtimeSkills, runtimeIdentity); err != nil {
+			if err := installGlobalHarness(adapter, rt, harnessCfg, harnessConstraints, harnessSkills, harnessIdentity); err != nil {
 				genErr = err
 				return
 			}
@@ -313,7 +316,7 @@ func runInitWithConfig(cmd *cobra.Command, cwd string, force bool, result Onboar
 	installGlobalSkills(p, result.Harnesses)
 
 	// ── Phase 4: Register with global watch daemon ──────────────────────────
-	if err := ensureGlobalDaemon(cwd, leoDir, result.Harnesses); err != nil {
+	if err := ensureGlobalDaemon(cwd, momDir, result.Harnesses); err != nil {
 		p.Warnf("watch daemon: %v", err)
 	} else {
 		p.Check("Watch daemon installed")
@@ -321,16 +324,16 @@ func runInitWithConfig(cmd *cobra.Command, cwd string, force bool, result Onboar
 
 	// ── Telemetry: emit smoke events ────────────────────────────────────────
 	startedAt := time.Now().UTC().Format(time.RFC3339)
-	emitter := herald.New(leoDir, cfg.Telemetry.TelemetryEnabled())
+	emitter := herald.New(momDir, cfg.Telemetry.TelemetryEnabled())
 	emitter.EmitSessionEvent(herald.SessionEvent{
 		SessionID: "s-init",
 		RepoID:    filepath.Base(cwd),
-		Runtime:   cfg.PrimaryRuntime(),
+		Harness:   cfg.PrimaryHarness(),
 		StartedAt: startedAt,
 		Trigger:   "normal",
 	})
-	emitter.EmitRuntimeHealth(herald.RuntimeHealth{
-		Runtime:       cfg.PrimaryRuntime(),
+	emitter.EmitHarnessHealth(herald.HarnessHealth{
+		Harness:       cfg.PrimaryHarness(),
 		TS:            time.Now().UTC().Format(time.RFC3339),
 		WrapUpSuccess: true,
 		LatencyMS:     0,
@@ -350,8 +353,8 @@ func runInitWithConfig(cmd *cobra.Command, cwd string, force bool, result Onboar
 // runReinit handles `mom init` when the central vault already exists. It
 // reconciles selected harnesses, refreshes global integrations even when config
 // is unchanged, and registers the current cwd with the global watch daemon.
-func runReinit(cmd *cobra.Command, cwd, leoDir string, result OnboardingResult, p *ux.Printer) error {
-	cfg, err := config.Load(leoDir)
+func runReinit(cmd *cobra.Command, cwd, momDir string, result OnboardingResult, p *ux.Printer) error {
+	cfg, err := config.Load(momDir)
 	if err != nil {
 		// Corrupt or missing config — fall back to informational message.
 		p.Muted("MOM already exists — run with --force to reinitialize from scratch.")
@@ -382,7 +385,7 @@ func runReinit(cmd *cobra.Command, cwd, leoDir string, result OnboardingResult, 
 	}
 
 	if changed {
-		if err := config.Save(leoDir, cfg); err != nil {
+		if err := config.Save(momDir, cfg); err != nil {
 			return fmt.Errorf("saving config: %w", err)
 		}
 	}
@@ -390,10 +393,10 @@ func runReinit(cmd *cobra.Command, cwd, leoDir string, result OnboardingResult, 
 	// Refresh global context/tool integration for all enabled harnesses. This
 	// doubles as a repair path when a user deletes one global file and reruns init.
 	registry := harness.NewRegistry(cwd)
-	runtimeCfg := buildRuntimeConfig(cfg)
-	runtimeConstraints := buildRuntimeConstraints()
-	runtimeSkills := buildRuntimeSkills()
-	runtimeIdentity := buildRuntimeIdentity()
+	harnessCfg := buildHarnessConfig(cfg)
+	harnessConstraints := buildHarnessConstraints()
+	harnessSkills := buildHarnessSkills()
+	harnessIdentity := buildHarnessIdentity()
 	installed := make([]string, 0, len(cfg.EnabledHarnesses()))
 
 	for _, rt := range cfg.EnabledHarnesses() {
@@ -401,7 +404,7 @@ func runReinit(cmd *cobra.Command, cwd, leoDir string, result OnboardingResult, 
 		if !ok {
 			continue
 		}
-		if err := installGlobalHarness(adapter, rt, runtimeCfg, runtimeConstraints, runtimeSkills, runtimeIdentity); err != nil {
+		if err := installGlobalHarness(adapter, rt, harnessCfg, harnessConstraints, harnessSkills, harnessIdentity); err != nil {
 			p.Warnf("%s global integration: %v", rt, err)
 			continue
 		}
@@ -411,7 +414,7 @@ func runReinit(cmd *cobra.Command, cwd, leoDir string, result OnboardingResult, 
 	installGlobalSkills(p, cfg.EnabledHarnesses())
 
 	// Register with global watch daemon (updated harnesses).
-	if err := ensureGlobalDaemon(cwd, leoDir, cfg.EnabledHarnesses()); err != nil {
+	if err := ensureGlobalDaemon(cwd, momDir, cfg.EnabledHarnesses()); err != nil {
 		p.Warnf("watch daemon: %v", err)
 	} else {
 		p.Check("watch daemon updated")
@@ -429,10 +432,10 @@ func runReinit(cmd *cobra.Command, cwd, leoDir string, result OnboardingResult, 
 	return nil
 }
 
-// buildRuntimeConfig converts a config.Config to a harness.Config.
+// buildHarnessConfig converts a config.Config to a harness.Config.
 // Autonomy was retired from the persisted config; generated context files still
-// include the balanced default so the runtime retains the behavioral directive.
-func buildRuntimeConfig(cfg *config.Config) harness.Config {
+// include the balanced default so the harness retains the behavioral directive.
+func buildHarnessConfig(cfg *config.Config) harness.Config {
 	commMode := cfg.Communication.Mode
 	if commMode == "" {
 		commMode = "concise"
@@ -452,20 +455,20 @@ func buildRuntimeConfig(cfg *config.Config) harness.Config {
 	}
 }
 
-// buildRuntimeConstraints returns no generated central constraints. Agent behavior
+// buildHarnessConstraints returns no generated central constraints. Agent behavior
 // is delivered through installed skills and compact context files.
-func buildRuntimeConstraints() []harness.Constraint {
+func buildHarnessConstraints() []harness.Constraint {
 	return nil
 }
 
-// buildRuntimeSkills returns no generated central skills. Slash skills are
+// buildHarnessSkills returns no generated central skills. Slash skills are
 // installed through the skills package manager instead.
-func buildRuntimeSkills() []harness.Skill {
+func buildHarnessSkills() []harness.Skill {
 	return nil
 }
 
-// buildRuntimeIdentity parses the identity JSON into a harness.Identity.
-func buildRuntimeIdentity() *harness.Identity {
+// buildHarnessIdentity parses the identity JSON into a harness.Identity.
+func buildHarnessIdentity() *harness.Identity {
 	var identityData struct {
 		What        string   `json:"what"`
 		Philosophy  string   `json:"philosophy"`
@@ -483,7 +486,8 @@ func installGlobalSkills(p *ux.Printer, harnesses []string) {
 	for _, h := range harnesses {
 		agent, ok := skillsAgentForHarness(h)
 		if !ok {
-			p.Warnf("skills: unsupported harness %s", h)
+			// Pi installs its skills via the pi-mom extension; other
+			// harnesses not supported by skills.sh stay silent.
 			continue
 		}
 		args, command := skillsInstallCommand(agent)
@@ -501,27 +505,30 @@ func skillsInstallCommand(agent string) ([]string, string) {
 	return args, fmt.Sprintf("npx skills add momhq/mom -g -s '*' -a %s -y", agent)
 }
 
+// skillsAgentForHarness maps a MOM harness id to the skills.sh agent id.
+//
+// Pi is intentionally excluded: it installs the deeper pi-mom extension via
+// `pi install npm:pi-mom`, which already drops SKILL.md files into
+// ~/.pi/agent/skills/. Running skills.sh on top would duplicate every skill
+// in Pi's TUI. The pi-mom package and momhq/mom skills source stay in
+// lockstep via scripts/verify-skills-sync.sh.
 func skillsAgentForHarness(h string) (string, bool) {
 	switch h {
 	case "claude":
 		return "claude-code", true
 	case "codex":
 		return "codex", true
-	case "windsurf":
-		return "windsurf", true
-	case "pi":
-		return "pi", true
 	default:
 		return "", false
 	}
 }
 
-func installGlobalHarness(adapter harness.Adapter, rt string, runtimeCfg harness.Config, constraints []harness.Constraint, skills []harness.Skill, identity *harness.Identity) error {
+func installGlobalHarness(adapter harness.Adapter, rt string, harnessCfg harness.Config, constraints []harness.Constraint, skills []harness.Skill, identity *harness.Identity) error {
 	global, ok := adapter.(harness.GlobalAdapter)
 	if !ok {
 		return fmt.Errorf("%s does not support global install", rt)
 	}
-	if err := global.GenerateGlobalContextFile(runtimeCfg, constraints, skills, identity); err != nil {
+	if err := global.GenerateGlobalContextFile(harnessCfg, constraints, skills, identity); err != nil {
 		return fmt.Errorf("generating context: %w", err)
 	}
 	if err := global.RegisterGlobalMCP(); err != nil {
@@ -533,8 +540,12 @@ func installGlobalHarness(adapter harness.Adapter, rt string, runtimeCfg harness
 		}
 	}
 	if e, ok := adapter.(harness.GlobalExtensionInstaller); ok {
+		// Soft-fail per #255 Q7: extension install (e.g. `pi install
+		// npm:pi-mom`) is a best-effort step. If the harness CLI is
+		// missing or the marketplace install fails, mom init reports it
+		// and continues — the user can re-run the install manually.
 		if err := e.RegisterGlobalExtension(); err != nil {
-			return fmt.Errorf("registering extension: %w", err)
+			fmt.Fprintf(os.Stderr, "warning: %s extension install failed: %v\n", adapter.Name(), err)
 		}
 	}
 	return nil

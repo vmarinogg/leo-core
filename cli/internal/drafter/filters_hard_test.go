@@ -20,11 +20,11 @@ import (
 //     the substring that bookends the secret).
 func TestRedactSecrets_PatternFixture(t *testing.T) {
 	type tc struct {
-		name           string
-		input          string
-		secret         string // substring that must NOT survive redaction
-		wantCategory   string // category that must appear in returned categories
-		wantSurvives   string // text that must remain (proves we didn't nuke too much)
+		name         string
+		input        string
+		secret       string // substring that must NOT survive redaction
+		wantCategory string // category that must appear in returned categories
+		wantSurvives string // text that must remain (proves we didn't nuke too much)
 	}
 	cases := []tc{
 		{
@@ -68,9 +68,9 @@ func TestRedactSecrets_PatternFixture(t *testing.T) {
 			wantSurvives: "id_token=",
 		},
 		{
-			name: "pem-private-key-block",
-			input: "before\n-----BEGIN RSA PRIVATE KEY-----\nMIIEowIBAAKCAQEA+abc/123+def/456=\nMORE+KEY+CONTENT/HERE==\n-----END RSA PRIVATE KEY-----\nafter",
-			secret: "MIIEowIBAAKCAQEA+abc/123+def/456=",
+			name:         "pem-private-key-block",
+			input:        "before\n-----BEGIN RSA PRIVATE KEY-----\nMIIEowIBAAKCAQEA+abc/123+def/456=\nMORE+KEY+CONTENT/HERE==\n-----END RSA PRIVATE KEY-----\nafter",
+			secret:       "MIIEowIBAAKCAQEA+abc/123+def/456=",
 			wantCategory: "pem_private_key",
 			wantSurvives: "before",
 		},

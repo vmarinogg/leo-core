@@ -33,6 +33,16 @@ func (a *CodexAdapter) Tier() Tier {
 	return Fluent
 }
 
+// DefaultTranscriptDir returns Codex's session transcript directory.
+// Honors $CODEX_HOME when set (per Codex docs); otherwise falls back to
+// ~/.codex/sessions.
+func (a *CodexAdapter) DefaultTranscriptDir() string {
+	if home := os.Getenv("CODEX_HOME"); home != "" {
+		return filepath.Join(home, "sessions")
+	}
+	return "~/.codex/sessions"
+}
+
 func (a *CodexAdapter) GenerateContextFile(config Config, constraints []Constraint, skills []Skill, identity *Identity) error {
 	var body string
 	if config.Delivery == "context-file" {
@@ -51,15 +61,33 @@ func (a *CodexAdapter) GenerateContextFile(config Config, constraints []Constrai
 }
 
 func (a *CodexAdapter) RegisterHooks() error {
-	hooks := []HookDef{
-		{Event: "Stop", Command: "mom watch --sweep"},
-	}
-	codexDir := filepath.Join(a.projectRoot, ".codex")
-	hooksPath := filepath.Join(codexDir, "hooks.json")
+	return writeCodexHooks(filepath.Join(a.projectRoot, ".codex", "hooks.json"))
+}
 
-	// Ensure .codex/ exists.
-	if err := os.MkdirAll(codexDir, 0755); err != nil {
-		return fmt.Errorf("creating .codex dir: %w", err)
+// RegisterGlobalHooks writes the same hook contract to the user-level
+// Codex config dir (~/.codex/hooks.json, or $CODEX_HOME/hooks.json when
+// set) so Codex Desktop sessions fire `mom watch --sweep` after each
+// Cascade response — same defensive sweep wired for project-local
+// installs, scoped to the user.
+func (a *CodexAdapter) RegisterGlobalHooks() error {
+	path, err := codexHomePath("hooks.json")
+	if err != nil {
+		return err
+	}
+	return writeCodexHooks(path)
+}
+
+// writeCodexHooks renders Codex's hooks.json format at the given path,
+// creating parent dirs as needed. The hook set is intentionally small:
+// one Stop hook running the resolved MOM binary. Auxiliary signal — the
+// daemon's fsnotify watcher catches new transcripts even when this
+// hook never fires.
+func writeCodexHooks(hooksPath string) error {
+	hooks := []HookDef{
+		{Event: "Stop", Command: "mom watch --sweep --global"},
+	}
+	if err := os.MkdirAll(filepath.Dir(hooksPath), 0755); err != nil {
+		return fmt.Errorf("creating %s: %w", filepath.Dir(hooksPath), err)
 	}
 
 	// Codex hooks.json format: { "hooks": { "Event": [ { "hooks": [ {...} ] } ] } }
@@ -79,20 +107,15 @@ func (a *CodexAdapter) RegisterHooks() error {
 		byEvent[h.Event] = append(byEvent[h.Event], group)
 	}
 
-	root := map[string]any{
-		"hooks": byEvent,
-	}
-
+	root := map[string]any{"hooks": byEvent}
 	data, err := json.MarshalIndent(root, "", "  ")
 	if err != nil {
 		return fmt.Errorf("marshaling hooks: %w", err)
 	}
-
 	data = append(data, '\n')
 	if err := os.WriteFile(hooksPath, data, 0644); err != nil {
-		return fmt.Errorf("writing hooks.json: %w", err)
+		return fmt.Errorf("writing %s: %w", hooksPath, err)
 	}
-
 	return nil
 }
 
@@ -127,33 +150,44 @@ func (a *CodexAdapter) RegisterMCP() error {
 	return nil
 }
 
-// codexFeaturesBlock enables the hooks feature flag required by Codex.
+// codexFeaturesBlock enables Codex hooks. Codex deprecated the old
+// `codex_hooks` flag in favour of `hooks`.
 const codexFeaturesBlock = `
 [features]
-codex_hooks = true
+hooks = true
 `
 
-// upsertCodexMCPEntry ensures [mcp_servers.mom] and [features] codex_hooks
-// exist in a Codex config.toml. Idempotent — skips sections that already exist.
+// upsertCodexMCPEntry ensures [mcp_servers.mom] and [features].hooks exist in
+// a Codex config.toml. Idempotent and tolerant of older MOM writes that left
+// duplicate [features] tables or the deprecated codex_hooks key.
 func upsertCodexMCPEntry(path string) error {
 	existing, err := os.ReadFile(path)
 	if err != nil && !os.IsNotExist(err) {
 		return fmt.Errorf("reading %s: %w", filepath.Base(path), err)
 	}
 
-	// Build the MCP block with the resolved absolute path to the mom binary.
-	codexMCPBlock := fmt.Sprintf("\n[mcp_servers.mom]\ncommand = %q\nargs = [\"serve\", \"mcp\"]\n", resolveCommand())
+	// Build the MCP block. Always use the literal "mom" command so brew /
+	// npm / package upgrades pick up the right binary at runtime, instead of
+	// baking whichever absolute path happened to be on PATH at install time.
+	codexMCPBlock := "\n[mcp_servers.mom]\ncommand = \"mom\"\nargs = [\"serve\", \"mcp\"]\n"
 
 	content := string(existing)
 	changed := false
 
-	if !strings.Contains(content, "[mcp_servers.mom]") {
+	if strings.Contains(content, "[mcp_servers.mom]") {
+		refreshed, refreshedChanged := replaceCodexMCPBlock(content)
+		if refreshedChanged {
+			content = refreshed
+			changed = true
+		}
+	} else {
 		content = strings.TrimRight(content, "\n") + "\n" + codexMCPBlock
 		changed = true
 	}
 
-	if !strings.Contains(content, "codex_hooks") {
-		content = strings.TrimRight(content, "\n") + "\n" + codexFeaturesBlock
+	cleaned := normalizeCodexFeaturesBlock(content)
+	if cleaned != content {
+		content = cleaned
 		changed = true
 	}
 
@@ -165,6 +199,134 @@ func upsertCodexMCPEntry(path string) error {
 		return fmt.Errorf("writing %s: %w", filepath.Base(path), err)
 	}
 	return nil
+}
+
+// replaceCodexMCPBlock rewrites the existing [mcp_servers.mom] section so
+// its command/args fields always reflect the canonical "mom serve mcp" entry.
+// Stale paths baked by earlier installs (e.g. /tmp/mom-dev) are repaired.
+// The block ends at the next top-level [section] header. Any nested
+// [mcp_servers.mom.env] table is dropped — it was test-only debris.
+func replaceCodexMCPBlock(content string) (string, bool) {
+	lines := strings.Split(content, "\n")
+	var out []string
+	inBlock := false
+	changed := false
+	canonical := []string{
+		"[mcp_servers.mom]",
+		"command = \"mom\"",
+		"args = [\"serve\", \"mcp\"]",
+	}
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		isHeader := strings.HasPrefix(trimmed, "[") && strings.HasSuffix(trimmed, "]")
+		if trimmed == "[mcp_servers.mom]" {
+			inBlock = true
+			out = append(out, canonical...)
+			changed = true
+			continue
+		}
+		if inBlock {
+			if isHeader {
+				// nested mcp_servers.mom.* tables (e.g. .env) are dropped.
+				if strings.HasPrefix(trimmed, "[mcp_servers.mom.") {
+					changed = true
+					continue
+				}
+				inBlock = false
+				out = append(out, line)
+				continue
+			}
+			// drop original key/value lines inside the block.
+			changed = true
+			continue
+		}
+		out = append(out, line)
+	}
+	rebuilt := strings.TrimRight(strings.Join(out, "\n"), "\n") + "\n"
+	return rebuilt, changed && rebuilt != content
+}
+
+func normalizeCodexFeaturesBlock(content string) string {
+	lines := strings.Split(content, "\n")
+	var out []string
+	inFeatures := false
+	skipDuplicateFeatures := false
+	featuresSeen := false
+	hooksSeen := false
+	changed := false
+
+	flushFeatures := func() {
+		if inFeatures && !hooksSeen {
+			out = append(out, "hooks = true")
+			changed = true
+		}
+	}
+
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		isHeader := strings.HasPrefix(trimmed, "[") && strings.HasSuffix(trimmed, "]")
+		if isHeader {
+			flushFeatures()
+			inFeatures = trimmed == "[features]"
+			skipDuplicateFeatures = false
+			hooksSeen = false
+			if inFeatures {
+				if featuresSeen {
+					inFeatures = false
+					skipDuplicateFeatures = true
+					changed = true
+					continue
+				}
+				featuresSeen = true
+			}
+			out = append(out, line)
+			continue
+		}
+
+		if skipDuplicateFeatures {
+			changed = true
+			continue
+		}
+
+		if inFeatures {
+			if strings.HasPrefix(trimmed, "codex_hooks") {
+				if !hooksSeen {
+					out = append(out, "hooks = true")
+					hooksSeen = true
+				}
+				changed = true
+				continue
+			}
+			if strings.HasPrefix(trimmed, "hooks") {
+				if hooksSeen {
+					changed = true
+					continue
+				}
+				out = append(out, "hooks = true")
+				hooksSeen = true
+				if trimmed != "hooks = true" {
+					changed = true
+				}
+				continue
+			}
+		}
+		out = append(out, line)
+	}
+	flushFeatures()
+
+	if !featuresSeen {
+		trimmed := strings.TrimRight(strings.Join(out, "\n"), "\n")
+		if trimmed != "" {
+			trimmed += "\n"
+		}
+		return trimmed + strings.TrimLeft(codexFeaturesBlock, "\n")
+	}
+
+	result := strings.TrimRight(strings.Join(out, "\n"), "\n") + "\n"
+	if !changed && result == content {
+		return content
+	}
+	return result
 }
 
 func (a *CodexAdapter) DetectHarness() bool {
@@ -238,6 +400,8 @@ func codexHomePath(parts ...string) (string, error) {
 }
 
 var (
-	_ GlobalAdapter = (*CodexAdapter)(nil)
-	_ HookInstaller = (*CodexAdapter)(nil)
+	_ GlobalAdapter       = (*CodexAdapter)(nil)
+	_ HookInstaller       = (*CodexAdapter)(nil)
+	_ GlobalHookInstaller = (*CodexAdapter)(nil)
+	_ TranscriptSource    = (*CodexAdapter)(nil)
 )

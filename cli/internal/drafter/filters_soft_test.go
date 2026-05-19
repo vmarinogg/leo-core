@@ -70,9 +70,9 @@ func TestIsNoise_PureCodeWriteTurn(t *testing.T) {
 	// Single tool call that writes a file, no text. v1 logbook
 	// "Code being typed" rule. Code lives in the repo, not in MOM.
 	turn := softTurn{
-		Role:                  "assistant",
-		Text:                  "",
-		ToolCount:             1,
+		Role:                   "assistant",
+		Text:                   "",
+		ToolCount:              1,
 		CodebaseWriteToolCount: 1,
 	}
 	if !isNoise(turn) {

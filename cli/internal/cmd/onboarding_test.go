@@ -41,13 +41,13 @@ func isolateHarnessDetection(t *testing.T) {
 //   Confirm:     y/n, empty = default
 //
 // Form flow (bootstrap select removed alongside cartographer):
-//   Form 1: Note(welcome), MultiSelect(runtimes), Select(mode)
+//   Form 1: Note(welcome), MultiSelect(harnesses), Select(mode)
 //   Form 2: Note(summary), Confirm
 
 // TestOnboarding_DefaultSelections verifies that accepting all defaults works.
 func TestOnboarding_DefaultSelections(t *testing.T) {
 	isolateHarnessDetection(t)
-	// 0=confirm runtimes (claude pre-selected), then empty for mode, confirm.
+	// 0=confirm harnesses (claude pre-selected), then empty for mode, confirm.
 	input := testReader("0\n\n\n")
 	output := &bytes.Buffer{}
 
@@ -57,10 +57,10 @@ func TestOnboarding_DefaultSelections(t *testing.T) {
 	}
 
 	if len(result.Harnesses) == 0 {
-		t.Fatal("expected at least one runtime")
+		t.Fatal("expected at least one harness")
 	}
 	if result.Harnesses[0] != "claude" {
-		t.Errorf("expected first runtime=claude, got %q", result.Harnesses[0])
+		t.Errorf("expected first harness=claude, got %q", result.Harnesses[0])
 	}
 	if result.Language != "en" {
 		t.Errorf("expected language=en, got %q", result.Language)
@@ -91,10 +91,10 @@ func TestOnboarding_ExplicitSelections(t *testing.T) {
 		return false
 	}
 	if !hasRuntime("claude") {
-		t.Error("expected claude in runtimes")
+		t.Error("expected claude in harnesses")
 	}
 	if !hasRuntime("codex") {
-		t.Error("expected codex in runtimes")
+		t.Error("expected codex in harnesses")
 	}
 	if result.Language != "en" {
 		t.Errorf("expected language=en (fixed), got %q", result.Language)
@@ -139,7 +139,7 @@ func TestOnboarding_OutputContainsWelcome(t *testing.T) {
 }
 
 // TestOnboarding_OutputContainsSummary verifies the summary step renders.
-// Input: confirm runtimes, mode=2(efficient), confirm=y.
+// Input: confirm harnesses, mode=2(efficient), confirm=y.
 func TestOnboarding_OutputContainsSummary(t *testing.T) {
 	isolateHarnessDetection(t)
 	input := testReader("0\n2\ny\n")
@@ -164,10 +164,10 @@ func TestOnboarding_OutputContainsSummary(t *testing.T) {
 	}
 }
 
-// TestOnboarding_MultipleRuntimesSelected verifies toggling multiple runtimes.
-func TestOnboarding_MultipleRuntimesSelected(t *testing.T) {
+// TestOnboarding_MultipleHarnessesSelected verifies toggling multiple harnesses.
+func TestOnboarding_MultipleHarnessesSelected(t *testing.T) {
 	isolateHarnessDetection(t)
-	// Toggle codex (2) and windsurf (3), confirm (0), then defaults for mode and confirm.
+	// Toggle codex (2) and pi (3), confirm (0), then defaults for mode and confirm.
 	input := testReader("2\n3\n0\n\n\n")
 	output := &bytes.Buffer{}
 
@@ -177,7 +177,7 @@ func TestOnboarding_MultipleRuntimesSelected(t *testing.T) {
 	}
 
 	if len(result.Harnesses) != 3 {
-		t.Fatalf("expected 3 runtimes, got %d: %v", len(result.Harnesses), result.Harnesses)
+		t.Fatalf("expected 3 harnesses, got %d: %v", len(result.Harnesses), result.Harnesses)
 	}
 }
 
@@ -186,7 +186,7 @@ func TestOnboarding_MultipleRuntimesSelected(t *testing.T) {
 func TestOnboarding_GlobalInitUsesCurrentDirForWatcher(t *testing.T) {
 	isolateHarnessDetection(t)
 	cwd := t.TempDir()
-	// 0=confirm runtimes, empty for mode, empty for confirm (default=yes).
+	// 0=confirm harnesses, empty for mode, empty for confirm (default=yes).
 	input := testReader("0\n\n\n")
 	output := &bytes.Buffer{}
 

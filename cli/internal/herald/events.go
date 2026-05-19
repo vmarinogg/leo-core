@@ -6,7 +6,7 @@ type SessionEvent struct {
 	SessionID     string  `json:"session_id"`
 	OrgID         string  `json:"org_id,omitempty"`
 	RepoID        string  `json:"repo_id"`
-	Runtime       string  `json:"runtime"`
+	Harness       string  `json:"harness"`
 	StartedAt     string  `json:"started_at"`
 	EndedAt       *string `json:"ended_at"`
 	Trigger       string  `json:"trigger"`
@@ -50,10 +50,10 @@ type ConsumptionEvent struct {
 	Context   string  `json:"context"`
 }
 
-// RuntimeHealth records health metrics for a runtime at wrap-up time.
-type RuntimeHealth struct {
+// HarnessHealth records health metrics for a harness at wrap-up time.
+type HarnessHealth struct {
 	Kind          string  `json:"kind"`
-	Runtime       string  `json:"runtime"`
+	Harness       string  `json:"harness"`
 	TS            string  `json:"ts"`
 	WrapUpSuccess bool    `json:"wrap_up_success"`
 	ErrorType     *string `json:"error_type"`

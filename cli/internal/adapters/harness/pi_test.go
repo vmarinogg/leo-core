@@ -2,6 +2,7 @@ package harness
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -70,54 +71,72 @@ func TestPiAdapter_GenerateContextFile_MinimalDelivery(t *testing.T) {
 	}
 }
 
-func TestPiAdapter_RegisterExtension_LaysDownExtension(t *testing.T) {
-	dir := t.TempDir()
-	a := NewPiAdapter(dir)
+// TestPiAdapter_RegisterGlobalExtension_InvokesPiMarketplace verifies
+// that RegisterGlobalExtension shells the Pi marketplace install
+// command per #255 — the embedded TypeScript surface is retired.
+func TestPiAdapter_RegisterGlobalExtension_InvokesPiMarketplace(t *testing.T) {
+	// Stub the install command so the test does not require pi on PATH.
+	origInstall := piInstallCommand
+	origLookPath := commandExistsForPi
+	t.Cleanup(func() {
+		piInstallCommand = origInstall
+		commandExistsForPi = origLookPath
+	})
+	commandExistsForPi = func() bool { return true }
 
-	if err := a.RegisterExtension(); err != nil {
-		t.Fatalf("RegisterExtension: %v", err)
+	var capturedPkg string
+	piInstallCommand = func(pkg string) ([]byte, error) {
+		capturedPkg = pkg
+		return []byte("ok"), nil
 	}
 
-	target := filepath.Join(dir, ".pi", "extensions", "mom-tools.ts")
-	data, err := os.ReadFile(target)
-	if err != nil {
-		t.Fatalf("reading mom-tools.ts: %v", err)
+	a := NewPiAdapter(t.TempDir())
+	if err := a.RegisterGlobalExtension(); err != nil {
+		t.Fatalf("RegisterGlobalExtension: %v", err)
 	}
-	if len(data) == 0 {
-		t.Fatal("mom-tools.ts is empty")
-	}
-
-	// Sanity check: the embedded extension exposes a default factory that
-	// registers MOM tools with pi. Match a couple of stable phrases without
-	// being too brittle.
-	s := string(data)
-	for _, want := range []string{
-		"export default",
-		"pi.registerTool",
-		"mom",
-		"ctx.sessionManager.getSessionId()",
-	} {
-		if !strings.Contains(s, want) {
-			t.Errorf("mom-tools.ts missing expected token %q", want)
-		}
+	if capturedPkg != "npm:pi-mom" {
+		t.Errorf("install package = %q, want npm:pi-mom", capturedPkg)
 	}
 }
 
-func TestPiAdapter_RegisterExtension_Idempotent(t *testing.T) {
-	dir := t.TempDir()
-	a := NewPiAdapter(dir)
+// When pi is not on PATH, RegisterGlobalExtension surfaces an actionable
+// error (caller — mom init — soft-fails to the user).
+func TestPiAdapter_RegisterGlobalExtension_FailsWhenPiMissing(t *testing.T) {
+	origLookPath := commandExistsForPi
+	t.Cleanup(func() { commandExistsForPi = origLookPath })
+	commandExistsForPi = func() bool { return false }
 
-	if err := a.RegisterExtension(); err != nil {
-		t.Fatalf("first RegisterExtension: %v", err)
+	a := NewPiAdapter(t.TempDir())
+	err := a.RegisterGlobalExtension()
+	if err == nil {
+		t.Fatal("expected error when pi CLI is missing")
 	}
-	if err := a.RegisterExtension(); err != nil {
-		t.Fatalf("second RegisterExtension: %v", err)
+	if !strings.Contains(err.Error(), "pi CLI not found") {
+		t.Errorf("error should mention missing pi CLI, got %v", err)
+	}
+}
+
+// Install command failures surface as errors with the underlying output
+// so users (and mom init's logger) can diagnose.
+func TestPiAdapter_RegisterGlobalExtension_SurfacesInstallError(t *testing.T) {
+	origInstall := piInstallCommand
+	origLookPath := commandExistsForPi
+	t.Cleanup(func() {
+		piInstallCommand = origInstall
+		commandExistsForPi = origLookPath
+	})
+	commandExistsForPi = func() bool { return true }
+	piInstallCommand = func(pkg string) ([]byte, error) {
+		return []byte("network unreachable"), fmt.Errorf("exit status 1")
 	}
 
-	// Second call should overwrite cleanly with identical content.
-	target := filepath.Join(dir, ".pi", "extensions", "mom-tools.ts")
-	if _, err := os.Stat(target); err != nil {
-		t.Errorf("mom-tools.ts missing after second call: %v", err)
+	a := NewPiAdapter(t.TempDir())
+	err := a.RegisterGlobalExtension()
+	if err == nil {
+		t.Fatal("expected install error to surface")
+	}
+	if !strings.Contains(err.Error(), "network unreachable") {
+		t.Errorf("error should surface install output, got %v", err)
 	}
 }
 
@@ -231,9 +250,12 @@ func TestPiAdapter_DetectHarness_DoesNotMatchOnAGENTSMd(t *testing.T) {
 func TestPiAdapter_GeneratedFiles(t *testing.T) {
 	a := NewPiAdapter("/tmp/x")
 	got := a.GeneratedFiles()
+	// The pi-mom extension is installed via the Pi marketplace into
+	// ~/.pi/agent/extensions/ (see RegisterGlobalExtension) — it is
+	// not a MOM-generated project file. Only AGENTS.md and .mcp.json
+	// land in the project root.
 	want := []string{
 		"AGENTS.md",
-		filepath.Join(".pi", "extensions", "mom-tools.ts"),
 		".mcp.json",
 	}
 	if len(got) != len(want) {

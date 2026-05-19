@@ -14,7 +14,7 @@ MOM remembers project decisions across sessions.
 
 At session start, call ` + "`mom_status`" + `.
 
-Prefer skills and CLI: /mom-status, /mom-recall, /mom-wrap-up. For explicit "remember/save this" requests, pipe text to ` + "`mom record`" + ` through CLI; never invent session IDs, and omit ` + "`--session`" + ` unless you have a real runtime session ID. MCP fallback is for startup, discovery, or when CLI is unavailable.
+Prefer skills and CLI: /mom-status, /mom-recall, /mom-project, /mom-wrap-up. For explicit "remember/save this" requests, pipe text to ` + "`mom record`" + ` through CLI; never invent session IDs, and omit ` + "`--session`" + ` unless you have a real harness session ID. MCP fallback is for startup, discovery, or when CLI is unavailable.
 `
 }
 

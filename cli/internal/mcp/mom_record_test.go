@@ -218,6 +218,81 @@ func TestMomRecord_RejectsNonObjectContent(t *testing.T) {
 	}
 }
 
+// TestMomRecord_AcceptsContentAsStringifiedJSON locks the v0.40
+// harness-transport tolerance behaviour (#351). Some harness tool
+// gateways (notably Pi) serialise object-typed MCP parameters to
+// JSON strings before forwarding. The handler must accept either a
+// native map or a JSON string that parses into one, so well-formed
+// records from those harnesses are not silently dropped.
+func TestMomRecord_AcceptsContentAsStringifiedJSON(t *testing.T) {
+	srv, rs := newSrvWithSubscriber(t)
+	res, err := srv.toolMomRecord(map[string]any{
+		"session_id": "33333333-3333-4333-8333-333333333333",
+		"summary":    "stringified payload",
+		"content":    `{"text":"deploy notes from pi"}`,
+	})
+	if err != nil {
+		t.Fatalf("toolMomRecord: %v", err)
+	}
+	if res.IsError {
+		t.Fatalf("got IsError=true: %+v", res)
+	}
+	got, ok := rs.get()
+	if !ok {
+		t.Fatal("no event published")
+	}
+	payloadContent, ok := got.Payload["content"].(map[string]any)
+	if !ok {
+		t.Fatalf("event content not parsed to map: %T %+v", got.Payload["content"], got.Payload["content"])
+	}
+	if payloadContent["text"] != "deploy notes from pi" {
+		t.Errorf("content.text = %v, want \"deploy notes from pi\"", payloadContent["text"])
+	}
+}
+
+// TestMomRecord_RejectsStringifiedJSONWithEmptyObject keeps the
+// empty-content invariant after we permit string coercion: a string
+// that parses to an empty object must still be rejected and must not
+// publish an event.
+func TestMomRecord_RejectsStringifiedJSONWithEmptyObject(t *testing.T) {
+	srv, rs := newSrvWithSubscriber(t)
+	_, err := srv.toolMomRecord(map[string]any{
+		"session_id": "44444444-4444-4444-8444-444444444444",
+		"content":    `{}`,
+	})
+	if err == nil {
+		t.Fatal("expected error for stringified empty object")
+	}
+	if rs.count.Load() != 0 {
+		t.Errorf("event count = %d, want 0", rs.count.Load())
+	}
+}
+
+// TestMomRecord_RejectsStringifiedNonObject locks the rule that
+// stringified primitives or arrays do NOT coerce into the object
+// shape mom_record requires. Only JSON objects pass.
+func TestMomRecord_RejectsStringifiedNonObject(t *testing.T) {
+	cases := []string{
+		`"just a string"`, // valid JSON, not an object
+		`123`,             // number
+		`["text"]`,        // array
+		`null`,            // null
+	}
+	for _, raw := range cases {
+		srv, rs := newSrvWithSubscriber(t)
+		_, err := srv.toolMomRecord(map[string]any{
+			"session_id": "55555555-5555-4555-8555-555555555555",
+			"content":    raw,
+		})
+		if err == nil {
+			t.Fatalf("raw=%q: expected error", raw)
+		}
+		if rs.count.Load() != 0 {
+			t.Fatalf("raw=%q: event count = %d, want 0", raw, rs.count.Load())
+		}
+	}
+}
+
 // TestMomRecord_RejectsTagsThatNormaliseToEmpty locks the lesson from
 // the previous attempt: a memory + entity edge was persisted and THEN
 // UpsertTag("") failed downstream, leaving an orphan memory. The fix

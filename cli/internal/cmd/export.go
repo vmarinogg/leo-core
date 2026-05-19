@@ -1,13 +1,11 @@
 package cmd
 
 import (
-	"crypto/sha256"
 	"database/sql"
 	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
-	"sort"
 	"strings"
 	"time"
 
@@ -49,7 +47,7 @@ var exportCmd = &cobra.Command{
 
 var importCmd = &cobra.Command{
 	Use:   "import <path>",
-	Short: "Import MOM memory from a central export or legacy JSON files",
+	Short: "Import MOM memory from a central export",
 	Args:  cobra.ExactArgs(1),
 	RunE:  runImport,
 }
@@ -154,8 +152,7 @@ func writeJSONFile(path string, v any) error {
 }
 
 // runImport implements `mom import <path>`. It is merge-only: existing rows are
-// skipped, never overwritten. It accepts both modern table exports and legacy
-// JSON memory directories.
+// skipped, never overwritten. It accepts central table exports only.
 func runImport(cmd *cobra.Command, args []string) error {
 	importPath, err := filepath.Abs(args[0])
 	if err != nil {
@@ -180,18 +177,7 @@ func runImport(cmd *cobra.Command, args []string) error {
 		return nil
 	}
 
-	summary, err := importLegacyMemoryPath(importPath)
-	if err != nil {
-		return err
-	}
-	if summary.Skipped > 0 {
-		p.Muted(fmt.Sprintf("  %d source skipped (already imported)", summary.Skipped))
-	}
-	p.Checkf("%d memories imported", len(summary.Mappings))
-	if summary.Audit != "" {
-		p.Chevron(fmt.Sprintf("audit: %s", summary.Audit))
-	}
-	return nil
+	return fmt.Errorf("import path must be a MOM central export; legacy JSON imports were removed in v0.40 (upgrade to MOM v0.30 first for pre-v0.30 migrations)")
 }
 
 func isCentralExport(path string) (bool, error) {
@@ -299,68 +285,4 @@ func tableColumns(v *vault.Vault, table string) ([]string, error) {
 		return nil
 	})
 	return cols, err
-}
-
-func importLegacyMemoryPath(path string) (importSummary, error) {
-	memDir, ok := legacyImportMemoryDir(path)
-	if !ok {
-		return importSummary{}, fmt.Errorf("import path must be a MOM export or contain legacy memory JSON files")
-	}
-	docs, fingerprint, err := readLegacyMemoryDocsFromDir(memDir)
-	if err != nil {
-		return importSummary{}, err
-	}
-	if len(docs) == 0 {
-		return importSummary{}, fmt.Errorf("no legacy memory JSON files found in %s", memDir)
-	}
-	return executeCentralMemoryImport([]legacyVaultPlan{{Path: path, Fingerprint: fingerprint, Docs: docs}})
-}
-
-func legacyImportMemoryDir(path string) (string, bool) {
-	for _, candidate := range []string{
-		filepath.Join(path, "memory"),
-		filepath.Join(path, "docs"),
-		path,
-	} {
-		entries, err := os.ReadDir(candidate)
-		if err != nil {
-			continue
-		}
-		for _, e := range entries {
-			if _, ok := legacyMemoryJSONPath(candidate, e); ok {
-				return candidate, true
-			}
-		}
-	}
-	return "", false
-}
-
-func readLegacyMemoryDocsFromDir(memDir string) ([]legacyMemoryDoc, string, error) {
-	entries, err := os.ReadDir(memDir)
-	if err != nil {
-		return nil, "", err
-	}
-	var docs []legacyMemoryDoc
-	var parts []string
-	for _, e := range entries {
-		path, ok := legacyMemoryJSONPath(memDir, e)
-		if !ok {
-			continue
-		}
-		raw, err := os.ReadFile(path)
-		if err != nil {
-			continue
-		}
-		var doc map[string]any
-		if err := json.Unmarshal(raw, &doc); err != nil {
-			continue
-		}
-		sum := sha256.Sum256(raw)
-		hash := fmt.Sprintf("%x", sum[:])
-		docs = append(docs, legacyMemoryDoc{Path: path, Raw: raw, Doc: doc, Hash: hash})
-		parts = append(parts, e.Name()+":"+hash)
-	}
-	sort.Strings(parts)
-	sum := sha256.Sum256([]byte(strings.Join(parts, "\n")))
-	return docs, fmt.Sprintf("%x", sum[:]), nil
 }
