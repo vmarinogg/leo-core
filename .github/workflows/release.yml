@@ -12,14 +12,13 @@ jobs:
     runs-on: ubuntu-latest
     defaults:
       run:
-        working-directory: cli
     steps:
       - uses: actions/checkout@v4
 
       - uses: actions/setup-go@v5
         with:
           go-version: "1.26"
-          cache-dependency-path: cli/go.sum
+          cache-dependency-path: go.sum
 
       - name: Run tests
         run: go test ./...
@@ -29,25 +28,24 @@ jobs:
     runs-on: macos-latest
     defaults:
       run:
-        working-directory: cli
     steps:
       - uses: actions/checkout@v4
 
       - uses: actions/setup-go@v5
         with:
           go-version: "1.26"
-          cache-dependency-path: cli/go.sum
+          cache-dependency-path: go.sum
 
       - name: Build darwin/arm64
         run: |
           GOOS=darwin GOARCH=arm64 CGO_ENABLED=1 go build \
-            -ldflags "-s -w -X github.com/momhq/mom/cli/internal/cmd.Version=${GITHUB_REF#refs/tags/} -X github.com/momhq/mom/cli/internal/cmd.Commit=${GITHUB_SHA::7}" \
+            -ldflags "-s -w -X github.com/momhq/mom/ingress/cli.Version=${GITHUB_REF#refs/tags/} -X github.com/momhq/mom/ingress/cli.Commit=${GITHUB_SHA::7}" \
             -o bin/mom-darwin-arm64 ./cmd/mom
 
       - name: Build darwin/amd64
         run: |
           GOOS=darwin GOARCH=amd64 CGO_ENABLED=1 go build \
-            -ldflags "-s -w -X github.com/momhq/mom/cli/internal/cmd.Version=${GITHUB_REF#refs/tags/} -X github.com/momhq/mom/cli/internal/cmd.Commit=${GITHUB_SHA::7}" \
+            -ldflags "-s -w -X github.com/momhq/mom/ingress/cli.Version=${GITHUB_REF#refs/tags/} -X github.com/momhq/mom/ingress/cli.Commit=${GITHUB_SHA::7}" \
             -o bin/mom-darwin-amd64 ./cmd/mom
 
       - name: Compress
@@ -58,26 +56,25 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: darwin-binaries
-          path: cli/bin/mom-darwin-*.gz
+          path: bin/mom-darwin-*.gz
 
   build-linux:
     needs: test
     runs-on: ubuntu-latest
     defaults:
       run:
-        working-directory: cli
     steps:
       - uses: actions/checkout@v4
 
       - uses: actions/setup-go@v5
         with:
           go-version: "1.26"
-          cache-dependency-path: cli/go.sum
+          cache-dependency-path: go.sum
 
       - name: Build linux/amd64
         run: |
           CGO_ENABLED=1 go build \
-            -ldflags "-s -w -X github.com/momhq/mom/cli/internal/cmd.Version=${GITHUB_REF#refs/tags/} -X github.com/momhq/mom/cli/internal/cmd.Commit=${GITHUB_SHA::7}" \
+            -ldflags "-s -w -X github.com/momhq/mom/ingress/cli.Version=${GITHUB_REF#refs/tags/} -X github.com/momhq/mom/ingress/cli.Commit=${GITHUB_SHA::7}" \
             -o bin/mom-linux-amd64 ./cmd/mom
 
       - name: Compress
@@ -87,7 +84,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: linux-binaries
-          path: cli/bin/mom-linux-*.gz
+          path: bin/mom-linux-*.gz
 
   release:
     needs: [build-darwin, build-linux]
