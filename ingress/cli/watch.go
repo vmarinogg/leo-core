@@ -11,6 +11,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/momhq/mom/events/editor"
 	"github.com/momhq/mom/storage/canonical"
 
 	"github.com/fsnotify/fsnotify"
@@ -108,6 +109,7 @@ func runWatch(cmd *cobra.Command, _ []string) error {
 			Sources:    sources,
 			SweepOnly:  true,
 			Bus:        bus,
+			Editor:     editor.New(bus, nil, nil),
 		})
 		if err != nil {
 			return fmt.Errorf("creating watcher: %w", err)
@@ -134,6 +136,7 @@ func runWatch(cmd *cobra.Command, _ []string) error {
 		Sources:    sources,
 		DebounceMs: 300,
 		Bus:        bus,
+		Editor:     editor.New(bus, nil, nil),
 	})
 	if err != nil {
 		return fmt.Errorf("creating watcher: %w", err)
@@ -256,6 +259,7 @@ func runWatchGlobal(sweepOnly bool) error {
 				Sources:    sources,
 				SweepOnly:  true,
 				Bus:        bus,
+				Editor:     editor.New(bus, nil, nil),
 			})
 			if err != nil {
 				p.Warn(fmt.Sprintf("sweep %s: %v", projDir, err))
@@ -315,6 +319,7 @@ func runWatchGlobal(sweepOnly bool) error {
 			Sources:    sources,
 			DebounceMs: 300,
 			Bus:        bus,
+			Editor:     editor.New(bus, nil, nil),
 		})
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "[mom] watch %s: %v\n", projDir, err)

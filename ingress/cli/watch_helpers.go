@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/momhq/mom/events/editor"
 	"github.com/momhq/mom/storage/canonical"
 
 	"github.com/momhq/mom/ingress/harness"
@@ -133,6 +134,7 @@ func sweepTranscripts(projectDir, momDir string) {
 		Sources:    sources,
 		SweepOnly:  true,
 		Bus:        bus,
+		Editor:     editor.New(bus, nil, nil),
 	})
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "[mom] sweep: %v\n", err)
