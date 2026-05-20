@@ -2,10 +2,16 @@ VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo "dev
 COMMIT  ?= $(shell git rev-parse --short HEAD 2>/dev/null || echo "none")
 LDFLAGS  = -ldflags "-X github.com/momhq/mom/ingress/cli.Version=$(VERSION) -X github.com/momhq/mom/ingress/cli.Commit=$(COMMIT)"
 
-.PHONY: build test lint clean install brew-audit
+.PHONY: build test lint clean install brew-audit verify-registry
 
 build:
 	go build $(LDFLAGS) -o bin/mom ./cmd/mom
+
+# verify-registry validates every event schema under
+# events/registry/schemas/ against ADR 0018 + 0019. Fails on bad
+# filenames, malformed JSON, unknown field types, or family/name mismatches.
+verify-registry:
+	go test ./events/registry/... -run TestRegistry_OnDiskSchemasValid -count=1
 
 install:
 	@go install $(LDFLAGS) ./cmd/mom

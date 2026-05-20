@@ -32,6 +32,9 @@ jobs:
       - name: Smoke test
         run: ./bin/mom version
 
+      - name: Verify event schema registry (ADR 0018 + 0019)
+        run: make verify-registry
+
       - name: Test with coverage and race detector
         run: go test -race -coverprofile=coverage.out -covermode=atomic ./...
 
