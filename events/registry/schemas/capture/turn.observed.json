@@ -1,0 +1,16 @@
+{
+  "name": "capture.turn.observed",
+  "description": "A turn was observed on a harness transcript. Published by the watcher (ingress/watcher) for every parsed Turn. Carries the structured turn (role, text, tool_calls, usage, model, provider) on the bus; never persisted in raw form per ADR 0014.",
+  "fields": {
+    "session_id":       {"type": "string", "required": true},
+    "project_id":       {"type": "string", "required": false},
+    "provenance_actor": {"type": "string", "required": false},
+    "role":             {"type": "string", "required": true, "values": ["user", "assistant"]},
+    "text":             {"type": "string", "required": false},
+    "tool_calls":       {"type": "array",  "required": false},
+    "usage":            {"type": "object", "required": false},
+    "model":            {"type": "string", "required": false},
+    "provider":         {"type": "string", "required": false},
+    "harness":          {"type": "string", "required": false}
+  }
+}

@@ -1,0 +1,9 @@
+{
+  "name": "lifecycle.memory.dropped",
+  "description": "Drafter's soft filter dropped a cluster (noise heuristic, short/ack-only content, etc.). No memory is persisted; this event exists so Lens can show 'dropped' rows in the activity timeline.",
+  "fields": {
+    "session_id":   {"type": "string", "required": true},
+    "project_id":   {"type": "string", "required": false},
+    "drop_reason":  {"type": "string", "required": false}
+  }
+}

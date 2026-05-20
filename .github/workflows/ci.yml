@@ -15,14 +15,13 @@ jobs:
     runs-on: ubuntu-latest
     defaults:
       run:
-        working-directory: cli
     steps:
       - uses: actions/checkout@v4
 
       - uses: actions/setup-go@v5
         with:
           go-version: "1.26"
-          cache-dependency-path: cli/go.sum
+          cache-dependency-path: go.sum
 
       - name: Check go mod tidy
         run: go mod tidy && git diff --exit-code go.mod go.sum
@@ -32,6 +31,9 @@ jobs:
 
       - name: Smoke test
         run: ./bin/mom version
+
+      - name: Verify event schema registry (ADR 0018 + 0019)
+        run: make verify-registry
 
       - name: Test with coverage and race detector
         run: go test -race -coverprofile=coverage.out -covermode=atomic ./...
@@ -54,7 +56,7 @@ jobs:
         run: |
           cd "$GITHUB_WORKSPACE"
           MISSING=""
-          for f in $(git diff --name-only --diff-filter=A origin/main -- 'cli/internal/**/*.go' | grep -v '_test.go$'); do
+          for f in $(git diff --name-only --diff-filter=A origin/main -- './**/*.go' | grep -v '_test.go$'); do
             TEST_FILE="${f%%.go}_test.go"
             if [ ! -f "$TEST_FILE" ]; then
               MISSING="$MISSING\n- \`$f\` (expected \`$TEST_FILE\`)"
@@ -73,19 +75,17 @@ jobs:
     runs-on: ubuntu-latest
     defaults:
       run:
-        working-directory: cli
     steps:
       - uses: actions/checkout@v4
 
       - uses: actions/setup-go@v5
         with:
           go-version: "1.26"
-          cache-dependency-path: cli/go.sum
+          cache-dependency-path: go.sum
 
       - uses: golangci/golangci-lint-action@v7
         with:
           version: v2.11
-          working-directory: cli
 
       - name: Vet
         run: go vet ./...

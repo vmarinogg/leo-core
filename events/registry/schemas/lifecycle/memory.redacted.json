@@ -1,0 +1,11 @@
+{
+  "name": "lifecycle.memory.redacted",
+  "description": "Drafter's hard filter caught a secret in a cluster and redacted matching substrings before persisting. The matched substance is NEVER carried in this event (ADR 0014 §filter-audit).",
+  "fields": {
+    "session_id":         {"type": "string", "required": true},
+    "memory_id":          {"type": "string", "required": true},
+    "project_id":         {"type": "string", "required": false},
+    "filter_category":    {"type": "string", "required": false},
+    "redaction_count":    {"type": "number", "required": false}
+  }
+}
