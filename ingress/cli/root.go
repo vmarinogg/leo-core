@@ -45,4 +45,6 @@ func init() {
 	rootCmd.AddCommand(demoCmd)
 	rootCmd.AddCommand(lensCmd)
 	rootCmd.AddCommand(projectCmd)
+	rootCmd.AddCommand(getCmd)
+	rootCmd.AddCommand(landmarksCmd)
 }
