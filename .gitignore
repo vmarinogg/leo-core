@@ -38,3 +38,7 @@ mom-export/
 # Autoresearch artifacts
 autoresearch.jsonl
 mom-autoresearch/
+
+# Working directories — local-only, not shipped
+/goals/
+/scripts/
