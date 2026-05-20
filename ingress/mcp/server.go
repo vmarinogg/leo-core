@@ -122,6 +122,10 @@ func (s *Server) Serve(in io.Reader, out io.Writer) {
 	p.Diamond("MCP server")
 	p.Chevron(fmt.Sprintf("scope: %s", s.momDir))
 	p.Muted("listening on stdio — stdout reserved for JSON-RPC")
+	// ADR 0023: MCP transport is deprecated; emit exactly one boot
+	// warning so harness operators see the migration notice. Sent
+	// to stderr so it doesn't pollute the JSON-RPC channel on stdout.
+	fmt.Fprintln(os.Stderr, deprecationNotice)
 	p.Blank()
 
 	// Open log file in append mode.
@@ -240,3 +244,27 @@ func (s *Server) logEntry(f *os.File, status, method, detail string) {
 		fmt.Fprintf(f, "%s  %-6s  %s\n", ts, status, method)
 	}
 }
+
+// deprecationNotice is the v0.50 boot warning per ADR 0023.
+// Emitted to stderr exactly once per Serve invocation.
+const deprecationNotice = `WARN: MOM's MCP transport is deprecated and will be removed in v0.60+.
+      Configure your harness to invoke ` + "`" + `mom <subcommand>` + "`" + ` as a subprocess.
+      See adr/0023-mcp-server-retirement.md for details.`
+
+// ToolNamesForParityAudit returns the names of every MCP tool the
+// server exposes. Exported solely for the CLI/MCP parity audit
+// (ingress/mcp/parity_test.go) per ADR 0023. Production code uses
+// the internal allTools() instead.
+func ToolNamesForParityAudit() []string {
+	defs := allTools()
+	names := make([]string, 0, len(defs))
+	for _, d := range defs {
+		names = append(names, d.Name)
+	}
+	return names
+}
+
+// DeprecationNotice returns the boot warning emitted to stderr per
+// ADR 0023. Exported so the parity test can assert the message
+// format without reaching into package internals.
+func DeprecationNotice() string { return deprecationNotice }
