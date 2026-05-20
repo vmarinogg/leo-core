@@ -28,19 +28,19 @@ var allowedTopLevelDirs = map[string]bool{
 // Anything else at the root is flagged. Test entries omitted from
 // gitignored paths.
 var allowedTopLevelFiles = map[string]bool{
-	".gitignore":       true,
-	".golangci.yml":    true,
-	".mcp.json":        true,
-	".mcp.json.bkp":    true,
-	".mom-project.yaml": true,
+	".gitignore":         true,
+	".golangci.yml":      true,
+	".mcp.json":          true,
+	".mcp.json.bkp":      true,
+	".mom-project.yaml":  true,
 	"CODE_OF_CONDUCT.md": true,
-	"CONTRIBUTING.md":  true,
-	"LICENSE":          true,
-	"Makefile":         true,
-	"README.md":        true,
-	"SECURITY.md":      true,
-	"go.mod":           true,
-	"go.sum":           true,
+	"CONTRIBUTING.md":    true,
+	"LICENSE":            true,
+	"Makefile":           true,
+	"README.md":          true,
+	"SECURITY.md":        true,
+	"go.mod":             true,
+	"go.sum":             true,
 }
 
 // allowedTopLevelDirsAux are dirs that live at the root but aren't Go
