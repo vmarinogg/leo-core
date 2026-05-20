@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/momhq/mom/shared/config"
 	"github.com/momhq/mom/shared/project"
 	"github.com/spf13/cobra"
 )
@@ -59,5 +60,23 @@ func runProjectBind(cmd *cobra.Command, args []string) error {
 		return err
 	}
 	fmt.Fprintf(cmd.OutOrStdout(), "bound %s to project %q\n", cwd, projectBindId)
+
+	// Per #388: binding expresses user intent that this directory should be
+	// watched. Register with the global daemon so a running daemon picks it
+	// up via the registry's fsnotify path, and so subsequent watch runs find
+	// it. Skipped silently when MOM is not initialized — the binding file is
+	// still useful (e.g. checked into a repo before MOM is installed on a
+	// new machine), and `mom init`/`mom upgrade` will register later.
+	projectRoot, momDir, err := resolveMomContext(cwd)
+	if err != nil {
+		return nil
+	}
+	cfg, err := config.Load(momDir)
+	if err != nil {
+		return nil
+	}
+	if err := ensureGlobalDaemon(projectRoot, momDir, cfg.EnabledHarnesses()); err != nil {
+		fmt.Fprintf(cmd.ErrOrStderr(), "warning: registering with watch daemon: %v\n", err)
+	}
 	return nil
 }

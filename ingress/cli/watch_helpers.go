@@ -45,9 +45,30 @@ func resolveMomContext(cwd string) (projectDir string, momDir string, err error)
 
 // ensureGlobalDaemon registers the project in the global watch registry and
 // ensures the single global daemon is running. Also cleans up legacy per-project agents.
-// Skipped when MOM_NO_DAEMON=1 or when running inside a test binary.
+//
+// Registry write (prune + register) always runs — including under tests and
+// under MOM_NO_DAEMON=1 — because the registry file is the source of user
+// intent and the running daemon hot-loads it via fsnotify. Only the daemon
+// install / launchctl side effects are skipped under the test/no-daemon gate.
 func ensureGlobalDaemon(projectRoot, momDir string, harnesses []string) error {
 	projectRoot = pathutil.CanonicalDir(projectRoot)
+
+	// ADR 0016: require an explicit project binding before adding this
+	// directory to the daemon registry. Without this, running `mom init`
+	// or `mom upgrade` from $HOME (or any unrelated cwd) would silently
+	// promote that directory into a permanently-watched project.
+	if _, err := os.Stat(filepath.Join(projectRoot, ".mom-project.yaml")); err != nil {
+		return fmt.Errorf("refusing to watch %s: no .mom-project.yaml binding (run `mom project bind <id>`)", projectRoot)
+	}
+
+	// Prune stale pre-v0.40 registry entries before registering this project.
+	_, _ = daemon.PruneInvalidRegistry()
+
+	// Register this project in the global registry.
+	if err := daemon.RegisterProject(projectRoot, momDir, harnesses); err != nil {
+		return fmt.Errorf("registering project: %w", err)
+	}
+
 	if os.Getenv("MOM_NO_DAEMON") == "1" {
 		return nil
 	}
@@ -64,22 +85,6 @@ func ensureGlobalDaemon(projectRoot, momDir string, harnesses []string) error {
 
 	// Do NOT resolve symlinks — global daemon uses the symlink path so
 	// brew upgrade / package updates are picked up on restart.
-
-	// Prune stale pre-v0.40 registry entries before registering this project.
-	_, _ = daemon.PruneInvalidRegistry()
-
-	// ADR 0016: require an explicit project binding before adding this
-	// directory to the daemon registry. Without this, running `mom init`
-	// or `mom upgrade` from $HOME (or any unrelated cwd) would silently
-	// promote that directory into a permanently-watched project.
-	if _, err := os.Stat(filepath.Join(projectRoot, ".mom-project.yaml")); err != nil {
-		return fmt.Errorf("refusing to watch %s: no .mom-project.yaml binding (run `mom project bind <id>`)", projectRoot)
-	}
-
-	// Register this project in the global registry.
-	if err := daemon.RegisterProject(projectRoot, momDir, harnesses); err != nil {
-		return fmt.Errorf("registering project: %w", err)
-	}
 
 	// Start global daemon if not already running.
 	h, err := daemon.StatusGlobal()
