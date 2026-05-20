@@ -1,6 +1,10 @@
 package watcher
 
-import "time"
+import (
+	"time"
+
+	"github.com/momhq/mom/bus/herald"
+)
 
 // Turn is the per-turn structured payload emitted by the watcher's
 // adapters. It carries everything Drafter needs to make filter
@@ -119,4 +123,16 @@ func (t Turn) ToPayload() map[string]any {
 		out["project_id"] = t.ProjectId
 	}
 	return out
+}
+
+// Canonical implements editor.Canonicalizer. It exposes Turn as a
+// canonical herald.TurnObserved event whose payload is exactly the
+// ToPayload() shape Drafter and Logbook already consume. The Editor
+// (ADR 0020) layers provenance + project_id + schema validation on top.
+func (t Turn) Canonical() (herald.EventType, map[string]any) {
+	payload := t.ToPayload()
+	if t.SessionID != "" {
+		payload["session_id"] = t.SessionID
+	}
+	return herald.TurnObserved, payload
 }

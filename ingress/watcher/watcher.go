@@ -12,6 +12,7 @@ import (
 
 	"github.com/fsnotify/fsnotify"
 	"github.com/momhq/mom/bus/herald"
+	"github.com/momhq/mom/events/editor"
 	"github.com/momhq/mom/shared/pathutil"
 	"github.com/momhq/mom/shared/project"
 	"github.com/momhq/mom/shared/ux"
@@ -53,11 +54,25 @@ type Config struct {
 	// DebounceMs is how long to wait after a Write event before reading.
 	// Defaults to 300ms if zero.
 	DebounceMs int
-	// Bus is the Herald event bus. When set, the watcher publishes one
-	// turn.observed event per parsed Turn so downstream subscribers
-	// (Drafter, Logbook) can run. May be nil; the watcher still
-	// advances cursors and writes its log either way.
+	// Bus is the Herald event bus. When set (and Editor is not),
+	// the watcher publishes one turn.observed event per parsed Turn
+	// directly so downstream subscribers (Drafter, Logbook) can run.
+	// May be nil; the watcher still advances cursors and writes its
+	// log either way.
+	//
+	// Deprecated by ADR 0020: when Editor is set, the watcher
+	// publishes through the Editor instead. Bus remains as the
+	// transport the Editor wraps. Callers should wire both during
+	// the v0.50 transition; #364's archtest will eventually forbid
+	// direct Bus.Publish from any Ingress package.
 	Bus *herald.Bus
+
+	// Editor is the canonicalization gateway (ADR 0020). When set,
+	// the watcher publishes parsed Turns through Editor.Publish,
+	// which canonicalizes, validates against the registry, and emits
+	// onto the bus. The Editor itself must hold a Bus reference.
+	Editor *editor.Editor
+
 	// SweepOnly when true skips fsnotify setup. The watcher can only be
 	// used for one-shot Sweep() calls, not Run().
 	SweepOnly bool
@@ -437,10 +452,19 @@ func (w *Watcher) ingestFile(path string) int {
 		w.p.Checkf("ingested %d turns from %s — %s", len(turns), w.p.HighlightValue(rt), w.p.HighlightValue(short))
 	}
 
-	// Emit one turn.observed event per parsed Turn. Drafter consumes
-	// these for the filter + cluster + persist pipeline; Logbook
-	// projects to a privacy-safe metadata row.
-	if w.cfg.Bus != nil {
+	// Emit one turn.observed event per parsed Turn. When Editor (ADR
+	// 0020) is wired, all canonicalization, validation, and provenance
+	// stamping happens there; the watcher just hands the Turn over.
+	// The legacy direct Bus.Publish path is retained for callers
+	// that haven't migrated yet.
+	if w.cfg.Editor != nil {
+		for _, t := range turns {
+			w.cfg.Editor.Publish(t, editor.Source{
+				Adapter: t.Harness,
+				Cwd:     resolveCwdForTurn(t, w.cfg.ProjectDir),
+			})
+		}
+	} else if w.cfg.Bus != nil {
 		defaultProjectId := w.resolveProjectId()
 		for _, t := range turns {
 			// Prefer per-turn cwd when the adapter surfaced one (Codex
@@ -590,4 +614,15 @@ func (w *Watcher) logf(format string, args ...any) {
 	defer f.Close()
 	ts := time.Now().UTC().Format(time.RFC3339)
 	fmt.Fprintf(f, "%s watcher: "+format+"\n", append([]any{ts}, args...)...)
+}
+
+// resolveCwdForTurn returns the working directory the Editor should
+// use for project_id resolution. Per-turn cwd from the adapter wins
+// when present (Codex reports it per turn); otherwise fall back to
+// the watcher's configured ProjectDir.
+func resolveCwdForTurn(t Turn, projectDir string) string {
+	if t.Cwd != "" {
+		return t.Cwd
+	}
+	return projectDir
 }
