@@ -74,10 +74,10 @@ const recordPrefixSize = 4
 // Event is the canonical herald.Event from the Editor (ADR 0020).
 // AppendedAt is the wall-clock time the Ledger wrote the record.
 type Record struct {
-	ID         string         `json:"id"`
-	Offset     uint64         `json:"offset"`
-	AppendedAt time.Time      `json:"appended_at"`
-	Event      herald.Event   `json:"event"`
+	ID         string       `json:"id"`
+	Offset     uint64       `json:"offset"`
+	AppendedAt time.Time    `json:"appended_at"`
+	Event      herald.Event `json:"event"`
 }
 
 // Ledger is a handle on the on-disk segment directory. Open returns
@@ -87,16 +87,16 @@ type Record struct {
 type Ledger struct {
 	dir      string
 	mu       sync.Mutex
-	active   *segment      // currently open for appending
+	active   *segment       // currently open for appending
 	segments []*segmentInfo // all segments ordered by start offset
 	nextID   uint64         // next offset to assign
 }
 
 type segment struct {
-	path   string
-	file   *os.File
-	size   int64  // current size including header
-	start  uint64 // offset of the FIRST record in this segment
+	path  string
+	file  *os.File
+	size  int64  // current size including header
+	start uint64 // offset of the FIRST record in this segment
 }
 
 type segmentInfo struct {

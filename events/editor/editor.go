@@ -69,7 +69,7 @@ type Canonicalizer interface {
 // Editor is the canonicalization gateway. Construct via New.
 type Editor struct {
 	bus      Bus
-	ledger   LedgerAppender    // nil → Ledger append skipped (transitional)
+	ledger   LedgerAppender     // nil → Ledger append skipped (transitional)
 	registry *registry.Registry // nil → validation skipped (transitional)
 	logger   *log.Logger
 }

@@ -272,12 +272,12 @@ func TestEventNameRegex_AcceptsV1Families(t *testing.T) {
 
 func TestEventNameRegex_RejectsBadNames(t *testing.T) {
 	bad := []string{
-		"bootstrap.session.started",      // parked family
-		"capture.turn.Observed",          // uppercase
-		"capture.turn",                   // missing verb
-		"capture.turn.observed.extra",    // too many parts
-		"CAPTURE.turn.observed",          // uppercase family
-		"random.turn.observed",           // unknown family
+		"bootstrap.session.started",   // parked family
+		"capture.turn.Observed",       // uppercase
+		"capture.turn",                // missing verb
+		"capture.turn.observed.extra", // too many parts
+		"CAPTURE.turn.observed",       // uppercase family
+		"random.turn.observed",        // unknown family
 	}
 	for _, b := range bad {
 		if registry.EventNameRegex.MatchString(b) {

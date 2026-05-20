@@ -1,0 +1,33 @@
+name: PR has Closes/Fixes link
+
+# Enforces the PR-template rule from PRD 0004 (v0.50): every PR body
+# must contain a `Closes #N` or `Fixes #N` line so issues auto-close
+# on merge and the v0.X.Y milestone stays clean for the release-gate.
+#
+# Skips dependabot, release-bot, and PRs labelled `no-issue` (for
+# the rare doc-only or repo-housekeeping change that does not pair
+# with a tracker issue).
+
+on:
+  pull_request:
+    types: [opened, edited, synchronize, ready_for_review, reopened]
+
+jobs:
+  closes-link:
+    if: >-
+      github.actor != 'dependabot[bot]' &&
+      !contains(github.event.pull_request.labels.*.name, 'no-issue')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Assert PR body links a closing keyword
+        env:
+          BODY: ${{ github.event.pull_request.body }}
+        run: |
+          set -euo pipefail
+          if echo "$BODY" | grep -Eiq '(closes|fixes|resolves)[[:space:]]*#[0-9]+'; then
+            echo "PR body contains a Closes/Fixes/Resolves link — OK"
+            exit 0
+          fi
+          echo "::error::PR body must contain a 'Closes #N', 'Fixes #N', or 'Resolves #N' line."
+          echo "::error::Add it to the description, or apply the 'no-issue' label for issue-less PRs."
+          exit 1

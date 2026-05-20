@@ -1,0 +1,69 @@
+name: Release gate
+
+# Runs when a v0.x.y* tag is pushed. Enforces the milestone-clean
+# release-gate contract from PRD 0004 (v0.50) and the facts sheet in
+# goals/v0-50-execution-plan/facts.md:
+#
+#   "Every issue must close before the milestone tags. The release-
+#    gate CI job asserts zero open issues in milestone v<X.Y.Z> at
+#    tag time."
+
+on:
+  push:
+    tags:
+      - 'v[0-9]+.[0-9]+.[0-9]+*'
+
+jobs:
+  milestone-clean:
+    name: Milestone has zero open issues
+    runs-on: ubuntu-latest
+    permissions:
+      issues: read
+      contents: read
+    steps:
+      - name: Derive milestone title from tag
+        id: milestone
+        run: |
+          TAG="${GITHUB_REF#refs/tags/}"
+          # Strip any pre-release suffix: v0.50.0-alpha -> v0.50.0
+          MILESTONE="${TAG%%-*}"
+          echo "title=$MILESTONE" >> "$GITHUB_OUTPUT"
+          echo "tag=$TAG"           >> "$GITHUB_OUTPUT"
+          echo "Tag: $TAG"
+          echo "Milestone: $MILESTONE"
+
+      - name: Assert milestone has zero open issues
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          MILESTONE='${{ steps.milestone.outputs.title }}'
+          REPO='${{ github.repository }}'
+
+          # gh issue list filters by milestone *title*. We list open
+          # issues only and count rows. Zero rows = milestone clean.
+          OPEN_JSON=$(gh issue list \
+            --repo "$REPO" \
+            --milestone "$MILESTONE" \
+            --state open \
+            --limit 200 \
+            --json number,title)
+
+          COUNT=$(echo "$OPEN_JSON" | jq 'length')
+          echo "Open issues in milestone $MILESTONE: $COUNT"
+          if [ "$COUNT" -gt 0 ]; then
+            echo "::error::release-gate: milestone $MILESTONE has $COUNT open issues at tag time"
+            echo "$OPEN_JSON" | jq -r '.[] | "  - #\(.number) \(.title)"'
+            exit 1
+          fi
+          echo "release-gate: milestone $MILESTONE is clean — proceeding"
+
+  pr-closes-link:
+    name: Inform on PR-template Closes/Fixes line
+    # Informational only; tag-push events have no PR context. The
+    # gate exists so the workflow file documents the rule even when
+    # there is no live job to run on tag events.
+    runs-on: ubuntu-latest
+    if: false
+    steps:
+      - run: 'true'
