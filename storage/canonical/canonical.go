@@ -96,6 +96,25 @@ func Migrations() []vault.Migration {
 			)`,
 		},
 	})
+	migs = append(migs, vault.Migration{
+		// Crier (ADR 0022) projects canonical events from the Ledger
+		// (ADR 0021) into the Vault. To stay idempotent at-least-once
+		// we (a) tag each projected row with the ledger offset that
+		// produced it (UNIQUE so re-applying the same offset is a
+		// no-op), and (b) persist a single-row checkpoint that
+		// Crier advances after each successful projection.
+		Version: 7,
+		Stmts: []string{
+			`ALTER TABLE op_events ADD COLUMN ledger_offset INTEGER`,
+			`CREATE UNIQUE INDEX idx_op_events_ledger_offset ON op_events(ledger_offset) WHERE ledger_offset IS NOT NULL`,
+			`CREATE TABLE crier_state (
+				id          INTEGER PRIMARY KEY CHECK (id = 1),
+				checkpoint  INTEGER NOT NULL,
+				updated_at  TEXT NOT NULL
+			)`,
+			`INSERT INTO crier_state (id, checkpoint, updated_at) VALUES (1, -1, datetime('now'))`,
+		},
+	})
 	sort.Slice(migs, func(i, j int) bool { return migs[i].Version < migs[j].Version })
 	return migs
 }
