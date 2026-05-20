@@ -134,7 +134,7 @@ func sweepTranscripts(projectDir, momDir string) {
 		Sources:    sources,
 		SweepOnly:  true,
 		Bus:        bus,
-		Editor:     editor.New(bus, nil, nil),
+		Editor:     editor.New(bus, nil, nil).WithLedger(openCentralLedger()),
 	})
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "[mom] sweep: %v\n", err)

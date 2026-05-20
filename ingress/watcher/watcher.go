@@ -459,10 +459,12 @@ func (w *Watcher) ingestFile(path string) int {
 	// that haven't migrated yet.
 	if w.cfg.Editor != nil {
 		for _, t := range turns {
-			w.cfg.Editor.Publish(t, editor.Source{
+			if err := w.cfg.Editor.Publish(t, editor.Source{
 				Adapter: t.Harness,
 				Cwd:     resolveCwdForTurn(t, w.cfg.ProjectDir),
-			})
+			}); err != nil {
+				w.logf("editor publish (%s, session=%s): %v", herald.TurnObserved, t.SessionID, err)
+			}
 		}
 	} else if w.cfg.Bus != nil {
 		defaultProjectId := w.resolveProjectId()

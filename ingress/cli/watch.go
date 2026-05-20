@@ -13,6 +13,7 @@ import (
 
 	"github.com/momhq/mom/events/editor"
 	"github.com/momhq/mom/storage/canonical"
+	"github.com/momhq/mom/storage/ledger"
 
 	"github.com/fsnotify/fsnotify"
 	"github.com/momhq/mom/bus/herald"
@@ -109,7 +110,7 @@ func runWatch(cmd *cobra.Command, _ []string) error {
 			Sources:    sources,
 			SweepOnly:  true,
 			Bus:        bus,
-			Editor:     editor.New(bus, nil, nil),
+			Editor:     editor.New(bus, nil, nil).WithLedger(openCentralLedger()),
 		})
 		if err != nil {
 			return fmt.Errorf("creating watcher: %w", err)
@@ -136,7 +137,7 @@ func runWatch(cmd *cobra.Command, _ []string) error {
 		Sources:    sources,
 		DebounceMs: 300,
 		Bus:        bus,
-		Editor:     editor.New(bus, nil, nil),
+		Editor:     editor.New(bus, nil, nil).WithLedger(openCentralLedger()),
 	})
 	if err != nil {
 		return fmt.Errorf("creating watcher: %w", err)
@@ -259,7 +260,7 @@ func runWatchGlobal(sweepOnly bool) error {
 				Sources:    sources,
 				SweepOnly:  true,
 				Bus:        bus,
-				Editor:     editor.New(bus, nil, nil),
+				Editor:     editor.New(bus, nil, nil).WithLedger(openCentralLedger()),
 			})
 			if err != nil {
 				p.Warn(fmt.Sprintf("sweep %s: %v", projDir, err))
@@ -319,7 +320,7 @@ func runWatchGlobal(sweepOnly bool) error {
 			Sources:    sources,
 			DebounceMs: 300,
 			Bus:        bus,
-			Editor:     editor.New(bus, nil, nil),
+			Editor:     editor.New(bus, nil, nil).WithLedger(openCentralLedger()),
 		})
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "[mom] watch %s: %v\n", projDir, err)
@@ -531,4 +532,22 @@ func openCentralWorkers() centralWorkers {
 		drafter: drafter.New(lib),
 		logbook: logbook.New(lib),
 	}
+}
+
+// openCentralLedger opens the Ledger at $HOME/.mom/ledger/ (per
+// ADR 0021). The Editor uses it for durable-append before bus
+// publish. Returns nil on failure so callers fall back to bus-only
+// publish without erroring out the watcher.
+func openCentralLedger() editor.LedgerAppender {
+	dir, err := canonical.Dir()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "watch: canonical.Dir: %v — ledger not wired\n", err)
+		return nil
+	}
+	led, err := ledger.Open(filepath.Join(dir, "ledger"))
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "watch: ledger.Open: %v — ledger not wired\n", err)
+		return nil
+	}
+	return led
 }
