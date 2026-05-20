@@ -29,6 +29,7 @@ type claudeTranscriptLine struct {
 	Message     claudeMessage `json:"message"`
 	Timestamp   string        `json:"timestamp"`
 	SessionID   string        `json:"sessionId"`
+	Cwd         string        `json:"cwd"`
 	IsSidechain bool          `json:"isSidechain"`
 }
 
@@ -74,6 +75,7 @@ func (a *ClaudeAdapter) ExtractTurn(line []byte, sessionID string) (Turn, bool) 
 		Model:     tl.Message.Model,
 		Provider:  "anthropic",
 		Harness:   "claude-code",
+		Cwd:       tl.Cwd,
 	}
 	if turn.SessionID == "" {
 		turn.SessionID = sessionID

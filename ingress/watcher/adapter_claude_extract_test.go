@@ -20,6 +20,36 @@ const claudeSidechainTurn = `{"type":"assistant","sessionId":"s-test","isSidecha
 
 const claudeToolResultTurn = `{"type":"user","sessionId":"s-test","isSidechain":false,"message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_1","content":"file content"}]}}`
 
+// Claude Code writes a per-turn `cwd` on every assistant/user line.
+// The adapter must surface it via Turn.Cwd so the watcher can scope
+// project_id per turn (parity with the Codex adapter).
+const claudeUserTurnWithCwd = `{"type":"user","sessionId":"s-test","timestamp":"2026-05-05T12:00:00.000Z","isSidechain":false,"cwd":"/Users/x/logbook","message":{"role":"user","content":"hello"}}`
+
+func TestClaudeAdapter_ExtractTurn_SurfacesCwd(t *testing.T) {
+	a := NewClaudeAdapter()
+	turn, ok := a.ExtractTurn([]byte(claudeUserTurnWithCwd), "s-test")
+	if !ok {
+		t.Fatal("expected ok=true for user turn with cwd")
+	}
+	if turn.Cwd != "/Users/x/logbook" {
+		t.Errorf("Turn.Cwd = %q, want /Users/x/logbook (per-turn cwd must be surfaced for project_id resolution)", turn.Cwd)
+	}
+}
+
+// When the transcript line has no cwd, the adapter must leave Turn.Cwd
+// empty rather than synthesising a fallback. Fallback to the watcher's
+// startup ProjectDir happens at the watcher layer, not here.
+func TestClaudeAdapter_ExtractTurn_LeavesCwdEmptyWhenAbsent(t *testing.T) {
+	a := NewClaudeAdapter()
+	turn, ok := a.ExtractTurn([]byte(claudeUserTurn), "s-test")
+	if !ok {
+		t.Fatal("expected ok=true")
+	}
+	if turn.Cwd != "" {
+		t.Errorf("Turn.Cwd = %q, want empty (adapter must not synthesise cwd)", turn.Cwd)
+	}
+}
+
 func TestClaudeAdapter_ExtractTurn_UserText(t *testing.T) {
 	a := NewClaudeAdapter()
 	turn, ok := a.ExtractTurn([]byte(claudeUserTurn), "s-fallback")

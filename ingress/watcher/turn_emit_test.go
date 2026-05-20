@@ -248,6 +248,63 @@ func TestIngestFile_StampsProjectIdFromBindFile(t *testing.T) {
 	}
 }
 
+// TestIngestFile_StampsProjectIdFromPerTurnCwd_Claude verifies that a
+// Claude transcript line's per-turn `cwd` wins project_id resolution
+// over the watcher's startup ProjectDir. This is the contract that
+// keeps claude-code captures correctly scoped even when no
+// project-scoped watcher is registered (sibling to the Codex
+// `turn_context.cwd` path).
+func TestIngestFile_StampsProjectIdFromPerTurnCwd_Claude(t *testing.T) {
+	transcriptDir := t.TempDir()
+	momDir := t.TempDir()
+	watcherProjectDir := t.TempDir() // intentionally unbound
+	boundDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(boundDir, ".mom-project.yaml"),
+		[]byte("version: \"1\"\nid: logbook\n"), 0o644); err != nil {
+		t.Fatalf("write bind file: %v", err)
+	}
+
+	bus := herald.NewBus()
+	var mu sync.Mutex
+	var captured []herald.Event
+	bus.Subscribe(herald.TurnObserved, func(e herald.Event) {
+		mu.Lock()
+		captured = append(captured, e)
+		mu.Unlock()
+	})
+
+	w := &Watcher{
+		cfg: Config{
+			TranscriptDir: transcriptDir,
+			ProjectDir:    watcherProjectDir,
+			MomDir:        momDir,
+			Adapter:       NewClaudeAdapter(),
+			Bus:           bus,
+		},
+		timers:    make(map[string]*time.Timer),
+		cursorDir: filepath.Join(momDir, "cache"),
+		logFile:   filepath.Join(momDir, "watch.log"),
+	}
+	_ = os.MkdirAll(w.cursorDir, 0755)
+
+	line := `{"type":"user","sessionId":"s-cwd","timestamp":"2026-05-05T12:00:00.000Z","isSidechain":false,"cwd":"` + boundDir + `","message":{"role":"user","content":"hi"}}`
+	transcriptPath := filepath.Join(transcriptDir, "s-cwd.jsonl")
+	if err := os.WriteFile(transcriptPath, []byte(line+"\n"), 0o644); err != nil {
+		t.Fatalf("write transcript: %v", err)
+	}
+	w.ingestFile(transcriptPath)
+
+	mu.Lock()
+	defer mu.Unlock()
+	if len(captured) != 1 {
+		t.Fatalf("got %d events, want 1", len(captured))
+	}
+	got, _ := captured[0].Payload["project_id"].(string)
+	if got != "logbook" {
+		t.Errorf("payload project_id = %q, want logbook (resolved from per-turn cwd, not from watcher ProjectDir)", got)
+	}
+}
+
 // When the watcher's ProjectDir has no bind file, payloads omit
 // project_id (NULL stamps downstream).
 func TestIngestFile_OmitsProjectIdWhenUnbound(t *testing.T) {
