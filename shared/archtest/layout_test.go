@@ -34,6 +34,7 @@ var allowedTopLevelFiles = map[string]bool{
 	".mcp.json.bkp":      true,
 	".mom-project.yaml":  true,
 	"CODE_OF_CONDUCT.md": true,
+	"CHANGELOG.md":      true,
 	"CONTRIBUTING.md":    true,
 	"LICENSE":            true,
 	"Makefile":           true,
