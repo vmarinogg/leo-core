@@ -57,7 +57,7 @@ brew update && brew upgrade mom && mom version
 
 ```bash
 git clone https://github.com/momhq/mom.git
-cd mom/cli
+cd mom
 make install
 ```
 
@@ -214,13 +214,24 @@ Skills install is a soft-fail step, so _mom_ can be usable even if the external 
 
 ## Project layout
 
+The codebase is organised into role-based top-level buckets (see [ADR 0017](adr/0017-role-based-repo-layout.md)).
+
 ```text
 .
-├── assets/                 # logo and brand assets
-├── cli/                    # Go CLI, MCP server, watcher, Lens server
-├── skills/                 # _mom_ slash skills
+├── cmd/mom/                # entrypoint
+├── ingress/                # external input: CLI, MCP, watcher adapters, harness detection, explicit record
+├── events/                 # canonical event Editor, schema Registry, Crier projector (v0.50 work)
+├── bus/herald/             # in-process event bus
+├── workers/                # bus subscribers — drafter, logbook, cartographer, gardener
+├── services/               # read-side application code — finder (recall), lens (dashboard)
+├── storage/                # durable state — vault, librarian (gate), canonical, memory, legacy
+├── ops/                    # background lifecycle — daemon, diagnose
+├── shared/                 # cross-cutting utilities — config, pathutil, scope, project, ux, archtest
+├── docs/                   # in-repo documentation
 ├── adr/                    # architecture decisions
 ├── prd/                    # product requirements
+├── skills/                 # _mom_ slash skills
+├── assets/                 # logo and brand assets
 ├── Formula/mom.rb          # Homebrew formula
 └── .github/workflows/      # CI and release automation
 ```
