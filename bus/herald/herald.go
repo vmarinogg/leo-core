@@ -26,29 +26,36 @@ const (
 	ConfigChanged    EventType = "config-changed"
 	Error            EventType = "error"
 
-	// TurnObserved is the v0.30 source-of-truth event published by the
+	// TurnObserved is the source-of-truth event published by the
 	// watcher for every parsed turn. Carries the full structured turn
 	// (role, text, tool_calls with input, usage, model, provider) on
 	// the bus only — never persisted in raw form. Drafter consumes it
 	// for filter decisions; Logbook consumes it and persists a
 	// metadata-only projection (no text, no tool inputs) per ADR
 	// 0014's privacy contract.
-	TurnObserved EventType = "turn.observed"
+	//
+	// Renamed in v0.50 to capture.turn.observed per ADR 0018
+	// (family.subject.verb taxonomy). The constant name TurnObserved
+	// is the stable identifier; producers and subscribers use it.
+	TurnObserved EventType = "capture.turn.observed"
 
 	// MemoryRecord is the explicit-write event published by the MCP
 	// `mom_record` tool. Drafter consumes it, bypasses both filter
 	// layers (the user's explicitness wins per ADR 0014), and persists
-	// through Librarian. Logbook also subscribes to op.memory.created
-	// (below) for the audit stream.
-	MemoryRecord EventType = "memory.record"
+	// through Librarian.
+	//
+	// Renamed in v0.50 to capture.memory.recorded per ADR 0018.
+	MemoryRecord EventType = "capture.memory.recorded"
 
 	// OpMemoryCreated / OpMemoryRedacted / OpMemoryDropped are
 	// Drafter's outcome events for each turn it processed. Logbook
 	// subscribes to all three so Lens can show "memory was created /
 	// redacted / dropped" rows in the activity timeline.
-	OpMemoryCreated  EventType = "op.memory.created"
-	OpMemoryRedacted EventType = "op.memory.redacted"
-	OpMemoryDropped  EventType = "op.memory.dropped"
+	//
+	// Renamed in v0.50 to lifecycle.memory.* per ADR 0018.
+	OpMemoryCreated  EventType = "lifecycle.memory.created"
+	OpMemoryRedacted EventType = "lifecycle.memory.redacted"
+	OpMemoryDropped  EventType = "lifecycle.memory.dropped"
 )
 
 // Event is a single message on the bus.

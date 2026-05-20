@@ -146,7 +146,7 @@ func (s *Server) loadSessionData() (map[string]sessionData, int, error) {
 		b := get(e.SessionID)
 		b.includeTime(e.CreatedAt)
 		switch e.EventType {
-		case "turn.observed":
+		case "capture.turn.observed":
 			applyTurnObserved(b, e.Payload)
 		case "legacy.session.summary":
 			applyLegacySummary(b, e.Payload)
