@@ -1,0 +1,12 @@
+{
+  "name": "lifecycle.memory.created",
+  "description": "Drafter persisted a new memory (cluster flush success). Logbook subscribes for the audit stream and Lens renders the activity timeline row.",
+  "fields": {
+    "session_id":       {"type": "string", "required": true},
+    "memory_id":        {"type": "string", "required": true},
+    "project_id":       {"type": "string", "required": false},
+    "summary":          {"type": "string", "required": false},
+    "tags":             {"type": "array",  "required": false},
+    "provenance_actor": {"type": "string", "required": false}
+  }
+}

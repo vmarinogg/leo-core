@@ -1,0 +1,13 @@
+{
+  "name": "capture.memory.recorded",
+  "description": "An explicit-write memory was recorded via mom_record (MCP) or `mom record` (CLI). Bypasses Drafter's filter layers per ADR 0014; the user's explicitness wins.",
+  "fields": {
+    "session_id":           {"type": "string", "required": true},
+    "project_id":           {"type": "string", "required": false},
+    "provenance_actor":     {"type": "string", "required": false},
+    "provenance_source_type": {"type": "string", "required": false},
+    "summary":              {"type": "string", "required": false},
+    "content":              {"type": "object", "required": true},
+    "tags":                 {"type": "array",  "required": false}
+  }
+}

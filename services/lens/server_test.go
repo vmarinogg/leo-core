@@ -40,7 +40,7 @@ func insertTurn(t *testing.T, lib *librarian.Librarian, sessionID, role string, 
 		payload = map[string]any{}
 	}
 	payload["role"] = role
-	_, err := lib.InsertOpEvent(librarian.OpEvent{EventType: "turn.observed", SessionID: sessionID, CreatedAt: at, Payload: payload})
+	_, err := lib.InsertOpEvent(librarian.OpEvent{EventType: "capture.turn.observed", SessionID: sessionID, CreatedAt: at, Payload: payload})
 	if err != nil {
 		t.Fatalf("InsertOpEvent: %v", err)
 	}

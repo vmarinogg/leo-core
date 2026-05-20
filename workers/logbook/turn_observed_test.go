@@ -77,7 +77,7 @@ func TestSubscribeTurnObserved_PersistsMetadataProjection(t *testing.T) {
 		},
 	})
 
-	rows, err := lib.QueryOpEvents(librarian.OpEventFilter{EventType: "turn.observed"})
+	rows, err := lib.QueryOpEvents(librarian.OpEventFilter{EventType: "capture.turn.observed"})
 	if err != nil {
 		t.Fatalf("QueryOpEvents: %v", err)
 	}
@@ -260,7 +260,7 @@ func TestSubscribeTurnObserved_PreservesHarnessFromTurnPayload(t *testing.T) {
 		Payload:   turn.ToPayload(),
 	})
 
-	rows, err := lib.QueryOpEvents(librarian.OpEventFilter{EventType: "turn.observed"})
+	rows, err := lib.QueryOpEvents(librarian.OpEventFilter{EventType: "capture.turn.observed"})
 	if err != nil {
 		t.Fatalf("QueryOpEvents: %v", err)
 	}
