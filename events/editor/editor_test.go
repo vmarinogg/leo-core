@@ -233,3 +233,75 @@ func writeSchemaDir(t *testing.T, family, filename, body string) string {
 	}
 	return dir
 }
+
+// recordingLedger captures Append calls for Editor → Ledger ordering tests.
+type recordingLedger struct {
+	events []herald.Event
+	failOn int // 1-indexed call number on which to return an error; 0 = never fail
+}
+
+func (r *recordingLedger) Append(e herald.Event) (uint64, error) {
+	if r.failOn > 0 && len(r.events)+1 == r.failOn {
+		return 0, errLedgerFull
+	}
+	r.events = append(r.events, e)
+	return uint64(len(r.events) - 1), nil
+}
+
+var errLedgerFull = ledgerErr("simulated ledger failure")
+
+type ledgerErr string
+
+func (e ledgerErr) Error() string { return string(e) }
+
+func TestPublish_AppendsToLedgerBeforeBus(t *testing.T) {
+	bus := &recordingBus{}
+	led := &recordingLedger{}
+	e := editor.New(bus, nil, nil).WithLedger(led)
+	if err := e.Publish(staticInput{
+		eventType: "capture.turn.observed",
+		payload:   map[string]any{"session_id": "s1", "text": "hi"},
+	}, editor.Source{Adapter: "claude-code"}); err != nil {
+		t.Fatalf("Publish: %v", err)
+	}
+	if len(led.events) != 1 {
+		t.Fatalf("ledger.events len = %d, want 1", len(led.events))
+	}
+	if len(bus.events) != 1 {
+		t.Fatalf("bus.events len = %d, want 1", len(bus.events))
+	}
+	// Same payload reaches both layers.
+	if led.events[0].SessionID != bus.events[0].SessionID {
+		t.Errorf("session diverged: ledger=%q bus=%q", led.events[0].SessionID, bus.events[0].SessionID)
+	}
+}
+
+func TestPublish_LedgerFailure_AbortsBus(t *testing.T) {
+	bus := &recordingBus{}
+	led := &recordingLedger{failOn: 1}
+	e := editor.New(bus, nil, nil).WithLedger(led)
+	err := e.Publish(staticInput{
+		eventType: "capture.turn.observed",
+		payload:   map[string]any{"session_id": "s1"},
+	}, editor.Source{Adapter: "claude-code"})
+	if err == nil {
+		t.Fatal("expected error from ledger failure, got nil")
+	}
+	if len(bus.events) != 0 {
+		t.Fatalf("bus.events len = %d, want 0 (publish must abort on ledger failure)", len(bus.events))
+	}
+}
+
+func TestPublish_NoLedger_StillPublishesToBus(t *testing.T) {
+	bus := &recordingBus{}
+	e := editor.New(bus, nil, nil) // no WithLedger
+	if err := e.Publish(staticInput{
+		eventType: "capture.turn.observed",
+		payload:   map[string]any{"session_id": "s1"},
+	}, editor.Source{Adapter: "claude-code"}); err != nil {
+		t.Fatal(err)
+	}
+	if len(bus.events) != 1 {
+		t.Fatalf("bus.events len = %d, want 1 (no-ledger build still publishes)", len(bus.events))
+	}
+}

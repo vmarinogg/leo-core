@@ -16,6 +16,7 @@
 package editor
 
 import (
+	"fmt"
 	"log"
 
 	"github.com/momhq/mom/bus/herald"
@@ -28,6 +29,14 @@ import (
 // Editor doesn't transitively pull herald-test dependencies.
 type Bus interface {
 	Publish(herald.Event)
+}
+
+// LedgerAppender is the Ledger's Append surface, narrowed to what
+// the Editor needs. Implementations: storage/ledger.Ledger (production),
+// test recorders. Defined here so the Editor can stay decoupled from
+// the concrete Ledger driver shape.
+type LedgerAppender interface {
+	Append(herald.Event) (uint64, error)
 }
 
 // Source carries the contextual metadata about *where* an input came
@@ -60,18 +69,29 @@ type Canonicalizer interface {
 // Editor is the canonicalization gateway. Construct via New.
 type Editor struct {
 	bus      Bus
+	ledger   LedgerAppender    // nil → Ledger append skipped (transitional)
 	registry *registry.Registry // nil → validation skipped (transitional)
 	logger   *log.Logger
 }
 
 // New constructs an Editor bound to bus and reg. If reg is nil, the
 // Editor skips schema validation (useful during the v0.50 transition
-// before #363 registers schemas).
+// before #363 registers schemas). Ledger append is opt-in via
+// WithLedger; absent that, the Editor publishes only onto the bus.
 func New(bus Bus, reg *registry.Registry, logger *log.Logger) *Editor {
 	if logger == nil {
 		logger = log.Default()
 	}
 	return &Editor{bus: bus, registry: reg, logger: logger}
+}
+
+// WithLedger returns a new Editor wired to ledger. Production callers
+// use this to enable the ADR 0021 durable-append path: every published
+// event is appended to the Ledger before reaching the bus. Returns the
+// receiver for fluent chaining.
+func (e *Editor) WithLedger(ledger LedgerAppender) *Editor {
+	e.ledger = ledger
+	return e
 }
 
 // Canonicalize composes a canonical herald.Event from in + src without
@@ -124,15 +144,32 @@ func (e *Editor) Canonicalize(in Canonicalizer, src Source) herald.Event {
 	}
 }
 
-// Publish is the production entry point: canonicalize the input and
-// publish it. Returns no error today — herald.Bus.Publish is fire-
-// and-forget — but the signature reserves room for #366 to surface
-// Ledger-append failures.
-func (e *Editor) Publish(in Canonicalizer, src Source) {
+// Publish is the production entry point. The order is fixed per
+// ADR 0021 §crash-safety:
+//
+//  1. Canonicalize the input.
+//  2. Append the canonical event to the Ledger (when wired). If
+//     append fails, the event is NOT published onto the bus — the
+//     caller observes the error and the bus stays consistent.
+//  3. Publish onto the bus.
+//
+// Editors without a Ledger (transitional builds, tests) skip step 2.
+// Editors without a Bus skip step 3.
+//
+// The promise: when Publish returns nil, the event is durably in the
+// Ledger (if wired). A crash between Ledger append and bus publish
+// leaves the event on Layer 1; Crier reprojects on restart (#367/#368).
+func (e *Editor) Publish(in Canonicalizer, src Source) error {
 	ev := e.Canonicalize(in, src)
+	if e.ledger != nil {
+		if _, err := e.ledger.Append(ev); err != nil {
+			return fmt.Errorf("editor: ledger append %s: %w", ev.Type, err)
+		}
+	}
 	if e.bus != nil {
 		e.bus.Publish(ev)
 	}
+	return nil
 }
 
 // encodeViolation builds the _schema_violation marker payload. The
